@@ -1,0 +1,24 @@
+From 18d45cb48eeb4bf893b2118c1e97f5813cab146b Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Wed, 7 Jan 2026 07:15:47 +0000
+Subject: [PATCH] Update the path to utils_vertical
+
+Tracked-On: NA
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/groups/device-specific/caas/product.mk b/groups/device-specific/caas/product.mk
+index 3123bb7c..1868f695 100755
+--- a/groups/device-specific/caas/product.mk
++++ b/groups/device-specific/caas/product.mk
+@@ -47,7 +47,7 @@ PRODUCT_COPY_FILES += \
+     frameworks/native/data/etc/android.software.secure_lock_screen.xml:vendor/etc/permissions/android.software.secure_lock_screen.xml
+ 
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/file_share.sh:$(TARGET_COPY_OUT_VENDOR)/bin/file_share.sh
+-PRODUCT_COPY_FILES += vendor/intel/utils/bsp_diff/file_for_flashfile:$(PRODUCT_OUT)/LICENSE
++PRODUCT_COPY_FILES += vendor/intel/utils_vertical/bsp_diff/file_for_flashfile:$(PRODUCT_OUT)/LICENSE
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/auto_switch_pt_usb_vms.sh:$(PRODUCT_OUT)/scripts/auto_switch_pt_usb_vms.sh
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/findall.py:$(PRODUCT_OUT)/scripts/findall.py
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/sof_audio/configure_sof.sh:$(PRODUCT_OUT)/scripts/sof_audio/configure_sof.sh
+-- 
+2.34.1
+

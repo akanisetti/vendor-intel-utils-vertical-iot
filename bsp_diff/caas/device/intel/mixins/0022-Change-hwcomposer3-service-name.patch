@@ -1,0 +1,26 @@
+From 1bf6040043355d4bebd0e0bc05f351bb44a418ef Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Thu, 18 Dec 2025 18:40:15 +0000
+Subject: [PATCH] Change hwcomposer3 service name
+
+Change package name of hwc3-service.drm
+
+Tracked-On: xxxx
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/groups/device-specific/caas/product.mk b/groups/device-specific/caas/product.mk
+index 442f987e..3123bb7c 100755
+--- a/groups/device-specific/caas/product.mk
++++ b/groups/device-specific/caas/product.mk
+@@ -27,7 +27,7 @@ PRODUCT_PACKAGES +=  \
+                     android.hardware.graphics.allocator-service.minigbm \
+                     android.hardware.identity \
+                     android.hardware.identity-service.example \
+-                    android.hardware.graphics.composer3-service.intel
++                    android.hardware.composer.hwc3-service.drm
+ 
+ 
+ PRODUCT_PROPERTY_OVERRIDES += ro.control_privapp_permissions=enforce
+-- 
+2.34.1
+

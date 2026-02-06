@@ -1,0 +1,180 @@
+From 5c4a882c7aed2c1b61e9d0a2a85381193bd9b73c Mon Sep 17 00:00:00 2001
+From: celadon <celadon@intel.com>
+Date: Tue, 4 Feb 2025 13:01:04 +0000
+Subject: [PATCH] Revert "remove unused files in fake_device_config"
+
+This reverts commit 817c15018dbca3a3498eb5c68f9998274b8f4184.
+---
+ tools/aconfig/fake_device_config/Android.bp   | 10 +++++
+ .../src/android/os/Binder.java                | 26 +++++++++++++
+ .../src/android/os/StrictMode.java            | 29 ++++++++++++++
+ .../src/android/provider/DeviceConfig.java    | 39 +++++++++++++++++++
+ .../src/android/util/Log.java                 |  8 ++--
+ 5 files changed, 108 insertions(+), 4 deletions(-)
+ create mode 100644 tools/aconfig/fake_device_config/src/android/os/Binder.java
+ create mode 100644 tools/aconfig/fake_device_config/src/android/os/StrictMode.java
+ create mode 100644 tools/aconfig/fake_device_config/src/android/provider/DeviceConfig.java
+
+diff --git a/tools/aconfig/fake_device_config/Android.bp b/tools/aconfig/fake_device_config/Android.bp
+index bf98058895..1c5b7c5967 100644
+--- a/tools/aconfig/fake_device_config/Android.bp
++++ b/tools/aconfig/fake_device_config/Android.bp
+@@ -23,6 +23,16 @@ java_library {
+     is_stubs_module: true,
+ }
+ 
++java_library {
++    name: "strict_mode_stub",
++    srcs: [
++        "src/android/os/StrictMode.java",
++    ],
++    sdk_version: "core_current",
++    host_supported: true,
++    is_stubs_module: true,
++}
++
+ java_library {
+     name: "aconfig_storage_stub",
+     srcs: [
+diff --git a/tools/aconfig/fake_device_config/src/android/os/Binder.java b/tools/aconfig/fake_device_config/src/android/os/Binder.java
+new file mode 100644
+index 0000000000..8a2313dfda
+--- /dev/null
++++ b/tools/aconfig/fake_device_config/src/android/os/Binder.java
+@@ -0,0 +1,26 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package android.os;
++
++public class Binder {
++    public static final long clearCallingIdentity() {
++        throw new UnsupportedOperationException("Stub!");
++    }
++    public static final void restoreCallingIdentity(long token) {
++        throw new UnsupportedOperationException("Stub!");
++    }
++}
+diff --git a/tools/aconfig/fake_device_config/src/android/os/StrictMode.java b/tools/aconfig/fake_device_config/src/android/os/StrictMode.java
+new file mode 100644
+index 0000000000..641625206c
+--- /dev/null
++++ b/tools/aconfig/fake_device_config/src/android/os/StrictMode.java
+@@ -0,0 +1,29 @@
++/*
++ * Copyright (C) 2024 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package android.os;
++
++public class StrictMode {
++    public static ThreadPolicy allowThreadDiskReads() {
++        throw new UnsupportedOperationException("Stub!");
++    }
++
++    public static void setThreadPolicy(final ThreadPolicy policy) {
++        throw new UnsupportedOperationException("Stub!");
++    }
++
++    public static final class ThreadPolicy {}
++}
+diff --git a/tools/aconfig/fake_device_config/src/android/provider/DeviceConfig.java b/tools/aconfig/fake_device_config/src/android/provider/DeviceConfig.java
+new file mode 100644
+index 0000000000..dbb07ac983
+--- /dev/null
++++ b/tools/aconfig/fake_device_config/src/android/provider/DeviceConfig.java
+@@ -0,0 +1,39 @@
++/*
++ * Copyright (C) 2023 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package android.provider;
++
++/*
++ * This class allows generated aconfig code to compile independently of the framework.
++ */
++public class DeviceConfig {
++	private DeviceConfig() {
++	}
++
++	public static boolean getBoolean(String ns, String name, boolean def) {
++		return false;
++	}
++
++	public static Properties getProperties(String namespace, String... names) {
++		return new Properties();
++	}
++
++	public static class Properties {
++		public boolean getBoolean(String name, boolean def) {
++			return false;
++		}
++	}
++}
+diff --git a/tools/aconfig/fake_device_config/src/android/util/Log.java b/tools/aconfig/fake_device_config/src/android/util/Log.java
+index e40790a432..79de68060e 100644
+--- a/tools/aconfig/fake_device_config/src/android/util/Log.java
++++ b/tools/aconfig/fake_device_config/src/android/util/Log.java
+@@ -2,18 +2,18 @@ package android.util;
+ 
+ public final class Log {
+     public static int i(String tag, String msg) {
+-        throw new UnsupportedOperationException("Stub!");
++        return 0;
+     }
+ 
+     public static int w(String tag, String msg) {
+-        throw new UnsupportedOperationException("Stub!");
++        return 0;
+     }
+ 
+     public static int e(String tag, String msg) {
+-        throw new UnsupportedOperationException("Stub!");
++        return 0;
+     }
+ 
+     public static int e(String tag, String msg, Throwable tr) {
+-        throw new UnsupportedOperationException("Stub!");
++        return 0;
+     }
+ }
+-- 
+2.34.1
+

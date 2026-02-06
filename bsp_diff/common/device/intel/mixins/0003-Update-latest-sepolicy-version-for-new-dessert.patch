@@ -1,0 +1,28 @@
+From 7d50b5719fef3cbe79d88008a196c433a9c7f9eb Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Thu, 6 Feb 2025 09:25:57 +0000
+Subject: [PATCH 1/2] Update latest sepolicy version for new dessert
+
+Tests Done: Build proceeds
+
+Tracked-On: NA
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ groups/device-specific/caas/manifest.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/groups/device-specific/caas/manifest.xml b/groups/device-specific/caas/manifest.xml
+index 7c5949ed..0c9dc10e 100644
+--- a/groups/device-specific/caas/manifest.xml
++++ b/groups/device-specific/caas/manifest.xml
+@@ -37,6 +37,6 @@
+     </hal>
+     <!--<kernel target-level="5"/>-->
+     <sepolicy>
+-        <version>202404</version>
++        <version>202604</version>
+     </sepolicy>
+ </manifest>
+-- 
+2.34.1
+

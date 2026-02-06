@@ -1,0 +1,81 @@
+From 43dd1249f40c5f4cbe06e236ed376b34ba418f2f Mon Sep 17 00:00:00 2001
+From: Oguzhan Yalcin <oyalcin@google.com>
+Date: Mon, 28 Jul 2025 12:32:16 -0700
+Subject: [PATCH] New Patch Level for android mainline
+
+new android.bp file to define android-mainline patch level
+xml to define the patch level 2.
+
+Bug: 433787201
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:fa11a4437b6a5d41d503fac3763ed0d17e5adeff)
+Merged-In: I5aa0ff17b60b82d16a1054055370524734c5fba2
+Change-Id: I5aa0ff17b60b82d16a1054055370524734c5fba2
+Merging the fixes for apexd outage to security branches.
+Bug: 433787201
+---
+ patchlevel/Android.bp                         | 21 +++++++++++++++++
+ ...m.google.android.mainline.patchlevel.2.xml | 23 +++++++++++++++++++
+ 2 files changed, 44 insertions(+)
+ create mode 100644 patchlevel/Android.bp
+ create mode 100644 patchlevel/com.google.android.mainline.patchlevel.2.xml
+
+diff --git a/patchlevel/Android.bp b/patchlevel/Android.bp
+new file mode 100644
+index 00000000..99d43233
+--- /dev/null
++++ b/patchlevel/Android.bp
+@@ -0,0 +1,21 @@
++//
++// Copyright (C) 2025 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++
++prebuilt_etc {
++    name: "apexd.mainline_patch_level_2",
++    src: "com.google.android.mainline.patchlevel.2.xml",
++    filename_from_src: true,
++}
+diff --git a/patchlevel/com.google.android.mainline.patchlevel.2.xml b/patchlevel/com.google.android.mainline.patchlevel.2.xml
+new file mode 100644
+index 00000000..1bb3b2cc
+--- /dev/null
++++ b/patchlevel/com.google.android.mainline.patchlevel.2.xml
+@@ -0,0 +1,23 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Copyright (C) 2025 The Android Open Source Project
++
++     Licensed under the Apache License, Version 2.0 (the "License");
++     you may not use this file except in compliance with the License.
++     You may obtain a copy of the License at
++
++          http://www.apache.org/licenses/LICENSE-2.0
++
++     Unless required by applicable law or agreed to in writing, software
++     distributed under the License is distributed on an "AS IS" BASIS,
++     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++     See the License for the specific language governing permissions and
++     limitations under the License.
++-->
++
++<config>
++    <!-- Mainline platform patch level 2
++         Android 16 and above. 1 patches
++         1) https://docs.partner.android.com/partners/announcements/general/general2025#gpsu-jul-25
++    -->
++    <feature name="com.google.android.mainline.patchlevel.2" />
++</config>
+\ No newline at end of file
+-- 
+2.50.1.351.gcf940e82a1-goog
+

@@ -1,0 +1,34 @@
+From 7407a987cfc30d1679a2eea4477b1d522e035603 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Mon, 1 Dec 2025 13:41:06 +0000
+Subject: [PATCH] Fix kernel release version error
+
+Tracked-On: OAM-XXXX
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/groups/kernel/AndroidBoard.mk b/groups/kernel/AndroidBoard.mk
+index f8a79017..cce0c95d 100644
+--- a/groups/kernel/AndroidBoard.mk
++++ b/groups/kernel/AndroidBoard.mk
+@@ -191,7 +191,17 @@ $(KERNEL_CONFIG): $(KERNEL_CONFIG_DEPS) | $(CHECK_CONFIG_LOG)
+ # from INSTALLED_KERNEL_TARGET.
+ BOARD_KERNEL_CONFIG_FILE = $(KERNEL_CONFIG)
+ # BOARD_KERNEL_VERSION = $(shell cat $(KERNEL_DEFCONFIG) | sed -nr 's|.*([0-9]+[.][0-9]+[.][0-9]+)(-rc[1-9])? Kernel Configuration.*|\1|p')
+-BOARD_KERNEL_VERSION := $(shell grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' $(KERNEL_DEFCONFIG) | head -1)
++#BOARD_KERNEL_VERSION := $(shell grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' $(KERNEL_DEFCONFIG) | head -1)
++# Replace your current BOARD_KERNEL_VERSION line with:
++BOARD_KERNEL_VERSION := $(shell \
++    version=$$(grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' $(KERNEL_DEFCONFIG) | head -1); \
++    if [ -f $(PRODUCT_OUT)/kernel ]; then \
++        actual=$$(build/make/tools/extract_kernel.py --tools lz4:$(HOST_OUT)/bin/lz4 --input $(PRODUCT_OUT)/kernel --output-release 2>/dev/null || echo "$$version"); \
++        echo "$$actual" | sed 's/-g[a-f0-9]*\(-dirty\)\?$$//'; \
++    else \
++        echo "$$version"; \
++    fi)
++
+ 
+ $(PRODUCT_OUT)/kernel: $(LOCAL_KERNEL) $(LOCAL_KERNEL_PATH)/copy_modules
+ 	$(hide) cp $(LOCAL_KERNEL) $@
+-- 
+2.34.1
+

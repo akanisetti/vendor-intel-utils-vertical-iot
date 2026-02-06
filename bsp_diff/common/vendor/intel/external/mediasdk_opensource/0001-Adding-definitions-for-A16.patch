@@ -1,0 +1,30 @@
+From 65ac408b739caa7b047c1fdc88b8f988e996830c Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Tue, 4 Feb 2025 11:16:05 +0000
+Subject: [PATCH 1/2] Adding definitions for A16
+
+Tests Done: Build proceeds
+
+Tracked-On: NA
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ android/mfx_defs.mk | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/android/mfx_defs.mk b/android/mfx_defs.mk
+index abfeae31..83626666 100644
+--- a/android/mfx_defs.mk
++++ b/android/mfx_defs.mk
+@@ -21,6 +21,9 @@ MEDIA_VERSION_ALL := $(MEDIA_VERSION).pre$(MEDIA_VERSION_EXTRA)
+ MFX_CFLAGS += -DMEDIA_VERSION_STR=\"\\\"${MEDIA_VERSION_ALL}\\\"\"
+ 
+ # Android version preference:
++ifneq ($(filter 16 16.% W% ,$(PLATFORM_VERSION)),)
++  MFX_ANDROID_VERSION:= MFX_W
++endif
+ ifneq ($(filter 15 15.% V% ,$(PLATFORM_VERSION)),)
+   MFX_ANDROID_VERSION:= MFX_V
+ endif
+-- 
+2.34.1
+

@@ -1,0 +1,32 @@
+From bdd5c508ad53d03b7e44c172bc91de0905b45f40 Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Mon, 3 Mar 2025 10:21:51 +0000
+Subject: [PATCH] Update the clang lib patch for latest AOSP
+
+Tests Done: Build and boot
+
+Tracked-On: NA
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ core/definitions.mk | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/core/definitions.mk b/core/definitions.mk
+index 5b31a46..cd8394c 100755
+--- a/core/definitions.mk
++++ b/core/definitions.mk
+@@ -107,9 +107,9 @@ IAFW_CC := $(IAFW_TOOLS_CLANG_PREFIX)/clang
+ IAFW_OBJCOPY := $(IAFW_TOOLS_GCC_PREFIX)objcopy$(HOST_EXECUTABLE_SUFFIX)
+ EFI_OBJCOPY := $(IAFW_OBJCOPY)
+ ifeq ($(TARGET_IAFW_ARCH),x86_64)
+-IAFW_LIBCLANG := $(IAFW_TOOLCHAIN_CLANG_ROOT)/../lib/clang/19/lib/linux/libclang_rt.builtins-x86_64-android.a
++IAFW_LIBCLANG := $(IAFW_TOOLCHAIN_CLANG_ROOT)/../lib/clang/20/lib/linux/libclang_rt.builtins-x86_64-android.a
+ else
+-IAFW_LIBCLANG := $(IAFW_TOOLCHAIN_CLANG_ROOT)/../lib/clang/19/lib/linux/libclang_rt.builtins-i686-android.a
++IAFW_LIBCLANG := $(IAFW_TOOLCHAIN_CLANG_ROOT)/../lib/clang/20/lib/linux/libclang_rt.builtins-i686-android.a
+ endif
+ 
+ # Transformation definitions, ala build system's definitions.mk
+-- 
+2.34.1
+

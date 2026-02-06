@@ -1,0 +1,23 @@
+From 8593072888eacc7c4ebc2d454c43599b3c38549f Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Wed, 17 Dec 2025 16:54:56 +0000
+Subject: [PATCH 4/7] Add compatibility for 6.12 kernel
+
+Tracked-On: NA
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/compatibility_matrices/Android.bp b/compatibility_matrices/Android.bp
+index d928eaa39a..39bade3991 100644
+--- a/compatibility_matrices/Android.bp
++++ b/compatibility_matrices/Android.bp
+@@ -148,6 +148,7 @@ vintf_compatibility_matrix {
+     srcs: ["compatibility_matrix.202504.xml"],
+     kernel_configs: [
+         "kernel_config_b_6.12",
++        "kernel_config_w_6.12",
+     ],
+ }
+ 
+-- 
+2.34.1
+

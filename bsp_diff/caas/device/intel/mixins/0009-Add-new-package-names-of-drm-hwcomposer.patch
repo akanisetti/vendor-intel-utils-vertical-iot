@@ -1,0 +1,32 @@
+From 543188021cc53d78c0d7a8985bda678c81931540 Mon Sep 17 00:00:00 2001
+From: HeYue <yue.he@intel.com>
+Date: Mon, 15 Sep 2025 11:58:45 +0800
+Subject: [PATCH] Add new package names of drm-hwcomposer
+
+The new version of drm-hwcomposer changes the target names. Keep both
+new and old package names to avoid breaking prior targets.
+
+Tracked-On: OAM-134057
+Signed-off-by: Weifeng Liu <weifeng.liu@intel.com>
+---
+ groups/graphics/auto/product.mk | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/groups/graphics/auto/product.mk b/groups/graphics/auto/product.mk
+index bb6dc6db3fad..3ca872ad5c57 100755
+--- a/groups/graphics/auto/product.mk
++++ b/groups/graphics/auto/product.mk
+@@ -73,7 +73,9 @@ PRODUCT_COPY_FILES += \
+ 
+ # DRM HWComposer
+ PRODUCT_PACKAGES += \
+-    hwcomposer.drm_minigbm
++    hwcomposer.drm_minigbm \
++    libhwcservice \
++    libhwcservicelib
+ 
+ PRODUCT_PROPERTY_OVERRIDES += \
+     ro.hardware.hwcomposer=drm_minigbm
+-- 
+2.43.2
+

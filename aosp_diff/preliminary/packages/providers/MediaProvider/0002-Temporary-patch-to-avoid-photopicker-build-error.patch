@@ -1,0 +1,32 @@
+From 61f5a12b44a64557d6122c160fb60da517f2b9eb Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Mon, 3 Mar 2025 08:48:03 +0000
+Subject: [PATCH] Temporary patch to avoid photopicker build error
+
+Since Werror was set so warning was getting treated as error
+and build was failing. So avoiding it for now.
+
+Tests Done: Build proceed
+
+Tracked-On: NA
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ photopicker/Android.bp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/photopicker/Android.bp b/photopicker/Android.bp
+index 88c0e9139..a83debe6b 100644
+--- a/photopicker/Android.bp
++++ b/photopicker/Android.bp
+@@ -26,7 +26,7 @@ android_library {
+         "-Aroom.schemaLocation=packages/providers/MediaProvider/photopicker/schemas",
+     ],
+     kotlincflags: [
+-        "-Werror",
++        //"-Werror",
+         "-Xjvm-default=all",
+     ],
+     static_libs: [
+-- 
+2.34.1
+

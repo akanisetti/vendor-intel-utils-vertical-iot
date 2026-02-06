@@ -1,0 +1,30 @@
+From 77f012293371fdb09bcc89ccac9446e4ccef19f7 Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Fri, 11 Apr 2025 04:33:00 +0000
+Subject: [PATCH] Removing redeclaration of C++ built-in type 'bool'
+
+Tests Done: Build and boot
+
+Tracked-On: OAM-131786
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ intel_scu_ipcutil_test.c | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/intel_scu_ipcutil_test.c b/intel_scu_ipcutil_test.c
+index 1062ffc..ae9094d 100644
+--- a/intel_scu_ipcutil_test.c
++++ b/intel_scu_ipcutil_test.c
+@@ -38,9 +38,6 @@
+ #define INTE_SCU_IPC_REGISTER_WRITE		1
+ #define INTE_SCU_IPC_REGISTER_UPDATE	4
+ 
+-typedef int bool;
+-
+-
+ struct scu_ipc_data {
+ 	unsigned long     count;  		/* No. of registers */
+ 	unsigned short     addr[5]; 	/* Register addresses */
+-- 
+2.34.1
+

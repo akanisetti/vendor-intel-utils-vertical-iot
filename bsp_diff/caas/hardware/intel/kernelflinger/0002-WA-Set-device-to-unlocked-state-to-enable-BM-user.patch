@@ -1,0 +1,42 @@
+From 76774c66373f6ce9cce5eb936adc2f2e9fb75a0b Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Tue, 13 Jan 2026 07:14:00 +0000
+Subject: [PATCH] WA-Set device to unlocked state to enable BM user
+
+This patch will disable flashing lock check for USER
+build since Trusty and TPM is disabled.
+
+Tests Done: Build and boot USER BM image
+
+Tracked-On: OAM-123280
+Signed-off-by: Salini Venate <salini.venate@intel.com>
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/libfastboot/fastboot_flashing.c b/libfastboot/fastboot_flashing.c
+index 57c5114..5b9c85f 100644
+--- a/libfastboot/fastboot_flashing.c
++++ b/libfastboot/fastboot_flashing.c
+@@ -268,9 +268,9 @@ static void cmd_unlock(__attribute__((__unused__)) INTN argc,
+ #endif
+ 		change_device_state(UNLOCKED, TRUE);
+ 	} else {
+-#ifdef USER
++/*#ifdef USER
+ 		fastboot_fail("Unlocking device not allowed");
+-#else
++#else*/
+ 		/* user_build is from boot parameters to compatible for CIV and IVI */
+ 		if (user_build) {
+ 			fastboot_fail("Unlocking device not allowed");
+@@ -279,7 +279,7 @@ static void cmd_unlock(__attribute__((__unused__)) INTN argc,
+ 			fastboot_info("Unlocking anyway since this is not a User build");
+ 			change_device_state(UNLOCKED, TRUE);
+ 		}
+-#endif
++//#endif
+ 	}
+ }
+ 
+-- 
+2.34.1
+

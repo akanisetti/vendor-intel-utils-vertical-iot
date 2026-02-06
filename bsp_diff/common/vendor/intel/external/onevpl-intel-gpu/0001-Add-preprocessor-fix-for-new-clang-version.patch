@@ -1,0 +1,55 @@
+From 766c72c2782d647073ffed13e9f2abdb68179642 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Tue, 13 Jan 2026 07:09:49 +0000
+Subject: [PATCH] Add preprocessor fix for new clang version
+
+Tests Done: Build proceeds
+
+Tracked-On: NA
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/android/include/mfx_android_config.h b/android/include/mfx_android_config.h
+index 1ee3135b..26e3f5aa 100644
+--- a/android/include/mfx_android_config.h
++++ b/android/include/mfx_android_config.h
+@@ -20,5 +20,6 @@ Copyright(c) 2011-2018 Intel Corporation. All Rights Reserved.
+ #define MFX_S     0x0b
+ #define MFX_T     0x0c
+ #define MFX_U     0x0d
++#define MFX_W     0x10
+ 
+ #endif // #ifndef __MFX_CONFIG_H__
+diff --git a/android/include/mfx_android_defs.h b/android/include/mfx_android_defs.h
+index 7052485a..ced39d5b 100644
+--- a/android/include/mfx_android_defs.h
++++ b/android/include/mfx_android_defs.h
+@@ -50,7 +50,7 @@
+ 
+   #define MFX_ENABLE_EXT
+ 
+-#if MFX_ANDROID_VERSION >= MFX_P
++#if $MFX_ANDROID_VERSION >= $MFX_P
+   #define MFX_ENABLE_KERNELS
+ #endif
+ 
+diff --git a/android/mfx_defs.mk b/android/mfx_defs.mk
+index 489193b6..8bfa4a96 100644
+--- a/android/mfx_defs.mk
++++ b/android/mfx_defs.mk
+@@ -22,6 +22,12 @@ MFX_CFLAGS += -DMEDIA_VERSION_STR=\"\\\"${MEDIA_VERSION}\\\"\"
+ MFX_CFLAGS += -DONEVPL_EXPERIMENTAL
+ 
+ # Android version preference:
++ifneq ($(filter 16 16.% W% ,$(PLATFORM_VERSION)),)
++  MFX_ANDROID_VERSION:= MFX_W
++endif
++ifneq ($(filter 15 15.% U% ,$(PLATFORM_VERSION)),)
++  MFX_ANDROID_VERSION:= MFX_V
++endif
+ ifneq ($(filter 14 14.% U% ,$(PLATFORM_VERSION)),)
+   MFX_ANDROID_VERSION:= MFX_U
+ endif
+-- 
+2.34.1
+

@@ -1,0 +1,208 @@
+From 1b77414f2122691864ec7fb3a610156fed555fc9 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Mon, 2 Feb 2026 06:29:45 +0000
+Subject: [PATCH] Add implementations required to enable audio on 3.5mm jack
+
+Enable audio over 3.5mm jack by adding few function implementations
+for primary/default audio method.
+
+Tracked-On: NIACP3-1031
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ audio/aidl/default/ModulePrimary.cpp          | 19 +++++
+ .../default/include/core-impl/ModulePrimary.h |  6 ++
+ audio/aidl/default/primary/PrimaryMixer.cpp   | 69 +++++++++++++++++++
+ audio/aidl/default/primary/PrimaryMixer.h     | 21 +++++-
+ 4 files changed, 113 insertions(+), 2 deletions(-)
+
+diff --git a/audio/aidl/default/ModulePrimary.cpp b/audio/aidl/default/ModulePrimary.cpp
+index 6cb92519a3..b6bcccc666 100644
+--- a/audio/aidl/default/ModulePrimary.cpp
++++ b/audio/aidl/default/ModulePrimary.cpp
+@@ -20,11 +20,13 @@
+ #include <Utils.h>
+ #include <android-base/logging.h>
+ 
++#include "alsa/Utils.h"
+ #include "core-impl/ModulePrimary.h"
+ #include "core-impl/StreamMmapStub.h"
+ #include "core-impl/StreamOffloadStub.h"
+ #include "core-impl/StreamPrimary.h"
+ #include "core-impl/Telephony.h"
++#include "primary/PrimaryMixer.h"
+ 
+ using aidl::android::hardware::audio::common::areAllBitPositionFlagsSet;
+ using aidl::android::hardware::audio::common::hasMmapFlag;
+@@ -129,4 +131,21 @@ int32_t ModulePrimary::getNominalLatencyMs(const AudioPortConfig& portConfig) {
+     return hasMmapFlag(portConfig.flags.value()) ? kLowLatencyMs : kStandardLatencyMs;
+ }
+ 
++void ModulePrimary::onExternalDeviceConnectionChanged(
++        const ::aidl::android::media::audio::common::AudioPort& audioPort, bool connected) {
++    if (audioPort.ext.getTag() != AudioPortExt::Tag::device) {
++        return;
++    }
++    int card = primary::PrimaryMixer::get_pcm_card("PCH");
++    if (card != -1) {
++        primary::PrimaryMixer::getInstance().setDeviceConnectionState(
++                card, getMasterMute(), getMasterVolume(), connected);
++    }
++}
++
++ndk::ScopedAStatus ModulePrimary::populateConnectedDevicePort(AudioPort* audioPort, int32_t nextPortId) {
++    LOG(DEBUG) << __func__ << ": portId=" << audioPort->id << ", nextPortId=" << nextPortId;
++    return ndk::ScopedAStatus::ok();
++}
++
+ }  // namespace aidl::android::hardware::audio::core
+diff --git a/audio/aidl/default/include/core-impl/ModulePrimary.h b/audio/aidl/default/include/core-impl/ModulePrimary.h
+index c93deedfea..ca36861dfb 100644
+--- a/audio/aidl/default/include/core-impl/ModulePrimary.h
++++ b/audio/aidl/default/include/core-impl/ModulePrimary.h
+@@ -47,6 +47,12 @@ class ModulePrimary final : public Module {
+             int32_t bufferSizeFrames, int32_t frameSizeBytes, MmapBufferDescriptor* desc) override;
+     int32_t getNominalLatencyMs(
+             const ::aidl::android::media::audio::common::AudioPortConfig& portConfig) override;
++    void onExternalDeviceConnectionChanged(
++            const ::aidl::android::media::audio::common::AudioPort& audioPort,
++            bool connected) override;
++
++    ndk::ScopedAStatus populateConnectedDevicePort(
++            ::aidl::android::media::audio::common::AudioPort* audioPort, int32_t nextPortId) override;
+ 
+   private:
+     ChildInterface<ITelephony> mTelephony;
+diff --git a/audio/aidl/default/primary/PrimaryMixer.cpp b/audio/aidl/default/primary/PrimaryMixer.cpp
+index 577d010f20..2176bb7b70 100644
+--- a/audio/aidl/default/primary/PrimaryMixer.cpp
++++ b/audio/aidl/default/primary/PrimaryMixer.cpp
+@@ -17,6 +17,7 @@
+ #define LOG_TAG "AHAL_PrimaryMixer"
+ 
+ #include "PrimaryMixer.h"
++#include <android-base/logging.h>
+ 
+ namespace aidl::android::hardware::audio::core::primary {
+ 
+@@ -26,4 +27,72 @@ PrimaryMixer& PrimaryMixer::getInstance() {
+     return gInstance;
+ }
+ 
++void PrimaryMixer::setDeviceConnectionState(int card, bool masterMuted, float masterVolume,
++                                                   bool connected) {
++    LOG(DEBUG) << __func__ << ": card=" << card << ", connected=" << connected;
++    std::lock_guard guard(mLock);
++    if (connected) {
++        auto alsaMixer = std::make_shared<alsa::Mixer>(card);
++        if (!alsaMixer->isValid()) {
++            LOG(ERROR) << __func__ << ": failed to create mixer for card=" << card;
++            return;
++        }
++        alsaMixer->setMasterMute(masterMuted);
++        alsaMixer->setMasterVolume(masterVolume);
++        mMixer = alsaMixer;
++    } else {
++        mMixer.reset();
++    }
++}
++
++ndk::ScopedAStatus PrimaryMixer::getMasterMute(bool* muted) {
++    std::lock_guard guard(mLock);
++    return mMixer ? mMixer->getMasterMute(muted) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++ndk::ScopedAStatus PrimaryMixer::getMasterVolume(float* volume) {
++    std::lock_guard guard(mLock);
++    return mMixer ? mMixer->getMasterVolume(volume) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++ndk::ScopedAStatus PrimaryMixer::getMicGain(float* gain) {
++    std::lock_guard guard(mLock);
++    return mMixer ? mMixer->getMicGain(gain) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++ndk::ScopedAStatus PrimaryMixer::getMicMute(bool* muted) {
++    std::lock_guard guard(mLock);
++    return mMixer ? mMixer->getMicMute(muted) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++ndk::ScopedAStatus PrimaryMixer::getVolumes(std::vector<float>* volumes) {
++    std::lock_guard guard(mLock);
++    return mMixer ? mMixer->getVolumes(volumes) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++ndk::ScopedAStatus PrimaryMixer::setMasterMute(bool muted) {
++    std::lock_guard guard(mLock);
++    return mMixer ? mMixer->setMasterMute(muted) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++ndk::ScopedAStatus PrimaryMixer::setMasterVolume(float volume) {
++    std::lock_guard guard(mLock);
++    return mMixer ? mMixer->setMasterVolume(volume) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++ndk::ScopedAStatus PrimaryMixer::setMicGain(float gain) {
++    std::lock_guard guard(mLock);
++    return mMixer ? mMixer->setMicGain(gain) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++ndk::ScopedAStatus PrimaryMixer::setMicMute(bool muted) {
++    std::lock_guard guard(mLock);
++    return mMixer ? mMixer->setMicMute(muted) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++ndk::ScopedAStatus PrimaryMixer::setVolumes(const std::vector<float>& volumes) {
++    std::lock_guard guard(mLock);
++    return mMixer ? mMixer->setVolumes(volumes) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
+ }  // namespace aidl::android::hardware::audio::core::primary
+diff --git a/audio/aidl/default/primary/PrimaryMixer.h b/audio/aidl/default/primary/PrimaryMixer.h
+index 7d39d38b62..430fffb228 100644
+--- a/audio/aidl/default/primary/PrimaryMixer.h
++++ b/audio/aidl/default/primary/PrimaryMixer.h
+@@ -16,12 +16,14 @@
+ 
+ #pragma once
+ 
++#include <mutex>
++
+ #include "alsa/Mixer.h"
+ #define MAX_HDMI_DEVICES 20
+ 
+ namespace aidl::android::hardware::audio::core::primary {
+ 
+-class PrimaryMixer : public alsa::Mixer {
++class PrimaryMixer {
+   public:
+     static constexpr int kInvalidAlsaCard = -1;
+     static constexpr int kInvalidAlsaDevice = -1;
+@@ -72,9 +74,24 @@ class PrimaryMixer : public alsa::Mixer {
+         return -1;
+     }
+ 
++    void setDeviceConnectionState(int card, bool masterMuted, float masterVolume, bool connected);
++    ndk::ScopedAStatus getMasterMute(bool* muted);
++    ndk::ScopedAStatus getMasterVolume(float* volume);
++    ndk::ScopedAStatus getMicGain(float* gain);
++    ndk::ScopedAStatus getMicMute(bool* muted);
++    ndk::ScopedAStatus getVolumes(std::vector<float>* volumes);
++    ndk::ScopedAStatus setMasterMute(bool muted);
++    ndk::ScopedAStatus setMasterVolume(float volume);
++    ndk::ScopedAStatus setMicGain(float gain);
++    ndk::ScopedAStatus setMicMute(bool muted);
++    ndk::ScopedAStatus setVolumes(const std::vector<float>& volumes);
+ 
+   private:
+-    PrimaryMixer() : alsa::Mixer(kAlsaCard) {}
++    PrimaryMixer() = default;
++
++    std::mutex mLock;
++    std::shared_ptr<alsa::Mixer> mMixer GUARDED_BY(mLock);
+ };
+ 
++
+ }  // namespace aidl::android::hardware::audio::core::primary
+-- 
+2.34.1
+

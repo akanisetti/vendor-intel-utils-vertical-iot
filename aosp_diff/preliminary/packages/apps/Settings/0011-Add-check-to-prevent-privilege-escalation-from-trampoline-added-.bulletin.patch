@@ -1,0 +1,217 @@
+From e0476f87117c1b689b96c9a37ac12162d79c6cf6 Mon Sep 17 00:00:00 2001
+From: Joe Bolinger <jbolinger@google.com>
+Date: Wed, 20 Aug 2025 05:21:20 +0000
+Subject: [PATCH] Add check to prevent privilege escalation from trampoline
+ added in change Ie469c47005afb941f5646a2f790736362c23c697.
+
+Add additional check in enrollment base class.
+
+Flag: EXEMPT CVE_FIX
+Bug: 418774489
+Test: atest FaceEnrollTest FaceEnrollIntroductionTest
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:c07d03e5ef9ff05f34b6358440af6770044579ae)
+Merged-In: I49f4a980a0c9ed80cc2e370a42bd60425d018a4c
+Change-Id: I49f4a980a0c9ed80cc2e370a42bd60425d018a4c
+---
+ .../biometrics/BiometricEnrollBase.java       |  7 ++-
+ .../settings/biometrics/face/FaceEnroll.kt    |  9 ++++
+ .../face/FaceEnrollIntroduction.java          |  5 +--
+ .../MultiBiometricEnrollHelperTest.java       |  9 +++-
+ .../face/FaceEnrollIntroductionTest.java      |  5 +++
+ .../biometrics/face/FaceEnrollTest.kt         | 45 ++++++++++++-------
+ 6 files changed, 60 insertions(+), 20 deletions(-)
+
+diff --git a/src/com/android/settings/biometrics/BiometricEnrollBase.java b/src/com/android/settings/biometrics/BiometricEnrollBase.java
+index c4c8dc0f7e..e4765d8ea0 100644
+--- a/src/com/android/settings/biometrics/BiometricEnrollBase.java
++++ b/src/com/android/settings/biometrics/BiometricEnrollBase.java
+@@ -182,7 +182,12 @@ public abstract class BiometricEnrollBase extends InstrumentedActivity {
+                     EXTRA_LAUNCHED_POSTURE_GUIDANCE);
+             mNextLaunched = savedInstanceState.getBoolean(EXTRA_KEY_NEXT_LAUNCHED);
+         }
+-        mUserId = getIntent().getIntExtra(Intent.EXTRA_USER_ID, UserHandle.myUserId());
++        final String callingPackage = getLaunchedFromPackage();
++        if (callingPackage == null || !getPackageName().equals(callingPackage)) {
++            mUserId = UserHandle.myUserId();
++        } else {
++            mUserId = getIntent().getIntExtra(Intent.EXTRA_USER_ID, UserHandle.myUserId());
++        }
+         mPostureGuidanceIntent = FeatureFactory.getFeatureFactory()
+                 .getFaceFeatureProvider().getPostureGuidanceIntent(getApplicationContext());
+ 
+diff --git a/src/com/android/settings/biometrics/face/FaceEnroll.kt b/src/com/android/settings/biometrics/face/FaceEnroll.kt
+index 74f1613aaf..48ea527c03 100644
+--- a/src/com/android/settings/biometrics/face/FaceEnroll.kt
++++ b/src/com/android/settings/biometrics/face/FaceEnroll.kt
+@@ -20,6 +20,7 @@ import android.app.ComponentCaller
+ import android.content.Intent
+ import android.os.Bundle
+ import android.util.Log
++import androidx.annotation.VisibleForTesting
+ import androidx.appcompat.app.AppCompatActivity
+ import com.android.settings.biometrics.BiometricEnrollBase.RESULT_FINISHED
+ import com.android.settings.biometrics.combination.CombinedBiometricStatusUtils
+@@ -38,6 +39,9 @@ class FaceEnroll: AppCompatActivity() {
+     private val enrollActivityProvider: FaceEnrollActivityClassProvider
+         get() = featureFactory.faceFeatureProvider.enrollActivityClassProvider
+ 
++    @VisibleForTesting
++    var launchedFromProvider: () -> String? = { launchedFromPackage }
++
+     private var isLaunched = false
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+@@ -56,6 +60,11 @@ class FaceEnroll: AppCompatActivity() {
+             Log.d("FaceEnroll", "forward to $nextActivityClass")
+             val nextIntent = Intent(this, nextActivityClass)
+             nextIntent.putExtras(intent)
++
++            // drop extras that are not allowed from external packages before launching
++            if (launchedFromProvider() != packageName) {
++                nextIntent.removeExtra(Intent.EXTRA_USER_ID)
++            }
+             startActivityForResult(nextIntent, 0)
+ 
+             isLaunched = true
+diff --git a/src/com/android/settings/biometrics/face/FaceEnrollIntroduction.java b/src/com/android/settings/biometrics/face/FaceEnrollIntroduction.java
+index 946d9b3eb2..f594456158 100644
+--- a/src/com/android/settings/biometrics/face/FaceEnrollIntroduction.java
++++ b/src/com/android/settings/biometrics/face/FaceEnrollIntroduction.java
+@@ -239,9 +239,8 @@ public class FaceEnrollIntroduction extends BiometricEnrollIntroduction {
+         if (token != null) {
+             intent.putExtra(ChooseLockSettingsHelper.EXTRA_KEY_CHALLENGE_TOKEN, token);
+         }
+-        final int userId = getIntent().getIntExtra(Intent.EXTRA_USER_ID, UserHandle.myUserId());
+-        if (userId != UserHandle.USER_NULL) {
+-            intent.putExtra(Intent.EXTRA_USER_ID, userId);
++        if (mUserId != UserHandle.USER_NULL) {
++            intent.putExtra(Intent.EXTRA_USER_ID, mUserId);
+         }
+         BiometricUtils.copyMultiBiometricExtras(getIntent(), intent);
+         intent.putExtra(EXTRA_FROM_SETTINGS_SUMMARY, true);
+diff --git a/tests/robotests/src/com/android/settings/biometrics/MultiBiometricEnrollHelperTest.java b/tests/robotests/src/com/android/settings/biometrics/MultiBiometricEnrollHelperTest.java
+index 03b3b48461..76a1e34666 100644
+--- a/tests/robotests/src/com/android/settings/biometrics/MultiBiometricEnrollHelperTest.java
++++ b/tests/robotests/src/com/android/settings/biometrics/MultiBiometricEnrollHelperTest.java
+@@ -140,9 +140,16 @@ public class MultiBiometricEnrollHelperTest {
+         final ShadowPackageManager shadowPackageManager = shadowOf(mContext.getPackageManager());
+         shadowPackageManager.setSystemFeature(PackageManager.FEATURE_FACE, true);
+         ShadowUtils.setFaceManager(mFaceManager);
+-        ActivityController.of(new FaceEnrollIntroduction(), mFaceIntent)
++        ActivityController.of(new TestFaceEnrollIntroduction(), mFaceIntent)
+                 .create(mFaceIntent.getExtras()).get();
+ 
+         verify(mFaceManager).generateChallenge(eq(mUserId), any());
+     }
++
++    private static class TestFaceEnrollIntroduction extends FaceEnrollIntroduction {
++        @Override
++        public String getLaunchedFromPackage() {
++            return getPackageName();
++        }
++    }
+ }
+diff --git a/tests/robotests/src/com/android/settings/biometrics/face/FaceEnrollIntroductionTest.java b/tests/robotests/src/com/android/settings/biometrics/face/FaceEnrollIntroductionTest.java
+index 984073f19b..7d3aee92ba 100644
+--- a/tests/robotests/src/com/android/settings/biometrics/face/FaceEnrollIntroductionTest.java
++++ b/tests/robotests/src/com/android/settings/biometrics/face/FaceEnrollIntroductionTest.java
+@@ -182,6 +182,11 @@ public class FaceEnrollIntroductionTest {
+         public boolean isInMultiWindowMode() {
+             return mIsMultiWindowMode;
+         }
++
++        @Override
++        public String getLaunchedFromPackage() {
++            return getPackageName();
++        }
+     }
+ 
+     @Before
+diff --git a/tests/robotests/src/com/android/settings/biometrics/face/FaceEnrollTest.kt b/tests/robotests/src/com/android/settings/biometrics/face/FaceEnrollTest.kt
+index f4786388f5..ad4605aff9 100644
+--- a/tests/robotests/src/com/android/settings/biometrics/face/FaceEnrollTest.kt
++++ b/tests/robotests/src/com/android/settings/biometrics/face/FaceEnrollTest.kt
+@@ -21,11 +21,10 @@ import android.content.Intent
+ import com.android.settings.overlay.FeatureFactory
+ import com.android.settings.testutils.FakeFeatureFactory
+ import com.google.common.truth.Truth.assertThat
+-import com.google.common.truth.Truth
+ import org.junit.Before
+ import org.junit.Test
+ import org.junit.runner.RunWith
+-import org.mockito.Mockito
++import org.mockito.Mockito.`when` as whenever
+ import org.robolectric.Robolectric
+ import org.robolectric.RobolectricTestRunner
+ import org.robolectric.Shadows
+@@ -39,6 +38,7 @@ class FaceEnrollTest {
+         const val INTENT_VALUE = "testValue"
+         val INTENT = Intent().apply {
+             putExtra(INTENT_KEY, INTENT_VALUE)
++            putExtra(Intent.EXTRA_USER_ID, 11)
+         }
+     }
+ 
+@@ -47,30 +47,45 @@ class FaceEnrollTest {
+     @Before
+     fun setUp() {
+         featureFactory = FakeFeatureFactory.setupForTest()
+-        Mockito.`when`(featureFactory.faceFeatureProvider.enrollActivityClassProvider)
++        whenever(featureFactory.faceFeatureProvider.enrollActivityClassProvider)
+             .thenReturn(activityProvider)
+     }
+ 
+-    private fun setupActivity(activityClass: Class<out FaceEnroll>): FaceEnroll {
+-        return Robolectric.buildActivity(activityClass, INTENT).create().get()
++    private fun setupActivity(
++        activityClass: Class<out FaceEnroll>,
++        launchedFrom: String? = null,
++    ): FaceEnroll {
++        val activityController = Robolectric.buildActivity(activityClass, INTENT)
++        activityController.get().launchedFromProvider = {
++            launchedFrom ?: activityController.get().packageName
++        }
++        return activityController.create().get()
+     }
+ 
+     @Test
+     fun testFinishAndLaunchDefaultActivity() {
+-        // Run
+         val activity = setupActivity(FaceEnroll::class.java)
+ 
+-        // Verify
+-        verifyLaunchNextActivity(activity, activityProvider.next)
++        val nextActivityIntent = activity.asShadow().nextStartedActivity
++        assertThat(nextActivityIntent.component!!.className).isEqualTo(activityProvider.next.name)
++        assertThat(nextActivityIntent.extras!!.size()).isEqualTo(2)
++        assertThat(nextActivityIntent.getStringExtra(INTENT_KEY)).isEqualTo(INTENT_VALUE)
++        assertThat(nextActivityIntent.hasExtra(Intent.EXTRA_USER_ID)).isTrue()
+     }
+ 
+-    private fun verifyLaunchNextActivity(
+-        currentActivityInstance : FaceEnroll,
+-        nextActivityClass: Class<out Activity>
+-    ) {
+-        val nextActivityIntent = Shadows.shadowOf(currentActivityInstance).nextStartedActivity
+-        assertThat(nextActivityIntent.component!!.className).isEqualTo(nextActivityClass.name)
++    @Test
++    fun testFinishAndLaunchDefaultActivity_fromExternal_dropUser() {
++        val activity = setupActivity(
++            FaceEnroll::class.java,
++            launchedFrom = "com.foo.bar"
++        )
++
++        val nextActivityIntent = activity.asShadow().nextStartedActivity
++        assertThat(nextActivityIntent.component!!.className).isEqualTo(activityProvider.next.name)
+         assertThat(nextActivityIntent.extras!!.size()).isEqualTo(1)
+         assertThat(nextActivityIntent.getStringExtra(INTENT_KEY)).isEqualTo(INTENT_VALUE)
++        assertThat(nextActivityIntent.hasExtra(Intent.EXTRA_USER_ID)).isFalse()
+     }
+-}
+\ No newline at end of file
++}
++
++private fun Activity.asShadow() = Shadows.shadowOf(this)
+-- 
+2.52.0.rc1.455.g30608eb744-goog
+

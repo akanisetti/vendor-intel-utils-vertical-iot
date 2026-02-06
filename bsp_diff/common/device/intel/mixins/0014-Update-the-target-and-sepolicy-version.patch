@@ -1,0 +1,38 @@
+From 9ef8a50858c74bfb2c08fd030c4f291acba45133 Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Wed, 11 Jun 2025 09:53:56 +0000
+Subject: [PATCH 2/2] Update the target and sepolicy version
+
+This patch will update the sepolicy and target
+version to 202504 as required by r2 tag AOSP code.
+
+Tests Done: Build and boot
+
+Tracked-On: NA
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ groups/device-specific/caas/manifest.xml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/groups/device-specific/caas/manifest.xml b/groups/device-specific/caas/manifest.xml
+index 93c3f366..45301694 100644
+--- a/groups/device-specific/caas/manifest.xml
++++ b/groups/device-specific/caas/manifest.xml
+@@ -1,5 +1,5 @@
+ {{^ota-update}}
+-<manifest version="1.0" type="device" target-level="202604">
++<manifest version="1.0" type="device" target-level="202504">
+ {{/ota-update}}
+ {{#ota-update}}
+ <manifest version="1.0" type="device">
+@@ -37,6 +37,6 @@
+     </hal>
+     <!--<kernel target-level="5"/>-->
+     <sepolicy>
+-        <version>202604</version>
++        <version>202504</version>
+     </sepolicy>
+ </manifest>
+-- 
+2.34.1
+

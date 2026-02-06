@@ -1,0 +1,32 @@
+From 659013681ed76f5f0c24e5930029de9af1ccb89b Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Mon, 13 Jan 2025 05:26:28 +0000
+Subject: [PATCH] Update libdrm to use internal libdrm instead
+
+This patch updates the upstream libdrm to use
+internal libdrm instead.
+
+Tests Done: Build and boot
+
+Tracked-On: NA
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ tests/util/Android.bp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/util/Android.bp b/tests/util/Android.bp
+index f22d3ead..9710558c 100644
+--- a/tests/util/Android.bp
++++ b/tests/util/Android.bp
+@@ -27,7 +27,7 @@ package {
+     // all of the 'license_kinds' from "external_libdrm_license"
+     // to get the below license kinds:
+     //   SPDX-license-identifier-MIT
+-    default_applicable_licenses: ["external_libdrm_license"],
++    default_applicable_licenses: ["external_libdrm_license_orig"],
+ }
+ 
+ build = ["Android.sources.bp"]
+-- 
+2.34.1
+

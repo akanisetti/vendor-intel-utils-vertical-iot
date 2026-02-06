@@ -1,0 +1,127 @@
+From 61b3b73116cb7fc760683db1d02e6466522aacbf Mon Sep 17 00:00:00 2001
+From: Nan Wu <wnan@google.com>
+Date: Tue, 22 Jul 2025 06:57:12 -0700
+Subject: [PATCH] RESTRICT AUTOMERGE: Backport When an opaque window has alpha
+ < 0.5, don't let it receive touches.
+
+When a window is declared as opaque but the alpha is low, it's likely a fadeout animation or other visual change that should not affect touch handling.
+
+Bug: 266433089
+Test: inputflinger_tests
+Flag: EXEMPT BUGFIX
+Change-Id: I9ba48365d0ea080a4e68c8c497049225b759df79
+---
+ .../dispatcher/InputDispatcher.cpp            |  6 ++
+ .../tests/InputDispatcher_test.cpp            | 67 +++++++++++++++++++
+ 2 files changed, 73 insertions(+)
+
+diff --git a/services/inputflinger/dispatcher/InputDispatcher.cpp b/services/inputflinger/dispatcher/InputDispatcher.cpp
+index 2908c61182..62b78fd645 100644
+--- a/services/inputflinger/dispatcher/InputDispatcher.cpp
++++ b/services/inputflinger/dispatcher/InputDispatcher.cpp
+@@ -5343,6 +5343,12 @@ bool InputDispatcher::DispatcherTouchState::canWindowReceiveMotion(
+         const android::inputdispatcher::MotionEntry& motionEntry) const {
+     const WindowInfo& info = *window->getInfo();
+ 
++    if (info.touchOcclusionMode == TouchOcclusionMode::USE_OPACITY && info.alpha < 0.5f) {
++        LOG(INFO) << "Not sending motion to " << window->getName() << ", window opacity="
++            << info.alpha << " is below the threshold";
++        return false;
++    }
++
+     // Skip spy window targets that are not valid for targeted injection.
+     if (const auto err = verifyTargetedInjection(window, motionEntry); err) {
+         return false;
+diff --git a/services/inputflinger/tests/InputDispatcher_test.cpp b/services/inputflinger/tests/InputDispatcher_test.cpp
+index 298ba4209a..82622fbd8e 100644
+--- a/services/inputflinger/tests/InputDispatcher_test.cpp
++++ b/services/inputflinger/tests/InputDispatcher_test.cpp
+@@ -12219,11 +12219,14 @@ protected:
+     static constexpr gui::Uid TOUCHED_APP_UID{10001};
+     static constexpr gui::Uid APP_B_UID{10002};
+     static constexpr gui::Uid APP_C_UID{10003};
++    static constexpr gui::Uid BOTTOM_APP_UID{10004};
+ 
+     sp<FakeWindowHandle> mTouchWindow;
++    sp<FakeWindowHandle> mBottomWindow;
+ 
+     virtual void SetUp() override {
+         InputDispatcherTest::SetUp();
++        mBottomWindow = getWindow(BOTTOM_APP_UID, "Bottom");
+         mTouchWindow = getWindow(TOUCHED_APP_UID, "Touched");
+         mDispatcher->setMaximumObscuringOpacityForTouch(MAXIMUM_OBSCURING_OPACITY);
+     }
+@@ -12606,6 +12609,70 @@ TEST_F(InputDispatcherUntrustedTouchesTest,
+     mTouchWindow->consumeAnyMotionDown();
+ }
+ 
++/**
++ * If the touch window USE_OPACITY and it is translucent (alpha < 0.5), do not let it receive
++ * the touch event. The window below it also does not receive the touch event.
++ */
++TEST_F(InputDispatcherUntrustedTouchesTest, UseOpacity_BlocksWhenAlphaIsLow) {
++    mTouchWindow->editInfo()->touchOcclusionMode = TouchOcclusionMode::USE_OPACITY;
++    mTouchWindow->editInfo()->alpha = 0.4f; // Less than 0.5
++    mDispatcher->onWindowInfosChanged(
++            {{*mTouchWindow->getInfo(), *mBottomWindow->getInfo()}, {}, 0, 0});
++
++    touch();
++
++    mTouchWindow->assertNoEvents();
++    mBottomWindow->assertNoEvents();
++}
++
++/**
++ * If the touch window USE_OPACITY and it is visible (alpha > 0.5), it should receive
++ * the touch event. The window below it still does not receive the touch event.
++ */
++TEST_F(InputDispatcherUntrustedTouchesTest, UseOpacity_AllowsWhenAlphaIsSufficient) {
++    mTouchWindow->editInfo()->touchOcclusionMode = TouchOcclusionMode::USE_OPACITY;
++    mTouchWindow->editInfo()->alpha = 0.6f; // Greater than 0.5
++    mDispatcher->onWindowInfosChanged(
++            {{*mTouchWindow->getInfo(), *mBottomWindow->getInfo()}, {}, 0, 0});
++
++    touch();
++
++    mTouchWindow->consumeMotionDown();
++    mBottomWindow->assertNoEvents();
++}
++
++/**
++ * If the touch window USE_OPACITY and it is translucent at the threshold (alpha = 0.5),
++ * do not let it receive the touch event. The window below it also does not receive the touch event.
++ */
++TEST_F(InputDispatcherUntrustedTouchesTest, UseOpacity_AllowsWhenAlphaIsAtThreshold) {
++    mTouchWindow->editInfo()->touchOcclusionMode = TouchOcclusionMode::USE_OPACITY;
++    mTouchWindow->editInfo()->alpha = 0.5f; // Exactly at the threshold
++    mDispatcher->onWindowInfosChanged(
++            {{*mTouchWindow->getInfo(), *mBottomWindow->getInfo()}, {}, 0, 0});
++
++    touch();
++
++    mTouchWindow->consumeMotionDown();
++    mBottomWindow->assertNoEvents();
++}
++
++/**
++ * If the touch window does not USE_OPACITY and it is translucent (alpha < 0.4), let it receive
++ * the touch event. The window below it also does not receive the touch event.
++ */
++TEST_F(InputDispatcherUntrustedTouchesTest, OtherOcclusionMode_AllowsWhenAlphaIsLow) {
++    mTouchWindow->editInfo()->touchOcclusionMode = TouchOcclusionMode::BLOCK_UNTRUSTED;
++    mTouchWindow->editInfo()->alpha = 0.4f; // Less than 0.5, but mode is not USE_OPACITY
++    mDispatcher->onWindowInfosChanged(
++            {{*mTouchWindow->getInfo(), *mBottomWindow->getInfo()}, {}, 0, 0});
++
++    touch();
++
++    mTouchWindow->consumeMotionDown();
++    mBottomWindow->assertNoEvents();
++}
++
+ class InputDispatcherDragTests : public InputDispatcherTest {
+ protected:
+     std::shared_ptr<FakeApplicationHandle> mApp;
+-- 
+2.52.0.rc1.455.g30608eb744-goog
+

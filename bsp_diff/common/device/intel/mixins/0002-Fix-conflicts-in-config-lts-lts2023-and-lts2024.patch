@@ -1,0 +1,84 @@
+From aa4650c4214b501e4676088d1d67c78c467374bf Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Tue, 13 Jan 2026 06:54:55 +0000
+Subject: [PATCH] Fix conflicts in config-lts lts2023 and lts2024
+
+Update clang and defconfig for new aosp kernel
+lts2023-chromium lts2024-android
+
+Tracked-On: NA
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/groups/kernel/AndroidBoard.mk b/groups/kernel/AndroidBoard.mk
+index e65e40f0..213ab70f 100644
+--- a/groups/kernel/AndroidBoard.mk
++++ b/groups/kernel/AndroidBoard.mk
+@@ -6,7 +6,7 @@ PREBUILT_KERNEL_ROOT := vendor/intel/utils_priv/kernel/prebuilts/6.6/{{{prebuilt
+ endif
+ endif
+ 
+-TARGET_KERNEL_CLANG_VERSION := r530567
++TARGET_KERNEL_CLANG_VERSION := r547379
+ CLANG_PREBUILTS_PATH := $(abspath $(INTEL_PATH_DEVICE)/../../../prebuilts/clang)
+ 
+ ifneq ($(TARGET_KERNEL_CLANG_VERSION),)
+diff --git a/groups/kernel/gmin64/config-lts/lts2023-chromium/x86_64_defconfig b/groups/kernel/gmin64/config-lts/lts2023-chromium/x86_64_defconfig
+index 6beb66d4..04e5b95e 100644
+--- a/groups/kernel/gmin64/config-lts/lts2023-chromium/x86_64_defconfig
++++ b/groups/kernel/gmin64/config-lts/lts2023-chromium/x86_64_defconfig
+@@ -2,15 +2,15 @@
+ # Automatically generated file; DO NOT EDIT.
+ # Linux/x86_64 6.6.56 Kernel Configuration
+ #
+-CONFIG_CC_VERSION_TEXT="Android (12328485, +pgo, +bolt, +lto, +mlgo, based on r530567) clang version 19.0.0 (https://android.googlesource.com/toolchain/llvm-project 97a699bf4812a18fb657c2779f5296a4ab2694d2)"
++CONFIG_CC_VERSION_TEXT="Android (13174946, +pgo, +bolt, +lto, +mlgo, based on r547379) clang version 20.0.0 (https://android.googlesource.com/toolchain/llvm-project b718bcaf8c198c82f3021447d943401e3ab5bd54)"
+ CONFIG_GCC_VERSION=0
+ CONFIG_CC_IS_CLANG=y
+-CONFIG_CLANG_VERSION=190000
++CONFIG_CLANG_VERSION=200000
+ CONFIG_AS_IS_LLVM=y
+-CONFIG_AS_VERSION=190000
++CONFIG_AS_VERSION=200000
+ CONFIG_LD_VERSION=0
+ CONFIG_LD_IS_LLD=y
+-CONFIG_LLD_VERSION=190000
++CONFIG_LLD_VERSION=200000
+ CONFIG_CC_CAN_LINK=y
+ CONFIG_CC_CAN_LINK_STATIC=y
+ CONFIG_CC_HAS_ASM_GOTO_OUTPUT=y
+diff --git a/groups/kernel/gmin64/config-lts/lts2024-android/x86_64_defconfig b/groups/kernel/gmin64/config-lts/lts2024-android/x86_64_defconfig
+index df2595a8..06407cd4 100644
+--- a/groups/kernel/gmin64/config-lts/lts2024-android/x86_64_defconfig
++++ b/groups/kernel/gmin64/config-lts/lts2024-android/x86_64_defconfig
+@@ -2,15 +2,15 @@
+ # Automatically generated file; DO NOT EDIT.
+ # Linux/x86_64 6.12.8 Kernel Configuration
+ #
+-CONFIG_CC_VERSION_TEXT="Android (12328485, +pgo, +bolt, +lto, +mlgo, based on r530567) clang version 19.0.0 (https://android.googlesource.com/toolchain/llvm-project 97a699bf4812a18fb657c2779f5296a4ab2694d2)"
++CONFIG_CC_VERSION_TEXT="Android (13290119, +pgo, +bolt, +lto, +mlgo, based on r547379) clang version 20.0.0 (https://android.googlesource.com/toolchain/llvm-project b718bcaf8c198c82f3021447d943401e3ab5bd54)"
+ CONFIG_GCC_VERSION=0
+ CONFIG_CC_IS_CLANG=y
+-CONFIG_CLANG_VERSION=190000
++CONFIG_CLANG_VERSION=200000
+ CONFIG_AS_IS_LLVM=y
+-CONFIG_AS_VERSION=190000
++CONFIG_AS_VERSION=200000
+ CONFIG_LD_VERSION=0
+ CONFIG_LD_IS_LLD=y
+-CONFIG_LLD_VERSION=190000
++CONFIG_LLD_VERSION=200000
+ CONFIG_RUSTC_VERSION=0
+ CONFIG_RUSTC_LLVM_VERSION=0
+ CONFIG_CC_CAN_LINK=y
+@@ -7110,6 +7110,8 @@ CONFIG_PM_OPP=y
+ # CONFIG_HTE is not set
+ # end of Device Drivers
+ 
++CONFIG_CC_HAS_COUNTED_BY=y
++
+ #
+ # File systems
+ #
+-- 
+2.34.1
+

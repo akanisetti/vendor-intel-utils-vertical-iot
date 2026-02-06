@@ -1,0 +1,42 @@
+From 932cce74f8fed0745b6663861d60e8e582e79e16 Mon Sep 17 00:00:00 2001
+From: celadon <celadon@intel.com>
+Date: Wed, 5 Feb 2025 05:05:36 +0000
+Subject: [PATCH] Revert "Fix kotlinc 2.0 compiler warnings and move
+ PhotopickerLib to 2.0"
+
+This reverts commit 48cb2dd971f621b7186a370074c8a39a4826e975.
+---
+ photopicker/Android.bp                                        | 1 +
+ .../src/com/android/photopicker/extensions/Modifier.kt        | 4 +++-
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/photopicker/Android.bp b/photopicker/Android.bp
+index a3d85d5c9..88c0e9139 100644
+--- a/photopicker/Android.bp
++++ b/photopicker/Android.bp
+@@ -10,6 +10,7 @@ android_library {
+         "src/**/*.kt",
+         ":statslog-mediaprovider-java-gen",
+     ],
++    kotlin_lang_version: "1.9",
+     resource_dirs: ["res"],
+     sdk_version: "module_current",
+     min_sdk_version: "30",
+diff --git a/photopicker/src/com/android/photopicker/extensions/Modifier.kt b/photopicker/src/com/android/photopicker/extensions/Modifier.kt
+index bb16cb758..dacd735ae 100644
+--- a/photopicker/src/com/android/photopicker/extensions/Modifier.kt
++++ b/photopicker/src/com/android/photopicker/extensions/Modifier.kt
+@@ -195,7 +195,9 @@ private fun Modifier.transferTouchesToSurfaceControlViewHost(
+                     if (canceled) break
+ 
+                     val postSlopOffset =
+-                        touchSlopDetector.addPointerInputChange(dragEvent, touchSlop)
++                        if (dragEvent != null)
++                            touchSlopDetector.addPointerInputChange(dragEvent, touchSlop)
++                        else Offset.Unspecified
+ 
+                     // Once pastTouchSlop check to see if the touch meets the conditions to be
+                     // transferred to the host.
+-- 
+2.34.1
+

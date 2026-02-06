@@ -1,0 +1,66 @@
+From b78b49258fda70f1a9f6ee8e3961d378ff95dc62 Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Tue, 4 Feb 2025 12:04:02 +0000
+Subject: [PATCH] Adding changes for the new dessert
+
+Tests Done: Build proceed
+
+Tracked-On: NA
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ mfx_omx_defs.mk | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/mfx_omx_defs.mk b/mfx_omx_defs.mk
+index 51de2b0..142a96f 100644
+--- a/mfx_omx_defs.mk
++++ b/mfx_omx_defs.mk
+@@ -15,6 +15,9 @@
+ MFX_OMX_CFLAGS := -DANDROID
+ 
+ # Android version preference:
++ifneq ($(filter 16 16.% W% ,$(PLATFORM_VERSION)),)
++  MFX_ANDROID_VERSION:= MFX_W
++endif
+ ifneq ($(filter 15 15.% V% ,$(PLATFORM_VERSION)),)
+   MFX_ANDROID_VERSION:= MFX_V
+ endif
+@@ -67,7 +70,7 @@ MFX_OMX_CFLAGS += \
+ 
+ ifeq ($(BOARD_USES_GRALLOC1),true)
+   MFX_OMX_CFLAGS += -DMFX_OMX_USE_GRALLOC_1
+-  ifneq ($(filter MFX_P MFX_Q MFX_R MFX_S MFX_U MFX_V,$(MFX_ANDROID_VERSION)),)
++  ifneq ($(filter MFX_P MFX_Q MFX_R MFX_S MFX_U MFX_V,MFX_W,$(MFX_ANDROID_VERSION)),)
+     # plugins should use PRIME buffer descriptor since Android P
+     MFX_OMX_CFLAGS += -DMFX_OMX_USE_PRIME
+   endif
+@@ -100,7 +103,7 @@ ifneq ($(filter $(MFX_ANDROID_VERSION), MFX_O),)
+   MFX_OMX_CFLAGS_LIBVA += -DANDROID_O
+ endif
+ 
+-ifneq ($(filter $(MFX_ANDROID_VERSION), MFX_Q MFX_R MFX_S MFX_U MFX_V),)
++ifneq ($(filter $(MFX_ANDROID_VERSION), MFX_Q MFX_R MFX_S MFX_U MFX_V MFX_W),)
+   # HDR10 support on Android Q
+   MFX_OMX_CFLAGS += -DHEVC10HDR_SUPPORT
+   MFX_OMX_CFLAGS += -DENABLE_READ_SEI
+@@ -119,7 +122,7 @@ MFX_OMX_INCLUDES_LIBVA := $(TARGET_OUT_HEADERS)/libva
+ MFX_OMX_HEADER_LIBRARIES := libmfx_headers
+ 
+ # Setting usual imported headers
+-ifneq ($(filter MFX_O_MR1 MFX_P MFX_Q MFX_R MFX_S MFX_U MFX_V,$(MFX_ANDROID_VERSION)),)
++ifneq ($(filter MFX_O_MR1 MFX_P MFX_Q MFX_R MFX_S MFX_U MFX_V MFX_W,$(MFX_ANDROID_VERSION)),)
+   MFX_OMX_HEADER_LIBRARIES += \
+     media_plugin_headers \
+     libnativebase_headers \
+@@ -127,7 +130,7 @@ ifneq ($(filter MFX_O_MR1 MFX_P MFX_Q MFX_R MFX_S MFX_U MFX_V,$(MFX_ANDROID_VERS
+     libhardware_headers
+ endif
+ 
+-ifneq ($(filter MFX_P MFX_Q MFX_R MFX_S MFX_U MFX_V,$(MFX_ANDROID_VERSION)),)
++ifneq ($(filter MFX_P MFX_Q MFX_R MFX_S MFX_U MFX_V MFX_W,$(MFX_ANDROID_VERSION)),)
+   MFX_OMX_HEADER_LIBRARIES += \
+     libbase_headers
+ endif
+-- 
+2.34.1
+

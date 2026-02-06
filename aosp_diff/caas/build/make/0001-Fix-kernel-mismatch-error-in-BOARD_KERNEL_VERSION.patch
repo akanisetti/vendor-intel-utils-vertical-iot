@@ -1,0 +1,28 @@
+From bd85cca5751a4a6434c62158389a01c970451d0e Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Thu, 4 Dec 2025 07:20:59 +0000
+Subject: [PATCH] Fix kernel mismatch error in BOARD_KERNEL_VERSION
+
+Tracked-On: OAM-xxxx
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/core/Makefile b/core/Makefile
+index 1448572d46..a3a06f3641 100644
+--- a/core/Makefile
++++ b/core/Makefile
+@@ -5344,7 +5344,11 @@ $(BUILT_KERNEL_VERSION_FILE): $(foreach pair,$(my_decompress_tools),$(call word-
+ $(BUILT_KERNEL_VERSION_FILE): $(EXTRACT_KERNEL) $(firstword $(INSTALLED_KERNEL_TARGET))
+ 	KERNEL_RELEASE=`$(EXTRACT_KERNEL) --tools $(PRIVATE_DECOMPRESS_TOOLS) --input $(firstword $(INSTALLED_KERNEL_TARGET)) \
+ 	  --output-release` ;\
+-  if [ "$$KERNEL_RELEASE" != '$(BOARD_KERNEL_VERSION)' ]; then \
++	KERNEL_RELEASE_CLEAN=`echo "$$KERNEL_RELEASE" | sed 's/-.*$$//'` ;\
++	KERNEL_RELEASE_CLEAN1=`echo "$$KERNEL_RELEASE" | sed 's/-[^-]*$$//'` ;\
++  if [ "$$KERNEL_RELEASE" != '$(BOARD_KERNEL_VERSION)' ] && \
++     [ "$$KERNEL_RELEASE_CLEAN1" != '$(BOARD_KERNEL_VERSION)' ] && \
++     [ "$$KERNEL_RELEASE_CLEAN" != '$(BOARD_KERNEL_VERSION)' ]; then \
+     echo "Specified kernel version '$(BOARD_KERNEL_VERSION)' does not match actual kernel version '$$KERNEL_RELEASE' " ; exit 1; fi;
+ 	echo '$(BOARD_KERNEL_VERSION)' > $@
+ 
+-- 
+2.34.1
+

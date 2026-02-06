@@ -1,0 +1,29 @@
+From 6a1846b294e3d84e2d3be344a1ff7ed3cb59a2b5 Mon Sep 17 00:00:00 2001
+From: ahs <amrita.h.s@intel.com>
+Date: Wed, 27 Apr 2022 09:36:00 +0530
+Subject: [PATCH] Increase super_partition_size for caas to 6000.
+
+this is required to include libippcustom to
+product packages.
+
+Signed-off-by: ahs <amrita.h.s@intel.com>
+---
+ caas/mixins.spec | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/caas/mixins.spec b/caas/mixins.spec
+index b7ec2f1..fea6bb1 100755
+--- a/caas/mixins.spec
++++ b/caas/mixins.spec
+@@ -79,7 +79,7 @@ filesystem_config: common
+ telephony: false
+ load_modules: true
+ gptbuild: true(size=32G,generate_craff=false,compress_gptimage=true)
+-dynamic-partitions: true(super_img_in_flashzip=true,super_partition_size=5000,virtual_ab=true,virtual_ab_compression=true)
++dynamic-partitions: true(super_img_in_flashzip=true,super_partition_size=6000,virtual_ab=true,virtual_ab_compression=true)
+ dbc: true
+ atrace: true
+ firmware: true(all_firmwares=false)
+-- 
+2.33.0
+

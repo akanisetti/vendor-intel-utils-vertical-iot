@@ -1,0 +1,32 @@
+From 5975ee215983696b57375fbf31a1a3eac90810bf Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Thu, 10 Apr 2025 04:58:18 +0000
+Subject: [PATCH 1/2] Update the first API level to 36 for Beta3+
+
+This will update the first API level to 36 for
+A16.
+
+Tests Done: Build and boot
+
+Tracked-On: OAM-131786
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ groups/device-specific/caas/caas.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/groups/device-specific/caas/caas.mk b/groups/device-specific/caas/caas.mk
+index d26095a4..ba38074f 100644
+--- a/groups/device-specific/caas/caas.mk
++++ b/groups/device-specific/caas/caas.mk
+@@ -74,7 +74,7 @@ else
+ PRODUCT_SET_DEBUGFS_RESTRICTIONS := true
+ endif
+ {{^ota-update}}
+-PRODUCT_SHIPPING_API_LEVEL := 35
++PRODUCT_SHIPPING_API_LEVEL := 36
+ ifeq ($(BASE_LTS2024_ANDROID_KERNEL), true)
+ PRODUCT_OTA_ENFORCE_VINTF_KERNEL_REQUIREMENTS := false
+ else
+-- 
+2.34.1
+

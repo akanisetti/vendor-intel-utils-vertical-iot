@@ -1,0 +1,32 @@
+From 948d6a49f856353f40f69012cc3b1c4add4f2371 Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Thu, 10 Apr 2025 04:59:40 +0000
+Subject: [PATCH 2/2] WA to allow prebuilt libs with page size 4K
+
+According to latest AOSP code prebuilt libs should
+have page size of 16k. This patch needs to be reverted
+with proper fix.
+
+Tests Done: Build and boot
+
+Tracked-On: OAM-131786
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ groups/device-specific/caas/caas.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/groups/device-specific/caas/caas.mk b/groups/device-specific/caas/caas.mk
+index ba38074f..125f6ad9 100644
+--- a/groups/device-specific/caas/caas.mk
++++ b/groups/device-specific/caas/caas.mk
+@@ -66,6 +66,7 @@ PRODUCT_VENDOR_PROPERTIES += \
+     ro.soc.manufacturer=$(PRODUCT_MANUFACTURER)
+ 
+ SELINUX_IGNORE_NEVERALLOWS := true
++PRODUCT_CHECK_PREBUILT_MAX_PAGE_SIZE := false
+ 
+ PRODUCT_RESTRICT_VENDOR_FILES := false
+ ifneq ($(TARGET_BUILD_VARIANT),user)
+-- 
+2.34.1
+

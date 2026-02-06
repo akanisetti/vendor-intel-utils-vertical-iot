@@ -1,0 +1,84 @@
+From 91da221947b504e49cfc4b2a23a3833b6f2072ef Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Wed, 9 Apr 2025 10:26:16 +0000
+Subject: [PATCH 1/2] Defining user is necessary for service with latest
+
+This patch adds user to different services as it is mandatory
+with API level 36.
+
+Tests Done: Build and boot
+
+Tracked-On: NA
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ groups/bugreport/true/init.rc                 | 1 +
+ groups/debug-crashlogd/true/init.crashlogd.rc | 5 +++++
+ groups/ethernet/dhcp/init.recovery.rc         | 1 +
+ 3 files changed, 7 insertions(+)
+
+diff --git a/groups/bugreport/true/init.rc b/groups/bugreport/true/init.rc
+index 920dbd07..2d0a20f3 100644
+--- a/groups/bugreport/true/init.rc
++++ b/groups/bugreport/true/init.rc
+@@ -1,6 +1,7 @@
+ # bugreport is triggered by holding down volume down, volume up and power
+ service bugreport /system/bin/dumpstate -d -p -B -z \
+         -o /data/user_de/0/com.android.shell/files/bugreports/bugreport
++    user root
+     class main
+     disabled
+     oneshot
+diff --git a/groups/debug-crashlogd/true/init.crashlogd.rc b/groups/debug-crashlogd/true/init.crashlogd.rc
+index be03416a..166981ed 100644
+--- a/groups/debug-crashlogd/true/init.crashlogd.rc
++++ b/groups/debug-crashlogd/true/init.crashlogd.rc
+@@ -4,10 +4,12 @@ on post-fs-data
+     mkdir {{logs_dir}}/aplogs 0775 system log
+ 
+ service vendor.crashlogd /system/vendor/bin/crashlogd
++    user root
+     class late_start
+ 
+ # started by vendor/intel/log_capture/crashlog
+ service vendor.logsystemstate /system/vendor/bin/dumpstate_dropbox.sh -v
++    user root
+     disabled
+     oneshot
+ 
+@@ -40,11 +42,13 @@ on property:logd.logpersistd=clear
+     mkdir {{logs_dir}}/aplogs 0775 system log
+ 
+ service vendor.logfs /vendor/bin/logfs.sh
++    user root
+     group root shell log
+     class late_start
+     oneshot
+ 
+ service vendor.aplog /vendor/bin/aplog.sh
++    user root
+     group root shell log
+     class late_start
+     oneshot
+@@ -53,6 +57,7 @@ service vendor.aplog /vendor/bin/aplog.sh
+ ############### Aplog generate by AOSP logpersist ###############
+ 
+ service vendor.earlylogs /vendor/bin/elogs.sh
++    user root
+     class core
+     oneshot
+ 
+diff --git a/groups/ethernet/dhcp/init.recovery.rc b/groups/ethernet/dhcp/init.recovery.rc
+index b88713de..6d9911da 100644
+--- a/groups/ethernet/dhcp/init.recovery.rc
++++ b/groups/ethernet/dhcp/init.recovery.rc
+@@ -4,6 +4,7 @@ on boot
+ {{/eth-driver}}
+ 
+ service dhcpcd_eth0 /system/bin/dhcpcd -ABDKL eth0
++    user root
+     class main
+     disabled
+     oneshot
+-- 
+2.34.1
+

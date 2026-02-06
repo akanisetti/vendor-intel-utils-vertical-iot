@@ -1,0 +1,45 @@
+From de6947a70e8aaa521f9bcb4718eb53f7161d7bfc Mon Sep 17 00:00:00 2001
+From: Oguzhan Yalcin <oyalcin@google.com>
+Date: Tue, 29 Jul 2025 02:57:11 -0700
+Subject: [PATCH] Add apexd.mainline_patch_level_2 to PRODUCT_PACKAGES
+
+identifies that the apexd has a fix included for go/mainline-play-installs-incident
+
+Bug: 433787201
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:a89e1ec183c96413380b5e2db37581b7031d04ea)
+Merged-In: I7bbd5c9db0144b2ceba0902819e19ce7e56e2985
+Change-Id: I7bbd5c9db0144b2ceba0902819e19ce7e56e2985
+Merging the fixes for apexd outage to security branches.
+Bug: 433787201
+---
+ target/product/base_system.mk     | 1 +
+ target/product/generic/Android.bp | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/target/product/base_system.mk b/target/product/base_system.mk
+index 5c4ef33284..a6539bd2e6 100644
+--- a/target/product/base_system.mk
++++ b/target/product/base_system.mk
+@@ -28,6 +28,7 @@ PRODUCT_PACKAGES += \
+     android.test.mock \
+     android.test.runner \
+     apexd \
++    apexd.mainline_patch_level_2 \
+     appops \
+     app_process \
+     appwidget \
+diff --git a/target/product/generic/Android.bp b/target/product/generic/Android.bp
+index 0a32a55b6b..7198ea36e4 100644
+--- a/target/product/generic/Android.bp
++++ b/target/product/generic/Android.bp
+@@ -536,6 +536,7 @@ system_image_defaults {
+         "android.software.window_magnification.prebuilt.xml", // handheld_system
+         "android.system.suspend-service",
+         "apexd",
++        "apexd.mainline_patch_level_2",
+         "appops",
+         "approved-ogki-builds.xml", // base_system
+         "appwidget",
+-- 
+2.51.0.362.g3baa7cb742-goog
+

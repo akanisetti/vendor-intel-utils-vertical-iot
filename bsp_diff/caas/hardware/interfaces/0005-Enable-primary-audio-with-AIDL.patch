@@ -1,0 +1,93 @@
+From 5194d66e9919115862d6647ab7f7c1187726c3c8 Mon Sep 17 00:00:00 2001
+From: padmashree mandri <padmashree.mandri@intel.com>
+Date: Wed, 8 Jan 2025 15:39:28 +0000
+Subject: [PATCH 5/7] Enable primary audio with AIDL
+
+This patch adds implementation for dynamic detection
+of sound card and HDMI Audio.
+
+Tracked-On: OAM-129138
+Signed-off-by: padmashree mandri <padmashree.mandri@intel.com>
+
+diff --git a/audio/aidl/default/primary/PrimaryMixer.h b/audio/aidl/default/primary/PrimaryMixer.h
+index 760d42f362..7d39d38b62 100644
+--- a/audio/aidl/default/primary/PrimaryMixer.h
++++ b/audio/aidl/default/primary/PrimaryMixer.h
+@@ -17,6 +17,7 @@
+ #pragma once
+ 
+ #include "alsa/Mixer.h"
++#define MAX_HDMI_DEVICES 20
+ 
+ namespace aidl::android::hardware::audio::core::primary {
+ 
+@@ -28,6 +29,49 @@ class PrimaryMixer : public alsa::Mixer {
+     static constexpr int kAlsaDevice = 0;
+ 
+     static PrimaryMixer& getInstance();
++    static int get_pcm_card(const char* name)
++    {
++        char id_filepath[20] = {0};
++        char number_filepath[20] = {0};
++        ssize_t written;
++
++        snprintf(id_filepath, sizeof(id_filepath), "/proc/asound/%s", name);
++        written = readlink(id_filepath, number_filepath, sizeof(number_filepath));
++        if (written < 0)
++            return -1;
++        return atoi(number_filepath + 4);
++    }
++    static int get_pcm_device(int card) {
++        struct mixer *mixer = NULL;
++        struct mixer_ctl *ctl;
++        mixer = mixer_open(card);
++        for (int i = 0; i < MAX_HDMI_DEVICES; i++) {
++            char ctl_name[100] ;
++            enum mixer_ctl_type type;
++            int num_values;
++            snprintf(ctl_name, sizeof(ctl_name), "HDMI/DP,pcm=%d Jack", i);
++            ctl = mixer_get_ctl_by_name(mixer, ctl_name);
++            if (ctl) {
++                type = mixer_ctl_get_type(ctl);
++                num_values = mixer_ctl_get_num_values(ctl);
++                for (int j = 0; j < num_values; j++) {
++                    switch (type) {
++                        case MIXER_CTL_TYPE_BOOL:
++                            if (mixer_ctl_get_value(ctl,j)) {
++                                mixer_close(mixer);
++                                return i;
++                            }
++                    break;
++                    default:
++                        break;
++                    }
++               }
++           }
++        }
++        mixer_close(mixer);
++        return -1;
++    }
++
+ 
+   private:
+     PrimaryMixer() : alsa::Mixer(kAlsaCard) {}
+diff --git a/audio/aidl/default/primary/StreamPrimary.cpp b/audio/aidl/default/primary/StreamPrimary.cpp
+index 84556801dc..fc38ac3b31 100644
+--- a/audio/aidl/default/primary/StreamPrimary.cpp
++++ b/audio/aidl/default/primary/StreamPrimary.cpp
+@@ -181,6 +181,12 @@ StreamPrimary::AlsaDeviceId StreamPrimary::getCardAndDeviceId(
+     }
+     std::string deviceAddress = devices[0].address.get<AudioDeviceAddress::id>();
+     AlsaDeviceId cardAndDeviceId;
++    cardAndDeviceId.first  = primary::PrimaryMixer::get_pcm_card("PCH");
++    cardAndDeviceId.second = primary::PrimaryMixer::get_pcm_device(cardAndDeviceId.first);
++    LOG(DEBUG) << __func__ << ": parsed with card id " << cardAndDeviceId.first << ", device id "
++               << cardAndDeviceId.second;
++    return cardAndDeviceId;
++
+     if (const size_t suffixPos = deviceAddress.rfind("CARD_");
+         suffixPos == std::string::npos ||
+         sscanf(deviceAddress.c_str() + suffixPos, "CARD_%d_DEV_%d", &cardAndDeviceId.first,
+-- 
+2.34.1
+

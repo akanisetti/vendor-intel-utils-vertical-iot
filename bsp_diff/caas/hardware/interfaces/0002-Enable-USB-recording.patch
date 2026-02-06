@@ -1,0 +1,57 @@
+From 43fc049cd8e49abc8d5bf6561224370eb684671e Mon Sep 17 00:00:00 2001
+From: padmashree mandri <padmashree.mandri@intel.com>
+Date: Fri, 2 Aug 2024 04:42:43 +0000
+Subject: [PATCH 2/7] Enable USB recording
+
+This patch adds below changes
+1> Enable USB audio module
+2> Workaround fix for USB recording
+   USB recording is failing whenever there is change in source and
+   sink sampling rate. To avoid record failure adding condition
+   to make sink sampling rate same as that of source.
+
+Tests Done: USB recording for all sampling rate.
+
+Tracked-On: OAM-122993
+Signed-off-by: padmashree mandri <padmashree.mandri@intel.com>
+
+diff --git a/audio/aidl/default/android.hardware.audio.service-aidl.xml b/audio/aidl/default/android.hardware.audio.service-aidl.xml
+index 27f48e223c..ae2580dad4 100644
+--- a/audio/aidl/default/android.hardware.audio.service-aidl.xml
++++ b/audio/aidl/default/android.hardware.audio.service-aidl.xml
+@@ -19,7 +19,6 @@
+     <version>3</version>
+     <fqname>IConfig/default</fqname>
+   </hal>
+-  <!-- Uncomment when these modules present in the configuration
+   <hal format="aidl">
+     <name>android.hardware.audio.core</name>
+     <version>3</version>
+@@ -30,7 +29,6 @@
+     <version>3</version>
+     <fqname>IModule/usb</fqname>
+   </hal>
+-  -->
+   <hal format="aidl">
+     <name>android.hardware.audio.effect</name>
+     <version>3</version>
+diff --git a/audio/aidl/default/usb/ModuleUsb.cpp b/audio/aidl/default/usb/ModuleUsb.cpp
+index 1d97bc4aa8..798f2a401d 100644
+--- a/audio/aidl/default/usb/ModuleUsb.cpp
++++ b/audio/aidl/default/usb/ModuleUsb.cpp
+@@ -100,6 +100,12 @@ ndk::ScopedAStatus ModuleUsb::checkAudioPatchEndpointsMatch(
+         const std::vector<AudioPortConfig*>& sources, const std::vector<AudioPortConfig*>& sinks) {
+     for (const auto& source : sources) {
+         for (const auto& sink : sinks) {
++	    /*TODO : Need to check why sink and source data is being compared
++	     and fix accordingly*/
++
++	    if (source->sampleRate != sink->sampleRate)
++		    sink->sampleRate = source->sampleRate;
++
+             if (source->sampleRate != sink->sampleRate ||
+                 source->channelMask != sink->channelMask || source->format != sink->format) {
+                 LOG(ERROR) << __func__
+-- 
+2.34.1
+

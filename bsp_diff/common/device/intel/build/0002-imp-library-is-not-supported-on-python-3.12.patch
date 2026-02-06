@@ -1,0 +1,46 @@
+From da7ed8a4af62b76e4ddb69cf9a3bf3266cde344c Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Thu, 10 Apr 2025 04:44:50 +0000
+Subject: [PATCH] imp library is not supported on python 3.12
+
+Google updated the python to 3.12 on latest codebase
+so imp lib is not supported anymore.
+Adding importlib instead of imp which is supported on
+the new python version.
+
+Tests Done: Build and boot
+
+Tracked-On: OAM-131786
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ releasetools/intel_common.py | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/releasetools/intel_common.py b/releasetools/intel_common.py
+index a9748ed..0718b59 100644
+--- a/releasetools/intel_common.py
++++ b/releasetools/intel_common.py
+@@ -21,7 +21,7 @@ import sys
+ import subprocess
+ import shlex
+ import shutil
+-import imp
++import importlib
+ import time
+ import collections
+ import fnmatch
+@@ -39,8 +39,9 @@ _FASTBOOT = "out/host/linux-x86/bin/fastboot"
+ 
+ def load_device_mapping(path):
+     try:
+-        mod = imp.load_module("device_mapping", open(path, "U"), path,
+-                              (".py", "U", imp.PY_SOURCE))
++        spec = importlib.util.spec_from_file_location("device_mapping", path)
++        module = importlib.util.module_from_spec(spec)
++        mod = spec.loader.exec_module(module)
+     except ImportError:
+         print("Device mapping not found")
+         return None
+-- 
+2.34.1
+

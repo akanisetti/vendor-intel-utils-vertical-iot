@@ -1,0 +1,37 @@
+From 2981c1f99407af1c341d9d056a6109892d3022d9 Mon Sep 17 00:00:00 2001
+From: yaravapa <yasoda.aravapalli@intel.com>
+Date: Mon, 25 Jan 2021 09:56:05 +0530
+Subject: [PATCH] Enable path restrictions for Android 11
+
+Change-Id: I81bddabea0b7c2e30c30567f862260af4c8fb853
+Tracked-On: OAM-95316
+Signed-off-by: yaravapa <yasoda.aravapalli@intel.com>
+---
+ ui/build/paths/config.go | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/ui/build/paths/config.go b/ui/build/paths/config.go
+index 110ddee89..9164fc02f 100644
+--- a/ui/build/paths/config.go
++++ b/ui/build/paths/config.go
+@@ -109,6 +109,17 @@ var Configuration = map[string]PathConfig{
+ 	"unzip":       Allowed,
+ 	"zip":         Allowed,
+ 
++       // These tool are required to build kernel and intel propreitary modules
++       "repo":    Allowed,
++       "mkdosfs": Allowed,
++       "mcopy":   Allowed,
++       "x86_64-linux-androidkernel-as": Allowed,
++       "x86_64-linux-androidkernel-ld": Allowed,
++       "file":    Allowed,
++       "sbsign":  Allowed,
++       "perl":    Allowed,
++       "cpio":    Allowed,
++       "depmod":  Allowed,
+ 	// Host toolchain is removed. In-tree toolchain should be used instead.
+ 	// GCC also can't find cc1 with this implementation.
+ 	"ar":         Forbidden,
+-- 
+2.34.1
+

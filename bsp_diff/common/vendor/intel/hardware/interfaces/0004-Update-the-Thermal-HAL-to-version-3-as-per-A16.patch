@@ -1,0 +1,32 @@
+From 635fc4f9fadc260971c1a7479118c4cf37137630 Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Thu, 6 Mar 2025 14:40:34 +0000
+Subject: [PATCH] Update the Thermal HAL to version 3 as per A16
+
+Thermal HAL needs to be version 3 for Target level 202604.
+So updating the same.
+
+Tests Done: Build and boot
+
+Tracked-On: OAM-130714
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ thermal/aidl/default/android.hardware.thermal@aidl-intel.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/thermal/aidl/default/android.hardware.thermal@aidl-intel.xml b/thermal/aidl/default/android.hardware.thermal@aidl-intel.xml
+index 08dc68c..148ddbf 100644
+--- a/thermal/aidl/default/android.hardware.thermal@aidl-intel.xml
++++ b/thermal/aidl/default/android.hardware.thermal@aidl-intel.xml
+@@ -1,7 +1,7 @@
+ <manifest version="1.0" type="device">
+     <hal format="aidl">
+         <name>android.hardware.thermal</name>
+-        <version>2</version>
++        <version>3</version>
+         <fqname>IThermal/default</fqname>
+     </hal>
+ </manifest>
+-- 
+2.34.1
+

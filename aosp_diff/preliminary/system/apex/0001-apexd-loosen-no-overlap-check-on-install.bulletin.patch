@@ -1,0 +1,104 @@
+From b9c9fb3d71291fee7be9bd77b96f38c05dca3398 Mon Sep 17 00:00:00 2001
+From: Jooyung Han <jooyung@google.com>
+Date: Tue, 17 Jun 2025 11:21:07 +0900
+Subject: [PATCH] apexd: loosen no-overlap check on install
+
+Each staged-install session starts with "SubmitStagedSession" and ends
+with either of "MarkStagedSessionReady" or "AbortStagedSession".
+No-overlap check is to avoid new installs before the submission ends
+with either success (MarkStagedSessionReady) or failure
+(AbortStagedSession). But for some reason, we found there can be a
+session that's submitted but not finished. This in effect disables
+further installs.
+
+Until we have a proper fix for this, let's loosen the check.
+
+Bug: 424874098
+Bug: 425478146
+Test: ApexTestCases
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:e8474ce3f0a27b9781b6eaf518520941a3820111)
+Merged-In: I47f92390717eeb9d87a5a0e173e6644364a76021
+Change-Id: I47f92390717eeb9d87a5a0e173e6644364a76021
+Merging the fixes for apexd outage to security branches.
+Bug: 433787201
+---
+ apexd/apexd.cpp      |  7 -------
+ apexd/apexd_test.cpp | 23 -----------------------
+ 2 files changed, 30 deletions(-)
+
+diff --git a/apexd/apexd.cpp b/apexd/apexd.cpp
+index 9e3c915a..6e985eab 100644
+--- a/apexd/apexd.cpp
++++ b/apexd/apexd.cpp
+@@ -700,11 +700,6 @@ Result<void> VerifyPackageBoot(const ApexFile& apex_file) {
+ Result<void> VerifyNoOverlapInSessions(std::span<const ApexFile> apex_files,
+                                        std::span<const ApexSession> sessions) {
+   for (const auto& session : sessions) {
+-    // We don't want to install/stage while another session is being staged.
+-    if (session.GetState() == SessionState::VERIFIED) {
+-      return Error() << "Session " << session.GetId() << " is being staged.";
+-    }
+-
+     // We don't want to install/stage if the same package is already staged.
+     if (session.GetState() == SessionState::STAGED) {
+       for (const auto& apex : apex_files) {
+@@ -744,7 +739,6 @@ Result<VerificationResult> VerifyPackagesStagedInstall(
+   auto sessions = gSessionManager->GetSessions();
+ 
+   // Check overlapping: reject if the same package is already staged
+-  // or if there's a session being staged.
+   OR_RETURN(VerifyNoOverlapInSessions(apex_files, sessions));
+ 
+   // Since there can be multiple staged sessions, let's verify incoming APEXes
+@@ -3362,7 +3356,6 @@ Result<VerificationResult> VerifyPackageNonStagedInstall(
+   auto sessions = gSessionManager->GetSessions();
+ 
+   // Check overlapping: reject if the same package is already staged
+-  // or if there's a session being staged.
+   OR_RETURN(VerifyNoOverlapInSessions(Single(apex_file), sessions));
+ 
+   auto check_fn =
+diff --git a/apexd/apexd_test.cpp b/apexd/apexd_test.cpp
+index f0b87aa4..490c6fb7 100644
+--- a/apexd/apexd_test.cpp
++++ b/apexd/apexd_test.cpp
+@@ -5025,18 +5025,6 @@ TEST_F(SubmitStagedSessionTest,
+               HasError(WithMessage(HasSubstr("already staged"))));
+ }
+ 
+-TEST_F(SubmitStagedSessionTest, RejectStagingIfAnotherSessionIsBeingStaged) {
+-  auto session_id = 42;
+-  PrepareStagedSession("apex.apexd_test.apex", session_id);
+-  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+-
+-  // MarkStagedSessionReady is not called yet.
+-  auto session_id2 = 43;
+-  PrepareStagedSession("apex.apexd_test_different_app.apex", session_id2);
+-  ASSERT_THAT(SubmitStagedSession(session_id2, {}, false, false, -1),
+-              HasError(WithMessage(HasSubstr("being staged"))));
+-}
+-
+ TEST_F(SubmitStagedSessionTest, RejectInstallPackageForStagedPackage) {
+   auto session_id = 42;
+   PrepareStagedSession("apex.apexd_test.apex", session_id);
+@@ -5048,17 +5036,6 @@ TEST_F(SubmitStagedSessionTest, RejectInstallPackageForStagedPackage) {
+       HasError(WithMessage(HasSubstr("already staged"))));
+ }
+ 
+-TEST_F(SubmitStagedSessionTest, RejectInstallIfAnotherSessionIsBeingStaged) {
+-  auto session_id = 42;
+-  PrepareStagedSession("apex.apexd_test.apex", session_id);
+-  ASSERT_THAT(SubmitStagedSession(session_id, {}, false, false, -1), Ok());
+-
+-  // MarkStagedSessionReady is not called yet.
+-  ASSERT_THAT(InstallPackage(GetTestFile("apex.apexd_test_different_app.apex"),
+-                             /* force= */ true),
+-              HasError(WithMessage(HasSubstr("being staged"))));
+-}
+-
+ TEST_F(SubmitStagedSessionTest, AbortedSessionDoesNotBlockNewStagingOrInstall) {
+   auto session_id = 42;
+   PrepareStagedSession("apex.apexd_test.apex", session_id);
+-- 
+2.50.1.351.gcf940e82a1-goog
+

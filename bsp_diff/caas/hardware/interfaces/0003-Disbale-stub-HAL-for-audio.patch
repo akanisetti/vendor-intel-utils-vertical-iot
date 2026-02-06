@@ -1,0 +1,33 @@
+From 9971a8aef25afba36d69deae81f4e9f014d9d025 Mon Sep 17 00:00:00 2001
+From: padmashree mandri <padmashree.mandri@intel.com>
+Date: Tue, 6 Aug 2024 11:08:39 +0000
+Subject: [PATCH 3/7] Disbale stub HAL for audio
+
+Reverting back enabling of stub HAL in AOSP
+as it is not being supported yet and causing
+boot issue.
+
+Tracked-On: OAM-123104
+Signed-off-by: padmashree mandri <padmashree.mandri@intel.com>
+
+diff --git a/audio/aidl/default/android.hardware.audio.service-aidl.xml b/audio/aidl/default/android.hardware.audio.service-aidl.xml
+index ae2580dad4..7ce4f2dbc5 100644
+--- a/audio/aidl/default/android.hardware.audio.service-aidl.xml
++++ b/audio/aidl/default/android.hardware.audio.service-aidl.xml
+@@ -19,11 +19,11 @@
+     <version>3</version>
+     <fqname>IConfig/default</fqname>
+   </hal>
+-  <hal format="aidl">
++  <!--hal format="aidl">
+     <name>android.hardware.audio.core</name>
+     <version>3</version>
+     <fqname>IModule/stub</fqname>
+-  </hal>
++  </hal-->
+   <hal format="aidl">
+     <name>android.hardware.audio.core</name>
+     <version>3</version>
+-- 
+2.34.1
+

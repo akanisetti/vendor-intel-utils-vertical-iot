@@ -1,0 +1,29 @@
+From 68b4fc938e9092b90321c52ecb183f112929623b Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Tue, 27 Jan 2026 06:49:32 +0000
+Subject: [PATCH] Enable serial log for RPL-SR
+
+Update mixins.spec to enable serial for RPL-SR
+
+Tracked-On: NIACP3-1026
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ caas/mixins.spec | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/caas/mixins.spec b/caas/mixins.spec
+index 6047ac1b..73b5784c 100755
+--- a/caas/mixins.spec
++++ b/caas/mixins.spec
+@@ -44,7 +44,7 @@ debug-tools: true
+ fota: true
+ default-drm: true
+ thermal: thermal-daemon
+-serialport: ttyS4
++serialport: ttyS0
+ flashfiles: ini(fast_flashfiles=false, oemvars=false,installer=true,flash_dnx_os=false,blank_no_fw=true,version=3.0)
+ net: common
+ debug-crashlogd: true
+-- 
+2.34.1
+

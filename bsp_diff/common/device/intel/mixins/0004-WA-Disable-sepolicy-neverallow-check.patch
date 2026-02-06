@@ -1,0 +1,33 @@
+From c987d20db58bfa27a1cc152e5493b7f9778747ec Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Thu, 6 Feb 2025 09:26:50 +0000
+Subject: [PATCH 2/2] [WA] Disable sepolicy neverallow check
+
+This patch will disable the sepolicy never allow check
+to disable for time. This needs to be removed and all
+errors needs to be fixed properly.
+
+Tests Done: Build proceeds
+
+Tracked-On: NA
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ groups/device-specific/caas/caas.mk | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/groups/device-specific/caas/caas.mk b/groups/device-specific/caas/caas.mk
+index db341137..538d1eff 100644
+--- a/groups/device-specific/caas/caas.mk
++++ b/groups/device-specific/caas/caas.mk
+@@ -65,6 +65,8 @@ PRODUCT_AAPT_PREF_CONFIG := mdpi
+ PRODUCT_VENDOR_PROPERTIES += \
+     ro.soc.manufacturer=$(PRODUCT_MANUFACTURER)
+ 
++SELINUX_IGNORE_NEVERALLOWS := true
++
+ PRODUCT_RESTRICT_VENDOR_FILES := false
+ ifneq ($(TARGET_BUILD_VARIANT),user)
+ PRODUCT_SET_DEBUGFS_RESTRICTIONS := false
+-- 
+2.34.1
+

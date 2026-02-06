@@ -1,0 +1,68 @@
+From cd588cfe4757e9dc93813e225f57d8f4affb396b Mon Sep 17 00:00:00 2001
+From: Akash Garg <gargakash@google.com>
+Date: Thu, 4 Sep 2025 13:36:57 +0000
+Subject: [PATCH] Restricting UserBuild from presistent carrierConfig Override
+
+Bug: 441823943
+Flag: EXEMPT Bugfix
+Test: manually verified
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:c8123b01bc9c0a3799320342f0319e9b637a5f0d)
+Merged-In: I915b1ffa30418bdb5df553057680e44b1b18af06
+Change-Id: I915b1ffa30418bdb5df553057680e44b1b18af06
+---
+ .../android/phone/CarrierConfigLoader.java    | 25 +++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/src/com/android/phone/CarrierConfigLoader.java b/src/com/android/phone/CarrierConfigLoader.java
+index 4e499de2f..0963a6543 100644
+--- a/src/com/android/phone/CarrierConfigLoader.java
++++ b/src/com/android/phone/CarrierConfigLoader.java
+@@ -33,6 +33,7 @@ import android.content.Intent;
+ import android.content.IntentFilter;
+ import android.content.ServiceConnection;
+ import android.content.SharedPreferences;
++import android.content.pm.ApplicationInfo;
+ import android.content.pm.PackageInfo;
+ import android.content.pm.PackageManager;
+ import android.os.Binder;
+@@ -1490,6 +1491,11 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
+             overrideConfig(mOverrideConfigs, phoneId, overrides);
+ 
+             if (persistent) {
++                if (isUserBuild() && !isSystemApp()) {
++                    throw new SecurityException("overrideConfig with persistent=true only can be "
++                            + "invoked by system app");
++                }
++
+                 overrideConfig(mPersistentOverrideConfigs, phoneId, overrides);
+ 
+                 if (overrides != null) {
+@@ -1512,6 +1518,25 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
+         });
+     }
+ 
++    private boolean isSystemApp() {
++        try {
++            String callingPackage = mContext.getPackageManager().getNameForUid(
++                    Binder.getCallingUid());
++
++            ApplicationInfo appInfo = mContext.getPackageManager().getApplicationInfo(
++                    callingPackage, 0);
++            return (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0
++                    || (appInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
++        } catch (Exception e) {
++            loge("isSystemApp: failed to get application info: " + e);
++            return false;
++        }
++    }
++
++    private boolean isUserBuild() {
++        return "user".equals(android.os.Build.TYPE);
++    }
++
+     private void overrideConfig(@NonNull PersistableBundle[] currentOverrides, int phoneId,
+             @Nullable PersistableBundle overrides) {
+         if (overrides == null) {
+-- 
+2.52.0.rc1.455.g30608eb744-goog
+

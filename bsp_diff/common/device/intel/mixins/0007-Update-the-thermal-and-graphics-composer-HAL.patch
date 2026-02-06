@@ -1,0 +1,55 @@
+From d65eb9cdc6ca5f5b7f931eee0c498dcfc4a90489 Mon Sep 17 00:00:00 2001
+From: "Tekriwal, Tanuj" <tanuj.tekriwal@intel.com>
+Date: Thu, 6 Mar 2025 15:03:22 +0000
+Subject: [PATCH] Update the thermal and graphics composer HAL
+
+Target level 202604 on A16 requires below HAL versions:
+1.Graphics composer HAL to aidl 4
+2.Thermal HAL to aidl version 3
+Updating the same.
+
+Tests Done: Full signed image build and boot
+
+Tracked-On: OAM-130714
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+---
+ groups/device-specific/caas/framework_manifest.xml | 2 +-
+ groups/device-specific/caas/manifest.xml           | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/groups/device-specific/caas/framework_manifest.xml b/groups/device-specific/caas/framework_manifest.xml
+index 6b5e614c..807ad004 100644
+--- a/groups/device-specific/caas/framework_manifest.xml
++++ b/groups/device-specific/caas/framework_manifest.xml
+@@ -49,7 +49,7 @@
+     </hal-->
+     <hal format="aidl">
+         <name>android.hardware.thermal</name>
+-        <version>1</version>
++        <version>3</version>
+         <fqname>IThermal/default</fqname>
+     </hal>
+     <!--hal format="aidl">
+diff --git a/groups/device-specific/caas/manifest.xml b/groups/device-specific/caas/manifest.xml
+index 0c9dc10e..93c3f366 100644
+--- a/groups/device-specific/caas/manifest.xml
++++ b/groups/device-specific/caas/manifest.xml
+@@ -1,5 +1,5 @@
+ {{^ota-update}}
+-<manifest version="1.0" type="device" target-level="202404">
++<manifest version="1.0" type="device" target-level="202604">
+ {{/ota-update}}
+ {{#ota-update}}
+ <manifest version="1.0" type="device">
+@@ -11,7 +11,7 @@
+     </hal-->
+     <hal format="aidl">
+         <name>android.hardware.graphics.composer3</name>
+-        <version>3</version>
++        <version>4</version>
+         <interface>
+             <name>IComposer</name>
+             <instance>default</instance>
+-- 
+2.34.1
+

@@ -1,0 +1,629 @@
+From bb0c52b2e7fd73c2456a54f6f988caeec8e44e98 Mon Sep 17 00:00:00 2001
+From: Austin Delgado <austindelgado@google.com>
+Date: Tue, 25 Mar 2025 19:01:04 +0000
+Subject: [PATCH] Move BP window to Keyguard_dialog
+
+Bug: 384727394
+Test: UdfpsControllerTest
+Test: UdfpsControllerOverlayTest
+Flag: EXEMPT bugfix
+
+Change-Id: Ifce421be7997eca4323a2e0412abca5753b6b787
+(cherry picked from commit 47fd897138eb2c9ee3a25ca35970d34178226f6a)
+---
+ .../biometrics/UdfpsControllerTest.java       | 37 ++--------
+ .../biometrics/AuthContainerView.java         |  2 +-
+ .../systemui/biometrics/UdfpsController.java  | 20 ++----
+ .../biometrics/UdfpsControllerOverlay.kt      | 58 ++++-----------
+ .../PromptUdfpsTouchOverlayViewModel.kt       | 26 +++++++
+ .../biometrics/UdfpsControllerOverlayTest.kt  | 71 +++----------------
+ 6 files changed, 62 insertions(+), 152 deletions(-)
+ create mode 100644 packages/SystemUI/src/com/android/systemui/biometrics/ui/viewmodel/PromptUdfpsTouchOverlayViewModel.kt
+
+diff --git a/packages/SystemUI/multivalentTests/src/com/android/systemui/biometrics/UdfpsControllerTest.java b/packages/SystemUI/multivalentTests/src/com/android/systemui/biometrics/UdfpsControllerTest.java
+index 56c018218269..0637603f5525 100644
+--- a/packages/SystemUI/multivalentTests/src/com/android/systemui/biometrics/UdfpsControllerTest.java
++++ b/packages/SystemUI/multivalentTests/src/com/android/systemui/biometrics/UdfpsControllerTest.java
+@@ -45,8 +45,6 @@ import android.os.RemoteException;
+ import android.testing.TestableLooper.RunWithLooper;
+ import android.view.LayoutInflater;
+ import android.view.Surface;
+-import android.view.View;
+-import android.view.ViewRootImpl;
+ import android.view.WindowManager;
+ import android.view.accessibility.AccessibilityManager;
+ 
+@@ -63,13 +61,13 @@ import com.android.systemui.biometrics.shared.model.UdfpsOverlayParams;
+ import com.android.systemui.biometrics.udfps.SinglePointerTouchProcessor;
+ import com.android.systemui.biometrics.ui.viewmodel.DefaultUdfpsTouchOverlayViewModel;
+ import com.android.systemui.biometrics.ui.viewmodel.DeviceEntryUdfpsTouchOverlayViewModel;
++import com.android.systemui.biometrics.ui.viewmodel.PromptUdfpsTouchOverlayViewModel;
+ import com.android.systemui.bouncer.domain.interactor.AlternateBouncerInteractor;
+ import com.android.systemui.bouncer.domain.interactor.PrimaryBouncerInteractor;
+ import com.android.systemui.camera.CameraGestureHelper;
+ import com.android.systemui.classifier.FalsingCollector;
+ import com.android.systemui.deviceentry.domain.interactor.DeviceEntryFaceAuthInteractor;
+ import com.android.systemui.dump.DumpManager;
+-import com.android.systemui.flags.FeatureFlags;
+ import com.android.systemui.keyguard.ScreenLifecycle;
+ import com.android.systemui.keyguard.UserActivityNotifierKosmosKt;
+ import com.android.systemui.keyguard.domain.interactor.KeyguardTransitionInteractor;
+@@ -82,7 +80,6 @@ import com.android.systemui.power.domain.interactor.PowerInteractor;
+ import com.android.systemui.power.shared.model.WakeSleepReason;
+ import com.android.systemui.power.shared.model.WakefulnessState;
+ import com.android.systemui.shade.domain.interactor.ShadeInteractor;
+-import com.android.systemui.statusbar.LockscreenShadeTransitionController;
+ import com.android.systemui.statusbar.VibratorHelper;
+ import com.android.systemui.statusbar.phone.ScreenOffAnimationController;
+ import com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager;
+@@ -98,8 +95,6 @@ import com.android.systemui.util.time.SystemClock;
+ 
+ import dagger.Lazy;
+ 
+-import javax.inject.Provider;
+-
+ import kotlinx.coroutines.CoroutineScope;
+ 
+ import org.junit.Before;
+@@ -115,6 +110,8 @@ import org.mockito.junit.MockitoRule;
+ import java.util.ArrayList;
+ import java.util.List;
+ 
++import javax.inject.Provider;
++
+ @SmallTest
+ @RunWith(AndroidJUnit4.class)
+ @RunWithLooper(setAsMainLooper = true)
+@@ -151,8 +148,6 @@ public class UdfpsControllerTest extends SysuiTestCase {
+     @Mock
+     private AccessibilityManager mAccessibilityManager;
+     @Mock
+-    private LockscreenShadeTransitionController mLockscreenShadeTransitionController;
+-    @Mock
+     private ScreenLifecycle mScreenLifecycle;
+     @Mock
+     private VibratorHelper mVibrator;
+@@ -178,9 +173,6 @@ public class UdfpsControllerTest extends SysuiTestCase {
+     @Mock
+     private UdfpsDisplayMode mUdfpsDisplayMode;
+     @Mock
+-    private FeatureFlags mFeatureFlags;
+-    // Stuff for configuring mocks
+-    @Mock
+     private SystemUIDialogManager mSystemUIDialogManager;
+     @Mock
+     private ActivityTransitionAnimator mActivityTransitionAnimator;
+@@ -204,31 +196,21 @@ public class UdfpsControllerTest extends SysuiTestCase {
+     private ArgumentCaptor<IUdfpsOverlayController> mOverlayCaptor;
+     private IUdfpsOverlayController mOverlayController;
+     @Captor
+-    private ArgumentCaptor<View> mViewCaptor;
+-    @Captor
+-    private ArgumentCaptor<View.OnHoverListener> mHoverListenerCaptor;
+-    @Captor
+-    private ArgumentCaptor<Runnable> mOnDisplayConfiguredCaptor;
+-    @Captor
+     private ArgumentCaptor<ScreenLifecycle.Observer> mScreenObserverCaptor;
+-    @Captor
+-    private ArgumentCaptor<UdfpsController.UdfpsOverlayController> mUdfpsOverlayControllerCaptor;
+-    private ScreenLifecycle.Observer mScreenObserver;
+     private FingerprintSensorPropertiesInternal mOpticalProps;
+-    private FingerprintSensorPropertiesInternal mUltrasonicProps;
+     private PowerInteractor mPowerInteractor;
+     private FakePowerRepository mPowerRepository;
+     @Mock
+     private InputManager mInputManager;
+     @Mock
+-    private ViewRootImpl mViewRootImpl;
+-    @Mock
+     private KeyguardTransitionInteractor mKeyguardTransitionInteractor;
+     @Mock
+     private Lazy<DeviceEntryUdfpsTouchOverlayViewModel> mDeviceEntryUdfpsTouchOverlayViewModel;
+     @Mock
+     private Lazy<DefaultUdfpsTouchOverlayViewModel> mDefaultUdfpsTouchOverlayViewModel;
+     @Mock
++    private Lazy<PromptUdfpsTouchOverlayViewModel> mPromptUdfpsTouchOverlayViewModel;
++    @Mock
+     private Provider<CameraGestureHelper> mCameraGestureHelper;
+ 
+     @Before
+@@ -269,13 +251,6 @@ public class UdfpsControllerTest extends SysuiTestCase {
+                 FingerprintSensorProperties.TYPE_UDFPS_OPTICAL,
+                 true /* resetLockoutRequiresHardwareAuthToken */);
+ 
+-        mUltrasonicProps = new FingerprintSensorPropertiesInternal(2 /* sensorId */,
+-                SensorProperties.STRENGTH_STRONG,
+-                5 /* maxEnrollmentsPerUser */,
+-                componentInfo,
+-                FingerprintSensorProperties.TYPE_UDFPS_ULTRASONIC,
+-                true /* resetLockoutRequiresHardwareAuthToken */);
+-
+         mFgExecutor = new FakeExecutor(new FakeSystemClock());
+ 
+         // Create a fake background executor.
+@@ -327,6 +302,7 @@ public class UdfpsControllerTest extends SysuiTestCase {
+                 mKeyguardTransitionInteractor,
+                 mDeviceEntryUdfpsTouchOverlayViewModel,
+                 mDefaultUdfpsTouchOverlayViewModel,
++                mPromptUdfpsTouchOverlayViewModel,
+                 mUdfpsOverlayInteractor,
+                 mPowerInteractor,
+                 mock(CoroutineScope.class),
+@@ -335,7 +311,6 @@ public class UdfpsControllerTest extends SysuiTestCase {
+         verify(mFingerprintManager).setUdfpsOverlayController(mOverlayCaptor.capture());
+         mOverlayController = mOverlayCaptor.getValue();
+         verify(mScreenLifecycle).addObserver(mScreenObserverCaptor.capture());
+-        mScreenObserver = mScreenObserverCaptor.getValue();
+ 
+         mUdfpsController.updateOverlayParams(sensorProps, new UdfpsOverlayParams());
+         mUdfpsController.setUdfpsDisplayMode(mUdfpsDisplayMode);
+diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/AuthContainerView.java b/packages/SystemUI/src/com/android/systemui/biometrics/AuthContainerView.java
+index 7bb08edd4773..38af7e064559 100644
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/AuthContainerView.java
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/AuthContainerView.java
+@@ -741,7 +741,7 @@ public class AuthContainerView extends LinearLayout
+         final WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                 ViewGroup.LayoutParams.MATCH_PARENT,
+                 ViewGroup.LayoutParams.MATCH_PARENT,
+-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
++                WindowManager.LayoutParams.TYPE_KEYGUARD_DIALOG,
+                 windowFlags,
+                 PixelFormat.TRANSLUCENT);
+         lp.privateFlags |= WindowManager.LayoutParams.SYSTEM_FLAG_SHOW_FOR_ALL_USERS;
+diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsController.java b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsController.java
+index 9064966b25c6..7966f41f304c 100644
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsController.java
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsController.java
+@@ -83,6 +83,7 @@ import com.android.systemui.biometrics.udfps.TouchProcessor;
+ import com.android.systemui.biometrics.udfps.TouchProcessorResult;
+ import com.android.systemui.biometrics.ui.viewmodel.DefaultUdfpsTouchOverlayViewModel;
+ import com.android.systemui.biometrics.ui.viewmodel.DeviceEntryUdfpsTouchOverlayViewModel;
++import com.android.systemui.biometrics.ui.viewmodel.PromptUdfpsTouchOverlayViewModel;
+ import com.android.systemui.bouncer.domain.interactor.AlternateBouncerInteractor;
+ import com.android.systemui.bouncer.domain.interactor.PrimaryBouncerInteractor;
+ import com.android.systemui.dagger.SysUISingleton;
+@@ -178,6 +179,8 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+             mDeviceEntryUdfpsTouchOverlayViewModel;
+     @NonNull private final Lazy<DefaultUdfpsTouchOverlayViewModel>
+             mDefaultUdfpsTouchOverlayViewModel;
++    @NonNull private final Lazy<PromptUdfpsTouchOverlayViewModel>
++            mPromptUdfpsTouchOverlayViewModel;
+     @NonNull private final AlternateBouncerInteractor mAlternateBouncerInteractor;
+     @NonNull private final UdfpsOverlayInteractor mUdfpsOverlayInteractor;
+     @NonNull private final PowerInteractor mPowerInteractor;
+@@ -272,18 +275,11 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+             mUdfpsOverlayInteractor.setRequestId(requestId);
+             mFgExecutor.execute(() -> UdfpsController.this.showUdfpsOverlay(
+                     new UdfpsControllerOverlay(
+-                        mContext,
+                         mInflater,
+                         mWindowManager,
+                         mAccessibilityManager,
+-                        mStatusBarStateController,
+-                        mKeyguardViewManager,
+                         mKeyguardUpdateMonitor,
+-                        mDialogManager,
+-                        mDumpManager,
+-                        mConfigurationController,
+                         mKeyguardStateController,
+-                        mUnlockedScreenOffAnimationController,
+                         mUdfpsDisplayMode,
+                         requestId,
+                         reason,
+@@ -292,14 +288,10 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+                             requestId,
+                             event
+                         ),
+-                            mActivityTransitionAnimator,
+-                        mPrimaryBouncerInteractor,
+-                        mAlternateBouncerInteractor,
+                         mKeyguardTransitionInteractor,
+-                        mSelectedUserInteractor,
+                         mDeviceEntryUdfpsTouchOverlayViewModel,
+                         mDefaultUdfpsTouchOverlayViewModel,
+-                        mShadeInteractor,
++                        mPromptUdfpsTouchOverlayViewModel,
+                         mUdfpsOverlayInteractor,
+                         mPowerInteractor,
+                         mScope
+@@ -697,6 +689,7 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+             @NonNull KeyguardTransitionInteractor keyguardTransitionInteractor,
+             Lazy<DeviceEntryUdfpsTouchOverlayViewModel> deviceEntryUdfpsTouchOverlayViewModel,
+             Lazy<DefaultUdfpsTouchOverlayViewModel> defaultUdfpsTouchOverlayViewModel,
++            Lazy<PromptUdfpsTouchOverlayViewModel> promptUdfpsTouchOverlayViewModel,
+             @NonNull UdfpsOverlayInteractor udfpsOverlayInteractor,
+             @NonNull PowerInteractor powerInteractor,
+             @Application CoroutineScope scope,
+@@ -752,6 +745,7 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+         mSessionTracker = sessionTracker;
+         mDeviceEntryUdfpsTouchOverlayViewModel = deviceEntryUdfpsTouchOverlayViewModel;
+         mDefaultUdfpsTouchOverlayViewModel = defaultUdfpsTouchOverlayViewModel;
++        mPromptUdfpsTouchOverlayViewModel = promptUdfpsTouchOverlayViewModel;
+ 
+         mDumpManager.registerDumpable(TAG, this);
+ 
+@@ -827,7 +821,7 @@ public class UdfpsController implements DozeReceiver, Dumpable {
+                     + " isn't running on keyguard. Skip show.");
+             return;
+         }
+-        if (overlay.show(this, mOverlayParams)) {
++        if (overlay.show(mOverlayParams)) {
+             Log.d(TAG, "showUdfpsOverlay | adding window reason=" + requestReason);
+             mOnFingerDown = false;
+             mAttemptedToDismissKeyguard = false;
+diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
+index 61b670715572..1e6567ea3158 100644
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
+@@ -18,7 +18,6 @@ package com.android.systemui.biometrics
+ 
+ import android.annotation.SuppressLint
+ import android.annotation.UiThread
+-import android.content.Context
+ import android.graphics.PixelFormat
+ import android.graphics.Rect
+ import android.hardware.biometrics.BiometricRequestConstants.REASON_AUTH_BP
+@@ -27,10 +26,8 @@ import android.hardware.biometrics.BiometricRequestConstants.REASON_ENROLL_ENROL
+ import android.hardware.biometrics.BiometricRequestConstants.REASON_ENROLL_FIND_SENSOR
+ import android.hardware.biometrics.BiometricRequestConstants.RequestReason
+ import android.hardware.fingerprint.IUdfpsOverlayControllerCallback
+-import android.os.Build
+ import android.os.RemoteException
+ import android.os.Trace
+-import android.provider.Settings
+ import android.util.Log
+ import android.util.RotationUtils
+ import android.view.LayoutInflater
+@@ -40,32 +37,21 @@ import android.view.View
+ import android.view.WindowManager
+ import android.view.accessibility.AccessibilityManager
+ import android.view.accessibility.AccessibilityManager.TouchExplorationStateChangeListener
+-import androidx.annotation.VisibleForTesting
+ import com.android.app.tracing.coroutines.launchTraced as launch
+ import com.android.keyguard.KeyguardUpdateMonitor
+-import com.android.systemui.animation.ActivityTransitionAnimator
+ import com.android.systemui.biometrics.domain.interactor.UdfpsOverlayInteractor
+ import com.android.systemui.biometrics.shared.model.UdfpsOverlayParams
+ import com.android.systemui.biometrics.ui.binder.UdfpsTouchOverlayBinder
+ import com.android.systemui.biometrics.ui.view.UdfpsTouchOverlay
+ import com.android.systemui.biometrics.ui.viewmodel.DefaultUdfpsTouchOverlayViewModel
+ import com.android.systemui.biometrics.ui.viewmodel.DeviceEntryUdfpsTouchOverlayViewModel
+-import com.android.systemui.bouncer.domain.interactor.AlternateBouncerInteractor
+-import com.android.systemui.bouncer.domain.interactor.PrimaryBouncerInteractor
++import com.android.systemui.biometrics.ui.viewmodel.PromptUdfpsTouchOverlayViewModel
+ import com.android.systemui.dagger.qualifiers.Application
+-import com.android.systemui.dump.DumpManager
+ import com.android.systemui.keyguard.domain.interactor.KeyguardTransitionInteractor
+ import com.android.systemui.keyguard.shared.model.KeyguardState
+-import com.android.systemui.plugins.statusbar.StatusBarStateController
+ import com.android.systemui.power.domain.interactor.PowerInteractor
+ import com.android.systemui.res.R
+-import com.android.systemui.shade.domain.interactor.ShadeInteractor
+-import com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager
+-import com.android.systemui.statusbar.phone.SystemUIDialogManager
+-import com.android.systemui.statusbar.phone.UnlockedScreenOffAnimationController
+-import com.android.systemui.statusbar.policy.ConfigurationController
+ import com.android.systemui.statusbar.policy.KeyguardStateController
+-import com.android.systemui.user.domain.interactor.SelectedUserInteractor
+ import dagger.Lazy
+ import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.Job
+@@ -75,42 +61,27 @@ import kotlinx.coroutines.flow.map
+ 
+ private const val TAG = "UdfpsControllerOverlay"
+ 
+-@VisibleForTesting const val SETTING_REMOVE_ENROLLMENT_UI = "udfps_overlay_remove_enrollment_ui"
+-
+ /**
+  * Keeps track of the overlay state and UI resources associated with a single FingerprintService
+  * request. This state can persist across configuration changes via the [show] and [hide] methods.
+  */
+ @UiThread
+ class UdfpsControllerOverlay
+-@JvmOverloads
+ constructor(
+-    private val context: Context,
+     private val inflater: LayoutInflater,
+     private val windowManager: WindowManager,
+     private val accessibilityManager: AccessibilityManager,
+-    private val statusBarStateController: StatusBarStateController,
+-    private val statusBarKeyguardViewManager: StatusBarKeyguardViewManager,
+     private val keyguardUpdateMonitor: KeyguardUpdateMonitor,
+-    private val dialogManager: SystemUIDialogManager,
+-    private val dumpManager: DumpManager,
+-    private val configurationController: ConfigurationController,
+     private val keyguardStateController: KeyguardStateController,
+-    private val unlockedScreenOffAnimationController: UnlockedScreenOffAnimationController,
+     private var udfpsDisplayModeProvider: UdfpsDisplayModeProvider,
+     val requestId: Long,
+     @RequestReason val requestReason: Int,
+     private val controllerCallback: IUdfpsOverlayControllerCallback,
+     private val onTouch: (View, MotionEvent) -> Boolean,
+-    private val activityTransitionAnimator: ActivityTransitionAnimator,
+-    private val primaryBouncerInteractor: PrimaryBouncerInteractor,
+-    private val alternateBouncerInteractor: AlternateBouncerInteractor,
+-    private val isDebuggable: Boolean = Build.IS_DEBUGGABLE,
+-    private val transitionInteractor: KeyguardTransitionInteractor,
+-    private val selectedUserInteractor: SelectedUserInteractor,
++    transitionInteractor: KeyguardTransitionInteractor,
+     private val deviceEntryUdfpsTouchOverlayViewModel: Lazy<DeviceEntryUdfpsTouchOverlayViewModel>,
+     private val defaultUdfpsTouchOverlayViewModel: Lazy<DefaultUdfpsTouchOverlayViewModel>,
+-    private val shadeInteractor: ShadeInteractor,
++    private val promptUdfpsTouchOverlayViewModel: Lazy<PromptUdfpsTouchOverlayViewModel>,
+     private val udfpsOverlayInteractor: UdfpsOverlayInteractor,
+     private val powerInteractor: PowerInteractor,
+     @Application private val scope: CoroutineScope,
+@@ -170,20 +141,9 @@ constructor(
+ 
+     private var touchExplorationEnabled = false
+ 
+-    private fun shouldRemoveEnrollmentUi(): Boolean {
+-        if (isDebuggable) {
+-            return Settings.Global.getInt(
+-                context.contentResolver,
+-                SETTING_REMOVE_ENROLLMENT_UI,
+-                0, /* def */
+-            ) != 0
+-        }
+-        return false
+-    }
+-
+     /** Show the overlay or return false and do nothing if it is already showing. */
+     @SuppressLint("ClickableViewAccessibility")
+-    fun show(controller: UdfpsController, params: UdfpsOverlayParams): Boolean {
++    fun show(params: UdfpsOverlayParams): Boolean {
+         if (getTouchOverlay() == null) {
+             overlayParams = params
+             sensorBounds = Rect(params.sensorBounds)
+@@ -206,6 +166,12 @@ constructor(
+                                         viewModel = deviceEntryUdfpsTouchOverlayViewModel.get(),
+                                         udfpsOverlayInteractor = udfpsOverlayInteractor,
+                                     )
++                                REASON_AUTH_BP ->
++                                    UdfpsTouchOverlayBinder.bind(
++                                        view = this,
++                                        viewModel = promptUdfpsTouchOverlayViewModel.get(),
++                                        udfpsOverlayInteractor = udfpsOverlayInteractor,
++                                    )
+                                 else ->
+                                     UdfpsTouchOverlayBinder.bind(
+                                         view = this,
+@@ -340,7 +306,7 @@ constructor(
+ 
+         val rot = overlayParams.rotation
+         if (rot == Surface.ROTATION_90 || rot == Surface.ROTATION_270) {
+-            if (!shouldRotate(animation)) {
++            if (!shouldRotate()) {
+                 Log.v(
+                     TAG,
+                     "Skip rotating UDFPS bounds " +
+@@ -375,7 +341,7 @@ constructor(
+         return this
+     }
+ 
+-    private fun shouldRotate(animation: UdfpsAnimationViewController<*>?): Boolean {
++    private fun shouldRotate(): Boolean {
+         if (!keyguardStateController.isShowing) {
+             // always rotate view if we're not on the keyguard
+             return true
+diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/ui/viewmodel/PromptUdfpsTouchOverlayViewModel.kt b/packages/SystemUI/src/com/android/systemui/biometrics/ui/viewmodel/PromptUdfpsTouchOverlayViewModel.kt
+new file mode 100644
+index 000000000000..d8c659ee18a8
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/ui/viewmodel/PromptUdfpsTouchOverlayViewModel.kt
+@@ -0,0 +1,26 @@
++/*
++ * Copyright (C) 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.systemui.biometrics.ui.viewmodel
++
++import javax.inject.Inject
++import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.flow.MutableStateFlow
++
++class PromptUdfpsTouchOverlayViewModel @Inject constructor() : UdfpsTouchOverlayViewModel {
++    // Biometric Prompt should always handle touches
++    override val shouldHandleTouches: Flow<Boolean> = MutableStateFlow(true)
++}
+diff --git a/packages/SystemUI/tests/src/com/android/systemui/biometrics/UdfpsControllerOverlayTest.kt b/packages/SystemUI/tests/src/com/android/systemui/biometrics/UdfpsControllerOverlayTest.kt
+index a9e6a3ebdb30..2c12ef67034e 100644
+--- a/packages/SystemUI/tests/src/com/android/systemui/biometrics/UdfpsControllerOverlayTest.kt
++++ b/packages/SystemUI/tests/src/com/android/systemui/biometrics/UdfpsControllerOverlayTest.kt
+@@ -30,35 +30,25 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
+ import androidx.test.filters.SmallTest
+ import com.android.keyguard.KeyguardUpdateMonitor
+ import com.android.systemui.SysuiTestCase
+-import com.android.systemui.animation.ActivityTransitionAnimator
+ import com.android.systemui.biometrics.domain.interactor.UdfpsOverlayInteractor
+ import com.android.systemui.biometrics.shared.model.UdfpsOverlayParams
+ import com.android.systemui.biometrics.ui.viewmodel.DefaultUdfpsTouchOverlayViewModel
+ import com.android.systemui.biometrics.ui.viewmodel.DeviceEntryUdfpsTouchOverlayViewModel
+-import com.android.systemui.bouncer.domain.interactor.AlternateBouncerInteractor
+-import com.android.systemui.bouncer.domain.interactor.PrimaryBouncerInteractor
+-import com.android.systemui.dump.DumpManager
++import com.android.systemui.biometrics.ui.viewmodel.PromptUdfpsTouchOverlayViewModel
+ import com.android.systemui.keyguard.data.repository.FakeKeyguardTransitionRepository
+ import com.android.systemui.keyguard.data.repository.fakeKeyguardTransitionRepository
+ import com.android.systemui.keyguard.domain.interactor.KeyguardTransitionInteractor
+ import com.android.systemui.keyguard.domain.interactor.keyguardTransitionInteractor
+ import com.android.systemui.keyguard.shared.model.KeyguardState
+ import com.android.systemui.kosmos.testScope
+-import com.android.systemui.plugins.statusbar.StatusBarStateController
+ import com.android.systemui.power.data.repository.FakePowerRepository
+ import com.android.systemui.power.data.repository.fakePowerRepository
+ import com.android.systemui.power.domain.interactor.PowerInteractor
+ import com.android.systemui.power.domain.interactor.powerInteractor
+ import com.android.systemui.power.shared.model.WakeSleepReason
+ import com.android.systemui.power.shared.model.WakefulnessState
+-import com.android.systemui.shade.domain.interactor.ShadeInteractor
+-import com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager
+-import com.android.systemui.statusbar.phone.SystemUIDialogManager
+-import com.android.systemui.statusbar.phone.UnlockedScreenOffAnimationController
+-import com.android.systemui.statusbar.policy.ConfigurationController
+ import com.android.systemui.statusbar.policy.KeyguardStateController
+ import com.android.systemui.testKosmos
+-import com.android.systemui.user.domain.interactor.SelectedUserInteractor
+ import com.google.common.truth.Truth.assertThat
+ import kotlinx.coroutines.test.TestScope
+ import kotlinx.coroutines.test.runCurrent
+@@ -67,10 +57,8 @@ import org.junit.Before
+ import org.junit.Rule
+ import org.junit.Test
+ import org.junit.runner.RunWith
+-import org.mockito.ArgumentCaptor
+ import org.mockito.ArgumentMatchers.any
+ import org.mockito.ArgumentMatchers.eq
+-import org.mockito.Captor
+ import org.mockito.Mock
+ import org.mockito.Mockito.never
+ import org.mockito.Mockito.verify
+@@ -79,12 +67,6 @@ import org.mockito.junit.MockitoJUnit
+ 
+ private const val REQUEST_ID = 2L
+ 
+-// Dimensions for the current display resolution.
+-private const val DISPLAY_WIDTH = 1080
+-private const val DISPLAY_HEIGHT = 1920
+-private const val SENSOR_WIDTH = 30
+-private const val SENSOR_HEIGHT = 60
+-
+ @SmallTest
+ @RunWith(AndroidJUnit4::class)
+ @RunWithLooper(setAsMainLooper = true)
+@@ -96,30 +78,17 @@ class UdfpsControllerOverlayTest : SysuiTestCase() {
+     @Mock private lateinit var inflater: LayoutInflater
+     @Mock private lateinit var windowManager: WindowManager
+     @Mock private lateinit var accessibilityManager: AccessibilityManager
+-    @Mock private lateinit var statusBarStateController: StatusBarStateController
+-    @Mock private lateinit var statusBarKeyguardViewManager: StatusBarKeyguardViewManager
+     @Mock private lateinit var keyguardUpdateMonitor: KeyguardUpdateMonitor
+-    @Mock private lateinit var dialogManager: SystemUIDialogManager
+-    @Mock private lateinit var dumpManager: DumpManager
+-    @Mock private lateinit var configurationController: ConfigurationController
+     @Mock private lateinit var keyguardStateController: KeyguardStateController
+-    @Mock
+-    private lateinit var unlockedScreenOffAnimationController: UnlockedScreenOffAnimationController
+     @Mock private lateinit var udfpsDisplayMode: UdfpsDisplayModeProvider
+     @Mock private lateinit var controllerCallback: IUdfpsOverlayControllerCallback
+-    @Mock private lateinit var udfpsController: UdfpsController
+-    @Mock private lateinit var mActivityTransitionAnimator: ActivityTransitionAnimator
+-    @Mock private lateinit var primaryBouncerInteractor: PrimaryBouncerInteractor
+-    @Mock private lateinit var alternateBouncerInteractor: AlternateBouncerInteractor
+-    @Mock private lateinit var mSelectedUserInteractor: SelectedUserInteractor
+     @Mock
+     private lateinit var deviceEntryUdfpsTouchOverlayViewModel:
+         DeviceEntryUdfpsTouchOverlayViewModel
+     @Mock private lateinit var defaultUdfpsTouchOverlayViewModel: DefaultUdfpsTouchOverlayViewModel
++    @Mock private lateinit var promptUdfpsTouchOverlayViewModel: PromptUdfpsTouchOverlayViewModel
+     @Mock private lateinit var keyguardTransitionRepository: FakeKeyguardTransitionRepository
+     private lateinit var keyguardTransitionInteractor: KeyguardTransitionInteractor
+-    @Mock private lateinit var shadeInteractor: ShadeInteractor
+-    @Captor private lateinit var layoutParamsCaptor: ArgumentCaptor<WindowManager.LayoutParams>
+     @Mock private lateinit var udfpsOverlayInteractor: UdfpsOverlayInteractor
+     private lateinit var powerRepository: FakePowerRepository
+     private lateinit var powerInteractor: PowerInteractor
+@@ -138,48 +107,28 @@ class UdfpsControllerOverlayTest : SysuiTestCase() {
+         keyguardTransitionInteractor = kosmos.keyguardTransitionInteractor
+     }
+ 
+-    private suspend fun withReasonSuspend(
+-        @RequestReason reason: Int,
+-        isDebuggable: Boolean = false,
+-        block: suspend () -> Unit,
+-    ) {
+-        withReason(reason, isDebuggable)
++    private suspend fun withReasonSuspend(@RequestReason reason: Int, block: suspend () -> Unit) {
++        withReason(reason)
+         block()
+     }
+ 
+-    private fun withReason(
+-        @RequestReason reason: Int,
+-        isDebuggable: Boolean = false,
+-        block: () -> Unit = {},
+-    ) {
++    private fun withReason(@RequestReason reason: Int, block: () -> Unit = {}) {
+         controllerOverlay =
+             UdfpsControllerOverlay(
+-                context,
+                 inflater,
+                 windowManager,
+                 accessibilityManager,
+-                statusBarStateController,
+-                statusBarKeyguardViewManager,
+                 keyguardUpdateMonitor,
+-                dialogManager,
+-                dumpManager,
+-                configurationController,
+                 keyguardStateController,
+-                unlockedScreenOffAnimationController,
+                 udfpsDisplayMode,
+                 REQUEST_ID,
+                 reason,
+                 controllerCallback,
+                 onTouch,
+-                mActivityTransitionAnimator,
+-                primaryBouncerInteractor,
+-                alternateBouncerInteractor,
+-                isDebuggable,
+                 keyguardTransitionInteractor,
+-                mSelectedUserInteractor,
+                 { deviceEntryUdfpsTouchOverlayViewModel },
+                 { defaultUdfpsTouchOverlayViewModel },
+-                shadeInteractor,
++                { promptUdfpsTouchOverlayViewModel },
+                 udfpsOverlayInteractor,
+                 powerInteractor,
+                 testScope,
+@@ -204,7 +153,7 @@ class UdfpsControllerOverlayTest : SysuiTestCase() {
+                 runCurrent()
+ 
+                 // WHEN a request comes to show the view
+-                controllerOverlay.show(udfpsController, overlayParams)
++                controllerOverlay.show(overlayParams)
+                 runCurrent()
+ 
+                 // THEN the view does not get added immediately
+@@ -232,7 +181,7 @@ class UdfpsControllerOverlayTest : SysuiTestCase() {
+                 runCurrent()
+ 
+                 // WHEN a request comes to show the view
+-                controllerOverlay.show(udfpsController, overlayParams)
++                controllerOverlay.show(overlayParams)
+                 runCurrent()
+ 
+                 // THEN view isn't added yet
+@@ -247,7 +196,7 @@ class UdfpsControllerOverlayTest : SysuiTestCase() {
+     fun neverRemoveViewThatHasNotBeenAdded() =
+         testScope.runTest {
+             withReasonSuspend(REASON_AUTH_KEYGUARD) {
+-                controllerOverlay.show(udfpsController, overlayParams)
++                controllerOverlay.show(overlayParams)
+                 val view = controllerOverlay.getTouchOverlay()
+                 view?.let {
+                     // parent is null, signalling that the view was never added
+@@ -292,7 +241,7 @@ class UdfpsControllerOverlayTest : SysuiTestCase() {
+                 runCurrent()
+ 
+                 // WHEN a request comes to show the view
+-                controllerOverlay.show(udfpsController, overlayParams)
++                controllerOverlay.show(overlayParams)
+                 runCurrent()
+ 
+                 // THEN the view does not get added immediately
+-- 
+2.50.1.351.gcf940e82a1-goog
+

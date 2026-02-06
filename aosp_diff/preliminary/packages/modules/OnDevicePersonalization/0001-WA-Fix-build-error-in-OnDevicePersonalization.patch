@@ -1,0 +1,47 @@
+From 68e64daebe2ea37507535f6b9524a3fd47bb0031 Mon Sep 17 00:00:00 2001
+From: Salini Venate <salini.venate@intel.com>
+Date: Wed, 5 Feb 2025 10:03:44 +0000
+Subject: [PATCH] WA - Fix build error in OnDevicePersonalization
+
+Below build error was seen during A16 bring-up:
+error: patterns in switch statements are not supported in -source 17
+                case NoSuchAlgorithmException ex:
+                     ^
+  (use -source 21 or higher to enable patterns in switch statements)
+
+As a WA, to proceed with build commenting out the debug logs where
+error is seen.
+
+Tests Done: Build proceeds
+
+Tracked-On: NA
+Signed-off-by: Salini Venate <salini.venate@intel.com>
+---
+ .../federatedcompute/services/security/KeyAttestation.java    | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/federatedcompute/src/com/android/federatedcompute/services/security/KeyAttestation.java b/federatedcompute/src/com/android/federatedcompute/services/security/KeyAttestation.java
+index d4b36392..bd1644f2 100644
+--- a/federatedcompute/src/com/android/federatedcompute/services/security/KeyAttestation.java
++++ b/federatedcompute/src/com/android/federatedcompute/services/security/KeyAttestation.java
+@@ -156,7 +156,7 @@ public class KeyAttestation {
+             return records;
+         } catch (Exception e) {
+             LogUtil.e(TAG, e, "Failed to generate hybrid key attestation.");
+-            switch (e) {
++            /*switch (e) {
+                 case NoSuchAlgorithmException ex:
+                         trainingEventLogger.logEventKind(
+                                 FEDERATED_COMPUTE_TRAINING_EVENT_REPORTED__KIND__TRAIN_KEY_ATTESTATION_NO_SUCH_ALGORITHM_EXCEPTION);
+@@ -180,7 +180,7 @@ public class KeyAttestation {
+                 default:
+                         trainingEventLogger.logEventKind(
+                                 FEDERATED_COMPUTE_TRAINING_EVENT_REPORTED__KIND__TRAIN_KEY_ATTESTATION_ERROR);
+-            }
++            }*/
+             return new ArrayList<>();
+         }
+     }
+-- 
+2.34.1
+

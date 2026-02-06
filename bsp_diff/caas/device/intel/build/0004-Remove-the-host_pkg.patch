@@ -1,0 +1,49 @@
+From f9a9b192a0442e0b1ad5c9d680baaf5ee40caeac Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Wed, 21 Jan 2026 16:11:19 +0000
+Subject: [PATCH] Remove the host_pkg
+
+Tracked-On: NIACP3-1025
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/tasks/flashfiles.mk b/tasks/flashfiles.mk
+index a21e729..a32c9aa 100755
+--- a/tasks/flashfiles.mk
++++ b/tasks/flashfiles.mk
+@@ -426,7 +426,7 @@ LOCAL_TOOL:= \
+ 
+ .PHONY: flashfiles
+ ifeq ($(RELEASE_BUILD),true)
+-flashfiles: $(INTEL_FACTORY_FLASHFILES_TARGET) $(BUILT_RELEASE_FLASH_FILES_PACKAGE) $(gpt_name) publish_mkdir_dest publish_vertical host-pkg selinux_policy check-vintf-all
++flashfiles: $(INTEL_FACTORY_FLASHFILES_TARGET) $(BUILT_RELEASE_FLASH_FILES_PACKAGE) $(gpt_name) publish_mkdir_dest publish_vertical selinux_policy check-vintf-all
+ 	@$(ACP) $(BUILT_RELEASE_FLASH_FILES_PACKAGE) $(publish_dest)
+ 	@$(ACP) $(BUILT_RELEASE_TARGET_FILES_PACKAGE) $(publish_dest)
+ ifeq (,$(filter  base_aaos aaos_iasw,$(TARGET_PRODUCT)))
+@@ -434,8 +434,6 @@ ifeq (,$(filter  base_aaos aaos_iasw,$(TARGET_PRODUCT)))
+ 	$(hide) mkdir -p $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+ 	$(hide) cp -r $(PRODUCT_OUT)/*-flashfiles-*.$(fn_compress_format) $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+ 	$(hide) cp -r $(PRODUCT_OUT)/scripts $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+-	$(hide) cp -r vendor/intel/utils_vertical/host $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+-	$(hide) mv $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/host $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/patches
+ 	$(hide) cp -r $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/* $(TOP)
+ ifneq (,$(wildcard vendor/intel/utils_vertical))
+ ifneq (,$(wildcard vendor/intel/fw/keybox_provisioning))
+@@ -479,14 +477,12 @@ else
+ 	$(hide)rm -rf $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release
+ endif
+ else
+-flashfiles: $(INTEL_FACTORY_FLASHFILES_TARGET) publish_gptimage_var publish_mkdir_dest publish_vertical host-pkg selinux_policy check-vintf-all
++flashfiles: $(INTEL_FACTORY_FLASHFILES_TARGET) publish_gptimage_var publish_mkdir_dest publish_vertical selinux_policy check-vintf-all
+ ifeq (,$(filter  base_aaos aaos_iasw,$(TARGET_PRODUCT)))
+ 	@echo "Publishing Release files started"
+ 	$(hide) mkdir -p $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+ 	$(hide) cp -r $(PRODUCT_OUT)/*-flashfiles-*.$(fn_compress_format) $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+ 	$(hide) cp -r $(PRODUCT_OUT)/scripts $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+-	$(hide) cp -r vendor/intel/utils_vertical/host $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+-	$(hide) mv $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/host $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/patches
+ 	$(hide) cp -r $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/* $(TOP)
+ ifneq (,$(wildcard vendor/intel/utils_vertical))
+ ifneq (,$(wildcard vendor/intel/fw/keybox_provisioning))
+-- 
+2.34.1
+

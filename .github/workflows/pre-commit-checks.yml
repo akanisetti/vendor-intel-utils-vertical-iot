@@ -1,0 +1,93 @@
+name: Commit Message Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  commit-message-check:
+    name: Validate commit messages
+    runs-on: innersource.prod.amr.dind
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # required to read all PR commits
+
+      - name: Run commit message checks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE_REF="origin/${{ github.base_ref }}"
+          HEAD_REF="HEAD"
+
+          echo "Checking commits in range: $BASE_REF..$HEAD_REF"
+          echo
+
+          commits=$(git rev-list "$BASE_REF..$HEAD_REF")
+
+          if [ -z "$commits" ]; then
+            echo "No commits to check."
+            exit 0
+          fi
+
+          fail=0
+
+          for commit in $commits; do
+            echo "----------------------------------------"
+            echo "Commit: $commit"
+
+            # Skip merge commits (multiple parents)
+            parents=$(git show -s --format=%P "$commit")
+            if [ "$(echo "$parents" | wc -w)" -gt 1 ]; then
+              echo "Skipping merge commit, considering only dev commits"
+              continue
+            fi
+
+            title=$(git show -s --format=%s "$commit")
+            body=$(git show -s --format=%b "$commit")
+
+            # 1. Title length check (≤ 70)
+            title_len=${#title}
+            if [ "$title_len" -gt 70 ]; then
+              echo "Title: $title"
+              echo "Commit title exceeds 70 characters ($title_len)"
+              fail=1
+            fi
+
+            # 2. Required tags
+            if ! echo "$body" | grep -q "^Tracked-On:"; then
+              echo "Missing 'Tracked-On:' in commit message body"
+              fail=1
+            fi
+
+            if ! echo "$body" | grep -q "^Signed-off-by:"; then
+              echo "Missing 'Signed-off-by:' in commit message body"
+              fail=1
+            fi
+
+            # 3. Line length check (body only, ≤ 120)
+            long_lines=$(echo "$body" | awk 'length($0) > 120')
+            if [ -n "$long_lines" ]; then
+              echo "Commit message contains lines longer than 120 characters:"
+              echo "$long_lines"
+              fail=1
+            fi
+          done
+
+          echo "----------------------------------------"
+
+          if [ "$fail" -ne 0 ]; then
+            echo
+            echo "Commit message validation FAILED"
+            echo "Fix the above issues and amend your commits."
+            exit 1
+          fi
+
+          echo
+          echo "Commit message validation PASSED"

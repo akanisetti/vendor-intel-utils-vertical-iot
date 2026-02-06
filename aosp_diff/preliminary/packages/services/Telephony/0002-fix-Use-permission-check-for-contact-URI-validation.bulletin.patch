@@ -1,0 +1,106 @@
+From 76467ce5606ca15a23125e1979ada74ba843cd6a Mon Sep 17 00:00:00 2001
+From: Thomas Stuart <tjstuart@google.com>
+Date: Wed, 19 Mar 2025 21:05:03 +0000
+Subject: [PATCH] fix: Use permission check for contact URI validation
+
+Changed the validation logic in onActivityResult for contact data.
+Instead of comparing user IDs, the code now verifies if the caller
+has explicit read permission for the returned URI using
+checkContentUriPermission.
+
+This ensures proper access control based on granted permissions.
+Throws SecurityException on denial for better error reporting.
+
+Flag: EXEMPT security fix
+Bug: 337785563
+Test: manual - steps for manual test
+      1. remove sim
+      2. sign into personal/test acct
+      3. create a pin for the personal acct
+      4. create a work profile via adb cmd
+      5. add pin for work profile
+      6. add a work profile contact
+      7. open PoC app
+Change-Id: Ic5634fdc08c817a8ddac9eee7310d808782e2c08
+(cherry picked from commit 9eb57535ecb11f271ace6e138b84594474a6e244)
+---
+ .../settings/VoicemailSettingsActivity.java   | 38 ++++++++++++++-----
+ 1 file changed, 28 insertions(+), 10 deletions(-)
+
+diff --git a/src/com/android/phone/settings/VoicemailSettingsActivity.java b/src/com/android/phone/settings/VoicemailSettingsActivity.java
+index baae26b24..f5cc6de4f 100644
+--- a/src/com/android/phone/settings/VoicemailSettingsActivity.java
++++ b/src/com/android/phone/settings/VoicemailSettingsActivity.java
+@@ -16,17 +16,18 @@
+ 
+ package com.android.phone.settings;
+ 
++import android.app.ComponentCaller;
+ import android.app.Dialog;
+-import android.content.ContentProvider;
+ import android.content.DialogInterface;
+ import android.content.Intent;
++import android.content.pm.PackageManager;
+ import android.database.Cursor;
++import android.net.Uri;
+ import android.os.AsyncResult;
+ import android.os.Bundle;
+ import android.os.Handler;
+ import android.os.Message;
+ import android.os.PersistableBundle;
+-import android.os.Process;
+ import android.os.UserHandle;
+ import android.os.UserManager;
+ import android.preference.Preference;
+@@ -40,6 +41,7 @@ import android.telephony.TelephonyManager;
+ import android.text.BidiFormatter;
+ import android.text.TextDirectionHeuristics;
+ import android.text.TextUtils;
++import android.util.EventLog;
+ import android.util.Log;
+ import android.view.MenuItem;
+ import android.widget.ListAdapter;
+@@ -541,16 +543,32 @@ public class VoicemailSettingsActivity extends PreferenceActivity
+             Cursor cursor = null;
+             try {
+                 // check if the URI returned by the user belongs to the user
+-                final int currentUser = UserHandle.getUserId(Process.myUid());
+-                if (currentUser
+-                        != ContentProvider.getUserIdFromUri(data.getData(), currentUser)) {
+-
+-                    if (DBG) {
+-                        log("onActivityResult: Contact data of different user, "
+-                                + "cannot access");
+-                    }
++                ComponentCaller currentCaller = getCurrentCaller();
++                if (currentCaller == null) {
++                    Log.e(LOG_TAG,
++                            "onActivityResult: Current caller is null, cannot check permissions.");
+                     return;
+                 }
++                Uri contactUri = (data != null) ? data.getData() : null;
++                if (contactUri == null) {
++                    Log.w(LOG_TAG, "onActivityResult: Intent data or contact URI is null.");
++                    return;
++                }
++                if (currentCaller.checkContentUriPermission(
++                        contactUri,
++                        Intent.FLAG_GRANT_READ_URI_PERMISSION)
++                        == PackageManager.PERMISSION_DENIED) {
++                    EventLog.writeEvent(0x534e4554, "337785563", currentCaller.getUid(),
++                            "Permission denied, cannot access contact");
++                    throw new SecurityException(String.format(
++                            "Permission denial: Caller (uid=%d, pkg=%s) lacks specific permission"
++                                    + " grant %s to access contact URI %s.",
++                            currentCaller.getUid(),
++                            currentCaller.getPackage(),
++                            "FLAG_GRANT_READ_URI_PERMISSION",
++                            contactUri
++                    ));
++                }
+                 cursor = getContentResolver().query(data.getData(),
+                     new String[] { CommonDataKinds.Phone.NUMBER }, null, null, null);
+                 if ((cursor == null) || (!cursor.moveToFirst())) {
+-- 
+2.50.1.351.gcf940e82a1-goog
+

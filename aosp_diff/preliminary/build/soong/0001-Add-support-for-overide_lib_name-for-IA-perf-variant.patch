@@ -1,0 +1,79 @@
+From 763c386f635a208412ac7d4a092dc075276e1714 Mon Sep 17 00:00:00 2001
+From: bodapati <shalini.salomi.bodapati@intel.com>
+Date: Tue, 28 Jan 2025 13:35:58 +0000
+Subject: [PATCH] Add support for overide_lib_name for IA perf variants of a
+ library
+
+Signed-off-by: bodapati <shalini.salomi.bodapati@intel.com>
+---
+ android/module.go | 5 +++++
+ cc/cc.go          | 5 +++++
+ cc/library.go     | 6 ++++++
+ 3 files changed, 16 insertions(+)
+
+diff --git a/android/module.go b/android/module.go
+index 75b550ac8..968b442e5 100644
+--- a/android/module.go
++++ b/android/module.go
+@@ -255,6 +255,7 @@ func SortedUniqueNamedPaths(l NamedPaths) NamedPaths {
+ type nameProperties struct {
+ 	// The name of the module.  Must be unique across all modules.
+ 	Name *string
++	Override_lib_name *string
+ }
+ 
+ type commonProperties struct {
+@@ -1190,6 +1191,10 @@ func (m *ModuleBase) BaseModuleName() string {
+ 	return String(m.nameProperties.Name)
+ }
+ 
++func (m *ModuleBase) OverrideLibraryName() string {
++	return String(m.nameProperties.Override_lib_name)
++}
++
+ func (m *ModuleBase) base() *ModuleBase {
+ 	return m
+ }
+diff --git a/cc/cc.go b/cc/cc.go
+index 027992868..73fea4e40 100644
+--- a/cc/cc.go
++++ b/cc/cc.go
+@@ -650,6 +650,7 @@ type ModuleContextIntf interface {
+ 	InVendorOrProduct() bool
+ 	selectedStl() string
+ 	baseModuleName() string
++	overrideLibraryName() string
+ 	isAfdoCompile(ctx ModuleContext) bool
+ 	isOrderfileCompile() bool
+ 	isCfi() bool
+@@ -1815,6 +1816,10 @@ func (ctx *moduleContextImpl) baseModuleName() string {
+ 	return ctx.mod.BaseModuleName()
+ }
+ 
++func (ctx *moduleContextImpl) overrideLibraryName() string {
++	return ctx.mod.ModuleBase.OverrideLibraryName()
++}
++
+ func CtxIsForPlatform(ctx android.BaseModuleContext) bool {
+ 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
+ 	return apexInfo.IsForPlatform()
+diff --git a/cc/library.go b/cc/library.go
+index 950ea9134..1e766d72d 100644
+--- a/cc/library.go
++++ b/cc/library.go
+@@ -835,6 +835,12 @@ func (library *libraryDecorator) getLibNameHelper(baseModuleName string, inVendo
+ // getLibName returns the actual canonical name of the library (the name which
+ // should be passed to the linker via linker flags).
+ func (library *libraryDecorator) getLibName(ctx BaseModuleContext) string {
++
++	// If an overrideLibraryName exists => this is a proxy library
++	// We must use the overrideLibraryName
++	if ctx.overrideLibraryName() != "" {
++		library.libName = ctx.overrideLibraryName()
++	}
+ 	name := library.getLibNameHelper(ctx.baseModuleName(), ctx.inVendor(), ctx.inProduct())
+ 
+ 	if ctx.Host() && Bool(library.Properties.Unique_host_soname) {
+-- 
+2.34.1
+

@@ -1,0 +1,74 @@
+From 01e2c4c25d064dd63c87eed6e053d17c804c52f3 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Wed, 21 Jan 2026 16:06:50 +0000
+Subject: [PATCH] Remove civ, host, vm-manager repo
+
+Tracked-On: NIACP3-1025
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/groups/device-specific/caas/AndroidBoard.mk b/groups/device-specific/caas/AndroidBoard.mk
+index f54382b0..722eb178 100644
+--- a/groups/device-specific/caas/AndroidBoard.mk
++++ b/groups/device-specific/caas/AndroidBoard.mk
+@@ -12,19 +12,19 @@ LOCAL_MAKE:= \
+         PATH="$(LOCAL_CLANG_PATH):$(PWD)/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8/x86_64-linux/bin:$$PATH" \
+ 	$(PWD)/prebuilts/build-tools/linux-x86/bin/make
+ 
+-.PHONY: vinput-manager
+-vinput-manager:
+-	cd device/intel/civ/host/virtual-input-manager && $(LOCAL_MAKE)
+-	cp device/intel/civ/host/virtual-input-manager/vinput-manager $(PRODUCT_OUT)/scripts/
+-	cp device/intel/civ/host/virtual-input-manager/sendkey $(PRODUCT_OUT)/scripts/
++#.PHONY: vinput-manager
++#vinput-manager:
++#	cd device/intel/civ/host/virtual-input-manager && $(LOCAL_MAKE)
++#	cp device/intel/civ/host/virtual-input-manager/vinput-manager $(PRODUCT_OUT)/scripts/
++#	cp device/intel/civ/host/virtual-input-manager/sendkey $(PRODUCT_OUT)/scripts/
+ 
+-.PHONY: em-host-utilities
+-em-host-utilities:
+-	mkdir -p $(PRODUCT_OUT)/scripts/
+-	cd device/intel/civ/host/backend/battery/vm_battery_utility && $(LOCAL_MAKE)
+-	cp device/intel/civ/host/backend/battery/vm_battery_utility/batsys $(PRODUCT_OUT)/scripts/
+-	cd device/intel/civ/host/backend/thermal/vm_thermal_utility && $(LOCAL_MAKE)
+-	cp device/intel/civ/host/backend/thermal/vm_thermal_utility/thermsys $(PRODUCT_OUT)/scripts/
++#.PHONY: em-host-utilities
++#em-host-utilities:
++#	mkdir -p $(PRODUCT_OUT)/scripts/
++#	cd device/intel/civ/host/backend/battery/vm_battery_utility && $(LOCAL_MAKE)
++#	cp device/intel/civ/host/backend/battery/vm_battery_utility/batsys $(PRODUCT_OUT)/scripts/
++#	cd device/intel/civ/host/backend/thermal/vm_thermal_utility && $(LOCAL_MAKE)
++#	cp device/intel/civ/host/backend/thermal/vm_thermal_utility/thermsys $(PRODUCT_OUT)/scripts/
+ 
+-.PHONY: host-pkg
+-host-pkg: em-host-utilities vinput-manager
++#.PHONY: host-pkg
++#host-pkg: em-host-utilities vinput-manager
+diff --git a/groups/device-specific/caas/BoardConfig.mk b/groups/device-specific/caas/BoardConfig.mk
+index 3a9aed2c..70d19616 100644
+--- a/groups/device-specific/caas/BoardConfig.mk
++++ b/groups/device-specific/caas/BoardConfig.mk
+@@ -28,7 +28,7 @@ BOARD_FLASHFILES += $(PRODUCT_OUT)/scripts/guest_pm_control
+ BOARD_FLASHFILES += $(PRODUCT_OUT)/scripts/intel-thermal-conf.xml
+ BOARD_FLASHFILES += $(PRODUCT_OUT)/scripts/thermald.service
+ BOARD_FLASHFILES += $(PRODUCT_OUT)/scripts/rpmb_dev
+-BOARD_FLASHFILES += $(PRODUCT_OUT)/scripts/vm-manager.deb
++#BOARD_FLASHFILES += $(PRODUCT_OUT)/scripts/vm-manager.deb
+ 
+ # for USB OTG WA
+ BOARD_SEPOLICY_DIRS += $(INTEL_PATH_SEPOLICY)/bxt_usb
+diff --git a/groups/device-specific/caas/product.mk b/groups/device-specific/caas/product.mk
+index 1868f695..e1ab404f 100755
+--- a/groups/device-specific/caas/product.mk
++++ b/groups/device-specific/caas/product.mk
+@@ -66,6 +66,6 @@ PRODUCT_COPY_FILES += device/intel/common/host_scripts/guest_time_keeping.sh:$(P
+ PRODUCT_COPY_FILES += device/intel/common/host_scripts/start_flash_usb.sh:$(PRODUCT_OUT)/scripts/start_flash_usb.sh
+ PRODUCT_COPY_FILES += vendor/intel/fw/trusty-release-binaries/rpmb_dev:$(PRODUCT_OUT)/scripts/rpmb_dev
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/wakeup.py:$(PRODUCT_OUT)/scripts/wakeup.py
+-PRODUCT_COPY_FILES += device/intel/civ/host/vm-manager-binaries/vm-manager.deb:$(PRODUCT_OUT)/scripts/vm-manager.deb
++#PRODUCT_COPY_FILES += device/intel/civ/host/vm-manager-binaries/vm-manager.deb:$(PRODUCT_OUT)/scripts/vm-manager.deb
+ 
+ PRODUCT_VENDOR_PROPERTIES += media.c2.hal.selection=aidl
+-- 
+2.34.1
+

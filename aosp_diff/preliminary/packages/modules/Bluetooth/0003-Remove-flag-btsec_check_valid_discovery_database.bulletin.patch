@@ -1,0 +1,86 @@
+From 6649ae8e46295770fc7612f49e00e8fdf23893fb Mon Sep 17 00:00:00 2001
+From: Brian Delwiche <delwiche@google.com>
+Date: Tue, 6 May 2025 18:12:30 +0000
+Subject: [PATCH] Remove flag btsec_check_valid_discovery_database
+
+This flag has passed the required soak and can be removed.
+
+This needs to be cherry-picked to 25Q2-staging as the flag was present when that branch was cut.
+
+Bug: 356201480
+Test: m libbluetooth
+Flag: EXEMPT flag removal
+Change-Id: Ib866bb355b11b160ec0667fbaf4020a6c1ec803b
+---
+ flags/security.aconfig                     | 10 ----------
+ system/bta/hf_client/bta_hf_client_main.cc |  3 +--
+ system/bta/hf_client/bta_hf_client_sdp.cc  |  3 +--
+ system/stack/sdp/sdp_discovery.cc          |  3 +--
+ 4 files changed, 3 insertions(+), 16 deletions(-)
+
+diff --git a/flags/security.aconfig b/flags/security.aconfig
+index 8d5a8c1f31..5d1f2dbc68 100644
+--- a/flags/security.aconfig
++++ b/flags/security.aconfig
+@@ -18,16 +18,6 @@ flag {
+     bug: "333634398"
+ }
+ 
+-flag {
+-  name: "btsec_check_valid_discovery_database"
+-  namespace: "bluetooth"
+-  description: "Check for a valid discovery database before using it, and don't set up a discovery database for a new HF client if one has already been defined for it"
+-  bug: "356201480"
+-  metadata {
+-    purpose: PURPOSE_BUGFIX
+-  }
+-}
+-
+ flag {
+   name: "le_enc_on_reconnect"
+   namespace: "bluetooth"
+diff --git a/system/bta/hf_client/bta_hf_client_main.cc b/system/bta/hf_client/bta_hf_client_main.cc
+index 526bf65956..56896a5cde 100644
+--- a/system/bta/hf_client/bta_hf_client_main.cc
++++ b/system/bta/hf_client/bta_hf_client_main.cc
+@@ -283,8 +283,7 @@ void bta_hf_client_cb_init(tBTA_HF_CLIENT_CB* client_cb, uint16_t handle) {
+   client_cb->enabled_hf_indicators.clear();
+   client_cb->peer_hf_indicators.clear();
+ 
+-  if (client_cb->p_disc_db &&
+-      com::android::bluetooth::flags::btsec_check_valid_discovery_database()) {
++  if (client_cb->p_disc_db) {
+     if (!get_legacy_stack_sdp_api()->service.SDP_CancelServiceSearch(client_cb->p_disc_db)) {
+       log::warn("Unable to cancel SDP service discovery peer:{}", client_cb->peer_addr);
+     }
+diff --git a/system/bta/hf_client/bta_hf_client_sdp.cc b/system/bta/hf_client/bta_hf_client_sdp.cc
+index c7b5ce7ceb..002e5f8d90 100644
+--- a/system/bta/hf_client/bta_hf_client_sdp.cc
++++ b/system/bta/hf_client/bta_hf_client_sdp.cc
+@@ -361,8 +361,7 @@ void bta_hf_client_do_disc(tBTA_HF_CLIENT_CB* client_cb) {
+   /* If we already have a non-null discovery database at this point, we can get
+    * into a race condition leading to UAF once this connection is closed.
+    * This should only happen with malicious modifications to a client. */
+-  if (com::android::bluetooth::flags::btsec_check_valid_discovery_database() &&
+-      client_cb->p_disc_db != NULL) {
++  if (client_cb->p_disc_db != NULL) {
+     log::error("Tried to set up a HF client with a preexisting discovery database.");
+     client_cb->p_disc_db = NULL;
+     // We manually set the state here because it's possible to call this from an
+diff --git a/system/stack/sdp/sdp_discovery.cc b/system/stack/sdp/sdp_discovery.cc
+index 67f6cba15f..c2ed37f3cf 100644
+--- a/system/stack/sdp/sdp_discovery.cc
++++ b/system/stack/sdp/sdp_discovery.cc
+@@ -643,8 +643,7 @@ static void process_service_search_attr_rsp(tCONN_CB* p_ccb, uint8_t* p_reply,
+     uint16_t bytes_left = SDP_DATA_BUF_SIZE;
+ 
+     /* If we don't have a valid discovery database, we can't do anything. */
+-    if (com::android::bluetooth::flags::btsec_check_valid_discovery_database() &&
+-        p_ccb->p_db == NULL) {
++    if (p_ccb->p_db == NULL) {
+       log::warn(
+               "Attempted continuation or first time request with invalid discovery "
+               "database");
+-- 
+2.51.0.362.g3baa7cb742-goog
+

@@ -1,0 +1,33 @@
+From 56a2dda44bc9f4310316f2559284b2dbcd334298 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Wed, 7 Jan 2026 07:13:55 +0000
+Subject: [PATCH] Update the path to utils_vertical folder
+
+Tracked-On: NA
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/tasks/flashfiles.mk b/tasks/flashfiles.mk
+index 0721420..68ec181 100755
+--- a/tasks/flashfiles.mk
++++ b/tasks/flashfiles.mk
+@@ -359,7 +359,7 @@ ifeq (,$(filter  base_aaos aaos_iasw,$(TARGET_PRODUCT)))
+ 	$(hide) mkdir -p $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+ 	$(hide) cp -r $(PRODUCT_OUT)/*-flashfiles-*.$(fn_compress_format) $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+ 	$(hide) cp -r $(PRODUCT_OUT)/scripts $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+-	$(hide) cp -r vendor/intel/utils/host $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
++	$(hide) cp -r vendor/intel/utils_vertical/host $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+ 	$(hide) mv $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/host $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/patches
+ 	$(hide) cp -r $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/* $(TOP)
+ ifneq (,$(wildcard vendor/intel/utils_vertical))
+@@ -410,7 +410,7 @@ ifeq (,$(filter  base_aaos aaos_iasw,$(TARGET_PRODUCT)))
+ 	$(hide) mkdir -p $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+ 	$(hide) cp -r $(PRODUCT_OUT)/*-flashfiles-*.$(fn_compress_format) $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+ 	$(hide) cp -r $(PRODUCT_OUT)/scripts $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+-	$(hide) cp -r vendor/intel/utils/host $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
++	$(hide) cp -r vendor/intel/utils_vertical/host $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+ 	$(hide) mv $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/host $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/patches
+ 	$(hide) cp -r $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/* $(TOP)
+ ifneq (,$(wildcard vendor/intel/utils_vertical))
+-- 
+2.34.1
+
