@@ -49,11 +49,13 @@ Contains BSP (Board Support Package) patches organized by platform:
 
 ## Complete Repository Tree
 
-For a complete visualization of all files and directories in this repository, see [TREE.md](TREE.md).
+For a complete visualization of all files and directories in this repository, refer to [TREE.md](TREE.md).
 
-The tree includes:
+As of the last update, the tree includes:
 - 180 directories
 - 385 files
+
+Note: These numbers represent a snapshot and may change as the repository evolves.
 
 ## Usage
 
@@ -82,8 +84,8 @@ Patches are organized by:
 2. **Platform**: Common, CAAS, AAOS
 3. **Component**: Framework, hardware, packages, etc.
 
-Each patch file follows the naming convention:
-- `NNNN-<description>.patch` where NNNN is a sequence number
+Patch files typically follow a naming convention with a sequence number prefix and description:
+- `NNNN-<description>.patch` where NNNN is a sequence number (e.g., 0001, 0002, etc.)
 
 ## License
 
