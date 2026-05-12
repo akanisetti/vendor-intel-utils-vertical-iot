@@ -1,0 +1,220 @@
+From 2b8bc2b15f2aceb4e2a379209997afce16427e76 Mon Sep 17 00:00:00 2001
+From: Shawn Lin <shawnlin@google.com>
+Date: Wed, 15 Oct 2025 12:18:38 +0000
+Subject: [PATCH] Fixed "Unlock your phone" unexpectedlly turned ON after OTA
+
+If the new setting key is not set, we should use the value of the old
+ones as the default value.
+
+Bug: 444673089
+Test: atest BiometricServiceTest
+Flag: EXEMPT BUGFIX
+Change-Id: I902c7fd9781037ba05b30821b4fa22aa1509f3fd
+(cherry picked from commit a3799e443e9fdbbcbc96824b8d2fc1e4c683bb7e)
+---
+ .../server/biometrics/BiometricService.java   | 45 ++++++++-
+ .../biometrics/BiometricServiceTest.java      | 91 +++++++++++++++++++
+ 2 files changed, 132 insertions(+), 4 deletions(-)
+
+diff --git a/services/core/java/com/android/server/biometrics/BiometricService.java b/services/core/java/com/android/server/biometrics/BiometricService.java
+index cf5fa9699ca9..7485929147e5 100644
+--- a/services/core/java/com/android/server/biometrics/BiometricService.java
++++ b/services/core/java/com/android/server/biometrics/BiometricService.java
+@@ -412,20 +412,39 @@ public class BiometricService extends SystemService {
+                     notifyEnabledOnKeyguardCallbacks(userId, TYPE_ANY_BIOMETRIC);
+                 }
+             } else if (FACE_KEYGUARD_ENABLED.equals(uri)) {
++                final int biometricKeyguardEnabled = Settings.Secure.getIntForUser(
++                        mContentResolver,
++                        Settings.Secure.BIOMETRIC_KEYGUARD_ENABLED,
++                        -1 /* default */,
++                        userId);
++                // For OTA case: if FACE_KEYGUARD_ENABLED is not set and BIOMETRIC_APP_ENABLED is
++                // set, set the default value of the former to that of the latter.
++                final boolean defaultValue = biometricKeyguardEnabled == -1
++                        ? DEFAULT_KEYGUARD_ENABLED : biometricKeyguardEnabled == 1;
+                 mFaceEnabledOnKeyguard.put(userId, Settings.Secure.getIntForUser(
+                         mContentResolver,
+                         Settings.Secure.FACE_KEYGUARD_ENABLED,
+-                        DEFAULT_KEYGUARD_ENABLED ? 1 : 0 /* default */,
++                        defaultValue ? 1 : 0 /* default */,
+                         userId) != 0);
+ 
+                 if (userId == ActivityManager.getCurrentUser() && !selfChange) {
+                     notifyEnabledOnKeyguardCallbacks(userId, TYPE_FACE);
+                 }
+             }  else if (FINGERPRINT_KEYGUARD_ENABLED.equals(uri)) {
++                final int biometricKeyguardEnabled = Settings.Secure.getIntForUser(
++                        mContentResolver,
++                        Settings.Secure.BIOMETRIC_KEYGUARD_ENABLED,
++                        -1 /* default */,
++                        userId);
++                // For OTA case: if FINGERPRINT_KEYGUARD_ENABLED is not set and
++                // BIOMETRIC_APP_ENABLED is set, set the default value of the former to that of the
++                // latter.
++                final boolean defaultValue = biometricKeyguardEnabled == -1
++                        ? DEFAULT_KEYGUARD_ENABLED : biometricKeyguardEnabled == 1;
+                 mFingerprintEnabledOnKeyguard.put(userId, Settings.Secure.getIntForUser(
+                         mContentResolver,
+                         Settings.Secure.FINGERPRINT_KEYGUARD_ENABLED,
+-                        DEFAULT_KEYGUARD_ENABLED ? 1 : 0 /* default */,
++                        defaultValue ? 1 : 0 /* default */,
+                         userId) != 0);
+ 
+                 if (userId == ActivityManager.getCurrentUser() && !selfChange) {
+@@ -438,16 +457,34 @@ public class BiometricService extends SystemService {
+                         DEFAULT_APP_ENABLED ? 1 : 0 /* default */,
+                         userId) != 0);
+             } else if (FACE_APP_ENABLED.equals(uri)) {
++                final int biometricAppEnabled = Settings.Secure.getIntForUser(
++                        mContentResolver,
++                        Settings.Secure.BIOMETRIC_APP_ENABLED,
++                        -1 /* default */,
++                        userId);
++                // For OTA case: if FACE_APP_ENABLED is not set and BIOMETRIC_APP_ENABLED is set,
++                // set the default value of the former to that of the latter.
++                final boolean defaultValue = biometricAppEnabled == -1
++                        ? DEFAULT_APP_ENABLED : biometricAppEnabled == 1;
+                 mFaceEnabledForApps.put(userId, Settings.Secure.getIntForUser(
+                         mContentResolver,
+                         Settings.Secure.FACE_APP_ENABLED,
+-                        DEFAULT_APP_ENABLED ? 1 : 0 /* default */,
++                        defaultValue ? 1 : 0 /* default */,
+                         userId) != 0);
+             } else if (FINGERPRINT_APP_ENABLED.equals(uri)) {
++                final int biometricAppEnabled = Settings.Secure.getIntForUser(
++                        mContentResolver,
++                        Settings.Secure.BIOMETRIC_APP_ENABLED,
++                        -1 /* default */,
++                        userId);
++                // For OTA case: if FINGERPRINT_APP_ENABLED is not set and BIOMETRIC_APP_ENABLED is
++                // set, set the default value of the former to that of the latter.
++                final boolean defaultValue = biometricAppEnabled == -1
++                        ? DEFAULT_APP_ENABLED : biometricAppEnabled == 1;
+                 mFingerprintEnabledForApps.put(userId, Settings.Secure.getIntForUser(
+                         mContentResolver,
+                         Settings.Secure.FINGERPRINT_APP_ENABLED,
+-                        DEFAULT_APP_ENABLED ? 1 : 0 /* default */,
++                        defaultValue ? 1 : 0 /* default */,
+                         userId) != 0);
+             } else if (MANDATORY_BIOMETRICS_ENABLED.equals(uri)) {
+                 updateMandatoryBiometricsForAllProfiles(userId);
+diff --git a/services/tests/servicestests/src/com/android/server/biometrics/BiometricServiceTest.java b/services/tests/servicestests/src/com/android/server/biometrics/BiometricServiceTest.java
+index 9918a9a35c33..3061bab24518 100644
+--- a/services/tests/servicestests/src/com/android/server/biometrics/BiometricServiceTest.java
++++ b/services/tests/servicestests/src/com/android/server/biometrics/BiometricServiceTest.java
+@@ -21,6 +21,12 @@ import static android.hardware.biometrics.BiometricAuthenticator.TYPE_CREDENTIAL
+ import static android.hardware.biometrics.BiometricAuthenticator.TYPE_FACE;
+ import static android.hardware.biometrics.BiometricAuthenticator.TYPE_FINGERPRINT;
+ import static android.hardware.biometrics.BiometricManager.Authenticators;
++import static android.provider.Settings.Secure.BIOMETRIC_APP_ENABLED;
++import static android.provider.Settings.Secure.BIOMETRIC_KEYGUARD_ENABLED;
++import static android.provider.Settings.Secure.FACE_APP_ENABLED;
++import static android.provider.Settings.Secure.FACE_KEYGUARD_ENABLED;
++import static android.provider.Settings.Secure.FINGERPRINT_APP_ENABLED;
++import static android.provider.Settings.Secure.FINGERPRINT_KEYGUARD_ENABLED;
+ import static android.view.DisplayAdjustments.DEFAULT_DISPLAY_ADJUSTMENTS;
+ 
+ import static com.android.server.biometrics.BiometricServiceStateProto.STATE_AUTHENTICATED_PENDING_SYSUI;
+@@ -40,6 +46,7 @@ import static junit.framework.TestCase.assertNotNull;
+ 
+ import static org.junit.Assert.assertNotEquals;
+ import static org.junit.Assert.assertNull;
++import static org.junit.Assume.assumeTrue;
+ import static org.mockito.ArgumentMatchers.any;
+ import static org.mockito.ArgumentMatchers.anyBoolean;
+ import static org.mockito.ArgumentMatchers.anyInt;
+@@ -2147,6 +2154,90 @@ public class BiometricServiceTest {
+                 invokeCanAuthenticate(mBiometricService, Authenticators.BIOMETRIC_STRONG));
+     }
+ 
++    @Test
++    @RequiresFlagsEnabled(com.android.settings.flags.Flags.FLAG_BIOMETRICS_ONBOARDING_EDUCATION)
++    public void
++            testEnabledForApps_biometricAppEnableOff_fpAppEnabledNotSet_returnFalse()
++            throws Exception {
++        final Context context = ApplicationProvider.getApplicationContext();
++        final int value = Settings.Secure.getIntForUser(context.getContentResolver(),
++                FINGERPRINT_APP_ENABLED, -1, context.getUserId());
++        assumeTrue("FINGERPRINT_APP_ENABLED is set. Skipped", value == -1);
++
++        Settings.Secure.putIntForUser(context.getContentResolver(),
++                BIOMETRIC_APP_ENABLED, 0, context.getUserId());
++
++        final BiometricService.SettingObserver settingObserver =
++                new BiometricService.SettingObserver(
++                        context, mBiometricHandlerProvider.getBiometricCallbackHandler(),
++                        new ArrayList<>(), mUserManager, mFingerprintManager, mFaceManager);
++
++        assertFalse(settingObserver.getEnabledForApps(context.getUserId(), TYPE_FINGERPRINT));
++    }
++
++    @Test
++    @RequiresFlagsEnabled(com.android.settings.flags.Flags.FLAG_BIOMETRICS_ONBOARDING_EDUCATION)
++    public void
++            testKeyguardEnabled_biometricKeyguardEnableOff_fpKeyguardEnabledNotSet_returnFalse()
++            throws Exception {
++        final Context context = ApplicationProvider.getApplicationContext();
++        final int value = Settings.Secure.getIntForUser(context.getContentResolver(),
++                FINGERPRINT_KEYGUARD_ENABLED, -1, context.getUserId());
++        assumeTrue("FINGERPRINT_KEYGUARD_ENABLED is set. Skipped", value == -1);
++
++        Settings.Secure.putIntForUser(context.getContentResolver(),
++                BIOMETRIC_KEYGUARD_ENABLED, 0, context.getUserId());
++
++        final BiometricService.SettingObserver settingObserver =
++                new BiometricService.SettingObserver(
++                        context, mBiometricHandlerProvider.getBiometricCallbackHandler(),
++                        new ArrayList<>(), mUserManager, mFingerprintManager, mFaceManager);
++
++        assertFalse(settingObserver.getEnabledOnKeyguard(context.getUserId(), TYPE_FINGERPRINT));
++    }
++
++    @Test
++    @RequiresFlagsEnabled(com.android.settings.flags.Flags.FLAG_BIOMETRICS_ONBOARDING_EDUCATION)
++    public void
++            testEnabledForApps_biometricAppEnableOff_faceAppEnabledNotSet_returnFalse()
++            throws Exception {
++        final Context context = ApplicationProvider.getApplicationContext();
++        final int value = Settings.Secure.getIntForUser(context.getContentResolver(),
++                FACE_APP_ENABLED, -1, context.getUserId());
++        assumeTrue("FACE_APP_ENABLED is set. Skipped", value == -1);
++
++        Settings.Secure.putIntForUser(context.getContentResolver(),
++                BIOMETRIC_APP_ENABLED, 0, context.getUserId());
++
++        final BiometricService.SettingObserver settingObserver =
++                new BiometricService.SettingObserver(
++                        context, mBiometricHandlerProvider.getBiometricCallbackHandler(),
++                        new ArrayList<>(), mUserManager, mFingerprintManager, mFaceManager);
++
++        assertFalse(settingObserver.getEnabledForApps(context.getUserId(), TYPE_FACE));
++    }
++
++    @Test
++    @RequiresFlagsEnabled(com.android.settings.flags.Flags.FLAG_BIOMETRICS_ONBOARDING_EDUCATION)
++    public void
++            testKeyguardEnabled_biometricKeyguardEnableOff_faceKeyguardEnabledNotSet_returnFalse()
++            throws Exception {
++        final Context context = ApplicationProvider.getApplicationContext();
++        final int value = Settings.Secure.getIntForUser(context.getContentResolver(),
++                FACE_KEYGUARD_ENABLED, -1, context.getUserId());
++        assumeTrue("FACE_KEYGUARD_ENABLED is set. Skipped", value == -1);
++
++        Settings.Secure.putIntForUser(context.getContentResolver(),
++                BIOMETRIC_KEYGUARD_ENABLED, 0, context.getUserId());
++
++        final BiometricService.SettingObserver settingObserver =
++                new BiometricService.SettingObserver(
++                        context, mBiometricHandlerProvider.getBiometricCallbackHandler(),
++                        new ArrayList<>(), mUserManager, mFingerprintManager, mFaceManager);
++
++        assertFalse(settingObserver.getEnabledOnKeyguard(context.getUserId(), TYPE_FACE));
++    }
++
+     // Helper methods
+ 
+     private int invokeCanAuthenticate(BiometricService service, int authenticators)
+-- 
+2.53.0.335.g19a08e0c02-goog
+

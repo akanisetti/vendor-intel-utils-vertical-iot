@@ -1,0 +1,147 @@
+From 4956ad4a8936f1d090958daf4c1a4c7ef1abc097 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Mon, 20 Apr 2026 09:07:59 +0000
+Subject: [PATCH] Register location_control service
+
+- Add location_control_service type in service.te
+- Map location_control service to dedicated SELinux label in
+  service_contexts
+- Grant system_app and platform_app find permission on
+  location_control_service
+- Update compat CIL files (202404, 34.0) with new service type
+- Sync prebuilt API snapshot (202504) with updated service.te
+
+This ensures framework-side location control service is properly labeled
+and accessible only to authorized system components, maintaining
+security
+boundaries while enabling location configuration from privileged apps.
+
+Tracked-On: NIACP3-1182
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ build/soong/service_fuzzer_bindings.go       | 1 +
+ prebuilts/api/202504/private/platform_app.te | 1 +
+ prebuilts/api/202504/public/service.te       | 1 +
+ private/compat/202404/202404.ignore.cil      | 1 +
+ private/compat/34.0/34.0.ignore.cil          | 1 +
+ private/platform_app.te                      | 1 +
+ private/service_contexts                     | 1 +
+ private/system_app.te                        | 2 ++
+ public/service.te                            | 1 +
+ 9 files changed, 10 insertions(+)
+
+diff --git a/build/soong/service_fuzzer_bindings.go b/build/soong/service_fuzzer_bindings.go
+index 6f25ee633..cf6fa795d 100644
+--- a/build/soong/service_fuzzer_bindings.go
++++ b/build/soong/service_fuzzer_bindings.go
+@@ -337,6 +337,7 @@ var (
+ 		"lights":                                 EXCEPTION_NO_FUZZER,
+ 		"locale":                                 EXCEPTION_NO_FUZZER,
+ 		"location":                               EXCEPTION_NO_FUZZER,
++		"location_control":                       EXCEPTION_NO_FUZZER,
+ 		"location_time_zone_manager":             EXCEPTION_NO_FUZZER,
+ 		"lock_settings":                          EXCEPTION_NO_FUZZER,
+ 		"logcat":                                 EXCEPTION_NO_FUZZER,
+diff --git a/prebuilts/api/202504/private/platform_app.te b/prebuilts/api/202504/private/platform_app.te
+index 38339dad6..a095d67c5 100644
+--- a/prebuilts/api/202504/private/platform_app.te
++++ b/prebuilts/api/202504/private/platform_app.te
+@@ -100,6 +100,7 @@ allow platform_app system_api_service:service_manager find;
+ allow platform_app vr_manager_service:service_manager find;
+ allow platform_app stats_service:service_manager find;
+ allow platform_app tradeinmode_service:service_manager find;
++allow platform_app location_control_service:service_manager find;
+ 
+ # Allow platform apps to log via statsd.
+ binder_call(platform_app, statsd)
+diff --git a/prebuilts/api/202504/public/service.te b/prebuilts/api/202504/public/service.te
+index 2d7cedfa2..bfd6c2e4f 100644
+--- a/prebuilts/api/202504/public/service.te
++++ b/prebuilts/api/202504/public/service.te
+@@ -172,6 +172,7 @@ type launcherapps_service, app_api_service, ephemeral_app_api_service, system_se
+ type legacy_permission_service, app_api_service, ephemeral_app_api_service, system_server_service, service_manager_type;
+ type light_service, app_api_service, ephemeral_app_api_service, system_server_service, service_manager_type;
+ type locale_service, app_api_service, ephemeral_app_api_service, system_server_service, service_manager_type;
++type location_control_service, system_server_service, service_manager_type;
+ type location_service, app_api_service, ephemeral_app_api_service, system_server_service, service_manager_type;
+ type location_time_zone_manager_service, system_server_service, service_manager_type;
+ type lock_settings_service, app_api_service, system_api_service, system_server_service, service_manager_type;
+diff --git a/private/compat/202404/202404.ignore.cil b/private/compat/202404/202404.ignore.cil
+index 69e7d5e8b..5b2aef531 100644
+--- a/private/compat/202404/202404.ignore.cil
++++ b/private/compat/202404/202404.ignore.cil
+@@ -41,4 +41,5 @@
+     virtualizationmanager_exec
+     wifi_mainline_supplicant_service
+     wifi_usd_service
++    location_control_service
+   ))
+diff --git a/private/compat/34.0/34.0.ignore.cil b/private/compat/34.0/34.0.ignore.cil
+index 3f5cb6878..b2904cd7d 100644
+--- a/private/compat/34.0/34.0.ignore.cil
++++ b/private/compat/34.0/34.0.ignore.cil
+@@ -54,4 +54,5 @@
+     enable_16k_pages_prop
+     proc_cgroups
+     media_quality_service
++    location_control_service
+   ))
+diff --git a/private/platform_app.te b/private/platform_app.te
+index 38339dad6..a095d67c5 100644
+--- a/private/platform_app.te
++++ b/private/platform_app.te
+@@ -100,6 +100,7 @@ allow platform_app system_api_service:service_manager find;
+ allow platform_app vr_manager_service:service_manager find;
+ allow platform_app stats_service:service_manager find;
+ allow platform_app tradeinmode_service:service_manager find;
++allow platform_app location_control_service:service_manager find;
+ 
+ # Allow platform apps to log via statsd.
+ binder_call(platform_app, statsd)
+diff --git a/private/service_contexts b/private/service_contexts
+index 67c84d5de..32fa8601a 100644
+--- a/private/service_contexts
++++ b/private/service_contexts
+@@ -323,6 +323,7 @@ legacy_permission                         u:object_r:legacy_permission_service:s
+ lights                                    u:object_r:light_service:s0
+ locale                                    u:object_r:locale_service:s0
+ location                                  u:object_r:location_service:s0
++location_control                          u:object_r:location_control_service:s0
+ location_time_zone_manager                u:object_r:location_time_zone_manager_service:s0
+ lock_settings                             u:object_r:lock_settings_service:s0
+ logcat                                    u:object_r:logcat_service:s0
+diff --git a/private/system_app.te b/private/system_app.te
+index 06d49e961..4e0aa8572 100644
+--- a/private/system_app.te
++++ b/private/system_app.te
+@@ -106,6 +106,7 @@ allow system_app {
+   -dnsresolver_service
+   -dumpstate_service
+   -installd_service
++  -location_control_service
+   -lpdump_service
+   -mdns_service
+   -netd_service
+@@ -116,6 +117,7 @@ allow system_app {
+   -vold_service
+   -default_android_service
+ }:service_manager find;
++allow system_app location_control_service:service_manager find;
+ # suppress denials for services system_app should not be accessing.
+ dontaudit system_app {
+   dnsresolver_service
+diff --git a/public/service.te b/public/service.te
+index 2d7cedfa2..bfd6c2e4f 100644
+--- a/public/service.te
++++ b/public/service.te
+@@ -172,6 +172,7 @@ type launcherapps_service, app_api_service, ephemeral_app_api_service, system_se
+ type legacy_permission_service, app_api_service, ephemeral_app_api_service, system_server_service, service_manager_type;
+ type light_service, app_api_service, ephemeral_app_api_service, system_server_service, service_manager_type;
+ type locale_service, app_api_service, ephemeral_app_api_service, system_server_service, service_manager_type;
++type location_control_service, system_server_service, service_manager_type;
+ type location_service, app_api_service, ephemeral_app_api_service, system_server_service, service_manager_type;
+ type location_time_zone_manager_service, system_server_service, service_manager_type;
+ type lock_settings_service, app_api_service, system_api_service, system_server_service, service_manager_type;
+-- 
+2.34.1
+

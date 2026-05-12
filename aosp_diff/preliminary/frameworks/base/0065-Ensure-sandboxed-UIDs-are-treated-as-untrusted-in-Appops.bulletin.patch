@@ -1,0 +1,35 @@
+From 066eff80abf013531320b8280637d1d00dd553a1 Mon Sep 17 00:00:00 2001
+From: Nate Myren <ntmyren@google.com>
+Date: Tue, 7 Oct 2025 14:03:49 -0700
+Subject: [PATCH] Ensure sandboxed UIDs are treated as untrusted in Appops
+
+They should not be considered "system" app for the purposes of
+attribution tag vaildation
+
+Bug: 443742082
+Test: atest AppOpsMemoryUsageTest
+Flag: EXEMPT CVE_FIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:1bc6b146137f76589146dff5cd82363de7ccfb7d
+Merged-In: I0c4ac8eaa8966027ad01375dde58b05febec3ffb
+Change-Id: I0c4ac8eaa8966027ad01375dde58b05febec3ffb
+---
+ services/core/java/com/android/server/appop/AppOpsService.java | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/services/core/java/com/android/server/appop/AppOpsService.java b/services/core/java/com/android/server/appop/AppOpsService.java
+index ae8a8d943ccc..9c9d338099dd 100644
+--- a/services/core/java/com/android/server/appop/AppOpsService.java
++++ b/services/core/java/com/android/server/appop/AppOpsService.java
+@@ -5043,6 +5043,9 @@ public class AppOpsService extends IAppOpsService.Stub {
+         if (packageName == null) {
+             return true;
+         }
++        if (Process.isSdkSandboxUid(uid)) {
++            return false;
++        }
+         int appId = UserHandle.getAppId(uid);
+         if (appId > 0 && appId < Process.FIRST_APPLICATION_UID) {
+             return true;
+-- 
+2.53.0.335.g19a08e0c02-goog
+

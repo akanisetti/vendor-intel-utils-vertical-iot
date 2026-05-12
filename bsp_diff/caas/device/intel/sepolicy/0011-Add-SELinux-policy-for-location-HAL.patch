@@ -1,0 +1,75 @@
+From 3b6751c4696487385c9d8603bc2c241a4ab40373 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Mon, 20 Apr 2026 09:26:39 +0000
+Subject: [PATCH] Add SELinux policy for location HAL
+
+Add new staticlocation SELinux policy module to enforce permissions and
+domain isolation for the Intel vendor location HAL. Includes domain
+definition, binder communication rules, data file access permissions,
+and service registration.
+
+Tracked-On: NIACP3-1182
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ staticlocation/file_contexts           |  2 ++
+ staticlocation/hal_location_default.te | 17 +++++++++++++++++
+ staticlocation/location_types.te       |  5 +++++
+ staticlocation/service_contexts        |  1 +
+ 4 files changed, 25 insertions(+)
+ create mode 100644 staticlocation/file_contexts
+ create mode 100644 staticlocation/hal_location_default.te
+ create mode 100644 staticlocation/location_types.te
+ create mode 100644 staticlocation/service_contexts
+
+diff --git a/staticlocation/file_contexts b/staticlocation/file_contexts
+new file mode 100644
+index 0000000..a919232
+--- /dev/null
++++ b/staticlocation/file_contexts
+@@ -0,0 +1,2 @@
++/vendor/bin/vendor\.intel\.location\.hal u:object_r:hal_location_default_exec:s0
++/data/vendor/location(/.*)? u:object_r:location_vendor_data_file:s0
+diff --git a/staticlocation/hal_location_default.te b/staticlocation/hal_location_default.te
+new file mode 100644
+index 0000000..5224142
+--- /dev/null
++++ b/staticlocation/hal_location_default.te
+@@ -0,0 +1,17 @@
++init_daemon_domain(hal_location_default)
++
++allow hal_location_default hal_location_service:service_manager add;
++allow system_server hal_location_service:service_manager find;
++
++binder_call(hal_location_default, servicemanager)
++binder_call(system_server, hal_location_default)
++
++allow hal_location_default location_vendor_data_file:dir create_dir_perms;
++allow hal_location_default location_vendor_data_file:dir rw_dir_perms;
++allow hal_location_default location_vendor_data_file:file create_file_perms;
++allow hal_location_default location_vendor_data_file:file rw_file_perms;
++
++# Allow system_server (LocationControlService) to write the config file
++allow system_server location_vendor_data_file:dir rw_dir_perms;
++allow system_server location_vendor_data_file:file create_file_perms;
++allow system_server location_vendor_data_file:file rw_file_perms;
+diff --git a/staticlocation/location_types.te b/staticlocation/location_types.te
+new file mode 100644
+index 0000000..0b7e28e
+--- /dev/null
++++ b/staticlocation/location_types.te
+@@ -0,0 +1,5 @@
++type hal_location_default, domain;
++type hal_location_default_exec, exec_type, vendor_file_type, file_type;
++
++type hal_location_service, service_manager_type;
++type location_vendor_data_file, data_file_type, file_type;
+diff --git a/staticlocation/service_contexts b/staticlocation/service_contexts
+new file mode 100644
+index 0000000..d250071
+--- /dev/null
++++ b/staticlocation/service_contexts
+@@ -0,0 +1 @@
++vendor.intel.location.ILocationHal/default u:object_r:hal_location_service:s0
+-- 
+2.34.1
+

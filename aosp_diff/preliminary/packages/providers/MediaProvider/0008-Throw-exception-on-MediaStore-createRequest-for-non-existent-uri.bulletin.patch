@@ -1,0 +1,90 @@
+From 973f11ad05506303f6bbb3fd6275c3a2b824b2e8 Mon Sep 17 00:00:00 2001
+From: Garvita Jain <garvitajain@google.com>
+Date: Mon, 1 Dec 2025 11:02:37 +0000
+Subject: [PATCH] Throw exception on MediaStore createRequest for non-existent
+ uri
+
+Throw IllegalArgument exception if a caller requests
+CREATE_WRITE/DELETE/.._REQUEST for a uri that does not exist in the
+Files table at the time of request.
+
+BUG: 418773439
+Test: atest MediaProviderTests
+Flag: EXEMPT bugfix
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:268fc3fb0a438abbc710687a9590cb80b3c0e8bc
+Merged-In: I00a3b15d8dbcd19afaec3980f7d7a07122bef640
+Change-Id: I00a3b15d8dbcd19afaec3980f7d7a07122bef640
+---
+ .../android/providers/media/MediaProvider.java | 16 ++++++++++++++++
+ .../providers/media/MediaProviderTest.java     | 18 ++++++++++++++++--
+ 2 files changed, 32 insertions(+), 2 deletions(-)
+
+diff --git a/src/com/android/providers/media/MediaProvider.java b/src/com/android/providers/media/MediaProvider.java
+index 4a09b7500..b9fc95667 100644
+--- a/src/com/android/providers/media/MediaProvider.java
++++ b/src/com/android/providers/media/MediaProvider.java
+@@ -8383,6 +8383,22 @@ public class MediaProvider extends ContentProvider {
+             }
+         }
+ 
++        // Do not allow to create request if the list contains a uri which does not exist
++        final LocalCallingIdentity token = clearLocalCallingIdentity();
++        try {
++            for (Uri uri : uris) {
++                try (Cursor c = queryForSingleItem(uri, new String[]{FileColumns._ID}, null, null,
++                        null)) {
++                    // queryForSingleItem method throws FileNotFoundException if no items were
++                    // found, or multiple items were found, or there was trouble reading the data.
++                } catch (FileNotFoundException e) {
++                    throw new IllegalArgumentException("Invalid Uri: " + uri, e);
++                }
++            }
++        } finally {
++            restoreLocalCallingIdentity(token);
++        }
++
+         final Context context = getContext();
+         final Intent intent = new Intent(method, null, context, PermissionActivity.class);
+         extras.putInt(EXTRA_CALLING_PACKAGE_UID, getCallingUidOrSelf());
+diff --git a/tests/src/com/android/providers/media/MediaProviderTest.java b/tests/src/com/android/providers/media/MediaProviderTest.java
+index 21cb56e48..660276ce3 100644
+--- a/tests/src/com/android/providers/media/MediaProviderTest.java
++++ b/tests/src/com/android/providers/media/MediaProviderTest.java
+@@ -39,6 +39,7 @@ import static org.junit.Assert.assertNotNull;
+ import static org.junit.Assert.assertNull;
+ import static org.junit.Assert.assertTrue;
+ import static org.junit.Assert.fail;
++import static org.junit.Assume.assumeTrue;
+ 
+ import android.Manifest;
+ import android.content.ContentInterface;
+@@ -334,11 +335,24 @@ public class MediaProviderTest {
+      */
+     @Test
+     public void testCreateRequest() throws Exception {
+-        final Collection<Uri> uris = Arrays.asList(
+-                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY, 42));
++        final ContentValues values = new ContentValues();
++        values.put(MediaColumns.DISPLAY_NAME, "test.mp3");
++        values.put(MediaColumns.MIME_TYPE, "audio/mpeg");
++        final Uri uri = sIsolatedResolver.insert(
++                MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values);
++        assumeTrue(uri != null);
++        final Collection<Uri> uris = List.of(uri);
+         assertNotNull(MediaStore.createWriteRequest(sIsolatedResolver, uris));
+     }
+ 
++    @Test
++    public void testCreateRequest_invalidUri_throwsException() throws Exception {
++        final Collection<Uri> uris = List.of(
++                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY, 42));
++        assertThrows(IllegalArgumentException.class,
++                () -> MediaStore.createWriteRequest(sIsolatedResolver, uris));
++    }
++
+     @Test
+     public void testRequestThumbnail_noAccess_throwsSecurityException() throws Exception {
+         final File dir = Environment
+-- 
+2.53.0.335.g19a08e0c02-goog
+

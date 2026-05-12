@@ -1,0 +1,251 @@
+From 2ce2b01a309edcd4e28460225dc5f2cc36d6597c Mon Sep 17 00:00:00 2001
+From: darshilshah <darshilshah@google.com>
+Date: Thu, 15 May 2025 14:45:41 +0000
+Subject: [PATCH] [security-aosp-25Q2-staging] Remove default ignoreable
+ characters before regex checks
+
+This is a combined CL for cherry-pick. Original CLs merged in main-
+ag/33577707
+ag/33920560
+ag/33920560
+
+Lower file system ignores certain characters while saving files.
+Malicious apps use these ignorable characters to by-pass regex checks
+that are needed to protect private app directories. We remove these
+characters before regex checks so that apps cannot by-pass the checks.
+
+Bug: 377888957
+Test: atest com.android.providers.media.util.FileUtilsTest#testNormalizeAndFilterDefaultIgnorableCodepoints
+Test: atest com.android.providers.media.util.FileUtilsTest#testIsDataOrObbRelativePathWithZwsChars_flagEnabled
+Test: atest com.android.providers.media.util.FileUtilsTest#testIsDataOrObbRelativePathWithZwsChars_flagDisabled
+Flag: com.android.providers.media.flags.enable_path_sanitization
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:ac3a6dc8db818a74357af1dfa2acfa911648827c)
+Change-Id: Ibb96bda4b4fdb0869209aeb37260bf656d155a9e
+---
+ mediaprovider_flags.aconfig                   |  9 ++++
+ .../providers/media/MediaProvider.java        | 10 +++-
+ .../providers/media/util/FileUtils.java       | 50 ++++++++++++++++++-
+ .../providers/media/util/FileUtilsTest.java   | 31 ++++++++++++
+ 4 files changed, 97 insertions(+), 3 deletions(-)
+
+diff --git a/mediaprovider_flags.aconfig b/mediaprovider_flags.aconfig
+index de617c438..30a023753 100644
+--- a/mediaprovider_flags.aconfig
++++ b/mediaprovider_flags.aconfig
+@@ -309,3 +309,12 @@ flag {
+     is_fixed_read_only: true
+     is_exported: true
+ }
++
++flag {
++    name: "enable_path_sanitization"
++    is_exported: false
++    namespace: "mediaprovider"
++    description: "This flag enables file path sanitization before regex checks"
++    is_fixed_read_only: true
++    bug: "377888957"
++}
+diff --git a/src/com/android/providers/media/MediaProvider.java b/src/com/android/providers/media/MediaProvider.java
+index 7b9753c8d..2872e4a7e 100644
+--- a/src/com/android/providers/media/MediaProvider.java
++++ b/src/com/android/providers/media/MediaProvider.java
+@@ -10502,7 +10502,7 @@ public class MediaProvider extends ContentProvider {
+         // Check if the caller has access to private app directories. Checks for Android/data,
+         // Android/media and Android/obb
+         boolean isUidAllowedAccessToDataOrObbPath =
+-                isUidAllowedAccessToDataOrObbPathForFuse(mCallingIdentity.get().uid, filePath);
++                isUidAllowedAccessToDataOrObbPath(mCallingIdentity.get().uid, filePath);
+ 
+         /*
+          * If owned photos is enabled, then image or video stored in app's private directory may
+@@ -10551,6 +10551,7 @@ public class MediaProvider extends ContentProvider {
+      * the caller does not have special access.
+      */
+     private boolean isPrivatePackagePathNotAccessibleByCaller(String path) {
++        path = FileUtils.normalizeAndFilterDefaultIgnorableCodepoints(path);
+         // Files under the apps own private directory
+         final String appSpecificDir = extractPathOwnerPackageName(path);
+ 
+@@ -10563,7 +10564,7 @@ public class MediaProvider extends ContentProvider {
+         if (isExternalMediaDirectory(path)) {
+             return false;
+         }
+-        return !isUidAllowedAccessToDataOrObbPathForFuse(mCallingIdentity.get().uid, path);
++        return !isUidAllowedAccessToDataOrObbPath(mCallingIdentity.get().uid, path);
+     }
+ 
+     private boolean shouldBypassDatabaseAndSetDirtyForFuse(int uid, String path) {
+@@ -11404,6 +11405,11 @@ public class MediaProvider extends ContentProvider {
+ 
+     @Keep
+     public boolean isUidAllowedAccessToDataOrObbPathForFuse(int uid, String path) {
++        return isUidAllowedAccessToDataOrObbPath(uid,
++                FileUtils.normalizeAndFilterDefaultIgnorableCodepoints(path));
++    }
++
++    private boolean isUidAllowedAccessToDataOrObbPath(int uid, String path) {
+         final LocalCallingIdentity token =
+                 clearLocalCallingIdentity(getCachedCallingIdentityForFuse(uid));
+         try {
+diff --git a/src/com/android/providers/media/util/FileUtils.java b/src/com/android/providers/media/util/FileUtils.java
+index b4e6aecd6..d944348db 100644
+--- a/src/com/android/providers/media/util/FileUtils.java
++++ b/src/com/android/providers/media/util/FileUtils.java
+@@ -46,6 +46,8 @@ import android.content.ClipDescription;
+ import android.content.ContentValues;
+ import android.content.Context;
+ import android.content.pm.PackageManager;
++import android.icu.lang.UCharacter;
++import android.icu.lang.UProperty;
+ import android.net.Uri;
+ import android.os.Environment;
+ import android.os.ParcelFileDescriptor;
+@@ -70,6 +72,7 @@ import androidx.annotation.Nullable;
+ import androidx.annotation.VisibleForTesting;
+ 
+ import com.android.modules.utils.build.SdkLevel;
++import com.android.providers.media.flags.Flags;
+ 
+ import java.io.File;
+ import java.io.FileDescriptor;
+@@ -84,6 +87,7 @@ import java.nio.file.Files;
+ import java.nio.file.NoSuchFileException;
+ import java.nio.file.Path;
+ import java.nio.file.attribute.BasicFileAttributes;
++import java.text.Normalizer;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.Collection;
+@@ -1007,6 +1011,50 @@ public class FileUtils {
+                     + "(?:\\.picker_transcoded$)|"
+                     + "(?:(?:Movies|Music|Pictures)/.thumbnails$))");
+ 
++    /**
++     * Normalizes the given path to NFD form and removes all default ignorable Unicode characters.
++     * These include characters (e.g., invisible zero-width spaces) that are ignored by the lower
++     * file system, but can be exploited by malicious apps to bypass path-based regex checks.
++     *
++     * @param path the input file path, possibly containing invisible Unicode characters
++     * @return a normalized path string with ignorable characters removed
++     */
++    public static String normalizeAndFilterDefaultIgnorableCodepoints(String path) {
++        // Normalization is not enabled.
++        if (!Flags.enablePathSanitization()) {
++            return path;
++        }
++
++        // Nothing to normalize.
++        if (path == null || path.isEmpty()) {
++            return path;
++        }
++
++        path = Normalizer.normalize(path, Normalizer.Form.NFD);
++        final int[] codePoints = path.codePoints().toArray();
++
++        boolean hasIgnorableCodepoints = false;
++        for (int codePoint : codePoints) {
++            if (UCharacter.hasBinaryProperty(codePoint, UProperty.DEFAULT_IGNORABLE_CODE_POINT)) {
++                hasIgnorableCodepoints = true;
++                break;
++            }
++        }
++        // Input is already normalized.
++        if (!hasIgnorableCodepoints) {
++            return path;
++        }
++
++        // Remove default ignorable code points.
++        StringBuilder normalizedPath = new StringBuilder(codePoints.length);
++        for (int codePoint : codePoints) {
++            if (!UCharacter.hasBinaryProperty(codePoint, UProperty.DEFAULT_IGNORABLE_CODE_POINT)) {
++                normalizedPath.appendCodePoint(codePoint);
++            }
++        }
++        return normalizedPath.toString();
++    }
++
+     /**
+      * The recordings directory. This is used for R OS. For S OS or later,
+      * we use {@link Environment#DIRECTORY_RECORDINGS} directly.
+@@ -1116,7 +1164,7 @@ public class FileUtils {
+     public static @Nullable String extractRelativePath(@Nullable String data) {
+         if (data == null) return null;
+ 
+-        final String path;
++        String path;
+         try {
+             path = getCanonicalPath(data);
+         } catch (IOException e) {
+diff --git a/tests/src/com/android/providers/media/util/FileUtilsTest.java b/tests/src/com/android/providers/media/util/FileUtilsTest.java
+index 637d4be80..089374216 100644
+--- a/tests/src/com/android/providers/media/util/FileUtilsTest.java
++++ b/tests/src/com/android/providers/media/util/FileUtilsTest.java
+@@ -71,22 +71,29 @@ import static org.junit.Assert.assertTrue;
+ import static org.junit.Assert.fail;
+ 
+ import android.content.ContentValues;
++import android.os.Build;
+ import android.os.Environment;
+ import android.os.SystemProperties;
+ import android.os.UserHandle;
++import android.platform.test.annotations.EnableFlags;
++import android.platform.test.flag.junit.SetFlagsRule;
+ import android.provider.MediaStore;
+ import android.provider.MediaStore.Audio.AudioColumns;
+ import android.provider.MediaStore.MediaColumns;
+ import android.text.TextUtils;
+ 
+ import androidx.test.InstrumentationRegistry;
++import androidx.test.filters.SdkSuppress;
+ import androidx.test.runner.AndroidJUnit4;
+ 
++import com.android.providers.media.flags.Flags;
++
+ import com.google.common.collect.Range;
+ 
+ import org.junit.After;
+ import org.junit.Assume;
+ import org.junit.Before;
++import org.junit.Rule;
+ import org.junit.Test;
+ import org.junit.runner.RunWith;
+ 
+@@ -103,6 +110,9 @@ import java.util.Optional;
+ 
+ @RunWith(AndroidJUnit4.class)
+ public class FileUtilsTest {
++    @Rule
++    public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
++
+     // Exposing here since it is also used by MediaProviderTest.java
+     public static final int MAX_FILENAME_BYTES = FileUtils.MAX_FILENAME_BYTES;
+ 
+@@ -1364,4 +1374,25 @@ public class FileUtilsTest {
+             }
+         }
+     }
++
++    @Test
++    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.S)
++    @EnableFlags(Flags.FLAG_ENABLE_PATH_SANITIZATION)
++    public void testNormalizeAndFilterDefaultIgnorableCodepoints() {
++        String pathWithZws = "/storage/emulated/0/An\u200Bdroid/data/com.google.example/files";
++        String pathWithZwsFiltered = "/storage/emulated/0/Android/data/com.google.example/files";
++        String emojiForNumber4 = "4\uFE0F⃣";
++        String emojiForNUmber4Filtered = "4⃣";
++
++        assertDefaultIgnorablesFiltered(pathWithZws, pathWithZwsFiltered);
++        assertDefaultIgnorablesFiltered(emojiForNumber4, emojiForNUmber4Filtered);
++    }
++
++    private static void assertDefaultIgnorablesFiltered(String pathWithIgnorables,
++            String pathWithIgnorablesRemoved) {
++        String normalizedAndFilteredPath =
++                FileUtils.normalizeAndFilterDefaultIgnorableCodepoints(pathWithIgnorables);
++
++        assertEquals(pathWithIgnorablesRemoved, normalizedAndFilteredPath);
++    }
+ }
+-- 
+2.53.0.335.g19a08e0c02-goog
+

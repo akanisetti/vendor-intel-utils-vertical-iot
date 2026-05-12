@@ -1,0 +1,337 @@
+From e744363120e1988c45e5c49bb22c382cbd176bd9 Mon Sep 17 00:00:00 2001
+From: Matt Pietal <mpietal@google.com>
+Date: Mon, 2 Jun 2025 19:53:54 +0000
+Subject: [PATCH] Validate user on biometric auth and keyguard done
+
+On user switching, it is possible to start a chain of events
+that validate the prior user before user switching is complete,
+notably on biomtetric auth success and the tryKeyguarDone paths.
+The latter is a runnable that can be scheduled after dismiss
+animations run, but if the user was changed in the middle, it
+is possible to dismiss the prior keyguard.
+
+Revalidate the user at multiple points, and reset the keyguard
+when the user id mismatch is detected.
+
+Bug: 413380719
+Test: atest KeyguardViewMediatorTest
+Flag: EXEMPT bugfix
+Merged-In: I70efe8704931e096698d4a775ee487bb5241d7f1
+Change-Id: I70efe8704931e096698d4a775ee487bb5241d7f1
+(cherry picked from commit 3395c83be381ab7bdb480d2384297e2e3345e482)
+---
+ .../keyguard/KeyguardViewMediator.java        | 103 +++++++++++++-----
+ .../keyguard/KeyguardViewMediatorTest.java    |  59 ++++++++++
+ 2 files changed, 135 insertions(+), 27 deletions(-)
+
+diff --git a/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardViewMediator.java b/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardViewMediator.java
+index 170966b45618..e5c09e146e5d 100644
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardViewMediator.java
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/KeyguardViewMediator.java
+@@ -328,6 +328,8 @@ public class KeyguardViewMediator implements CoreStartable,
+ 
+     private static final int UNOCCLUDE_ANIMATION_DURATION = 250;
+ 
++    private static final int NO_KEYGUARD_DONE_PENDING = -10000;
++
+     /**
+      * How far down to animate the unoccluding activity, in terms of percent of the activity's
+      * height.
+@@ -475,6 +477,8 @@ public class KeyguardViewMediator implements CoreStartable,
+     private boolean mDeviceInteractive;
+     private boolean mGoingToSleep;
+ 
++    private final Object mDismissToken = new Object();
++
+     // last known state of the cellular connection
+     private final String mPhoneState = TelephonyManager.EXTRA_STATE_IDLE;
+ 
+@@ -505,7 +509,7 @@ public class KeyguardViewMediator implements CoreStartable,
+     private boolean mWaitingUntilKeyguardVisible = false;
+     private final LockPatternUtils mLockPatternUtils;
+     private final BroadcastDispatcher mBroadcastDispatcher;
+-    private boolean mKeyguardDonePending = false;
++    private int mKeyguardDonePendingForUser = NO_KEYGUARD_DONE_PENDING;
+     private boolean mUnlockingAndWakingFromDream = false;
+     private boolean mHideAnimationRun = false;
+     private boolean mHideAnimationRunning = false;
+@@ -670,7 +674,9 @@ public class KeyguardViewMediator implements CoreStartable,
+     void handleBeforeUserSwitching(int userId, Runnable resultCallback) {
+         Log.d(TAG, String.format("onBeforeUserSwitching %d", userId));
+         synchronized (KeyguardViewMediator.this) {
++            mHandler.removeCallbacksAndMessages(mDismissToken);
+             mHandler.removeMessages(DISMISS);
++            mHandler.removeMessages(HIDE);
+             notifyTrustedChangedLocked(mUpdateMonitor.getUserHasTrust(userId));
+             resetKeyguardDonePendingLocked();
+             adjustStatusBarLocked();
+@@ -708,7 +714,8 @@ public class KeyguardViewMediator implements CoreStartable,
+         if (mLockPatternUtils.isSecure(userId)) {
+             // We are calling dismiss with a delay as there are race conditions in some scenarios
+             // caused by async layout listeners
+-            mHandler.postDelayed(() -> dismiss(null /* callback */, null /* message */), 500);
++            mHandler.postDelayed(() -> dismiss(null /* callback */, null /* message */),
++                    mDismissToken, 500);
+         }
+     }
+ 
+@@ -855,6 +862,11 @@ public class KeyguardViewMediator implements CoreStartable,
+         @Override
+         public void onBiometricAuthenticated(int userId, BiometricSourceType biometricSourceType,
+                 boolean isStrongBiometric) {
++            if (userId != mSelectedUserInteractor.getSelectedUserId()) {
++                Log.w(TAG, "onBiometricAuthenticated() invoked for userId: " + userId + ", current "
++                        + "userId: " + mSelectedUserInteractor.getSelectedUserId());
++                return;
++            }
+             if (mLockPatternUtils.isSecure(userId)) {
+                 mLockPatternUtils.getDevicePolicyManager().reportSuccessfulBiometricAttempt(
+                         userId);
+@@ -890,8 +902,8 @@ public class KeyguardViewMediator implements CoreStartable,
+             if (targetUserId != mSelectedUserInteractor.getSelectedUserId()) {
+                 return;
+             }
+-            Log.d(TAG, "keyguardDone");
+-            tryKeyguardDone();
++            Log.d(TAG, "keyguardDone: " + targetUserId);
++            tryKeyguardDone(targetUserId);
+         }
+ 
+         @Override
+@@ -908,18 +920,16 @@ public class KeyguardViewMediator implements CoreStartable,
+ 
+         @Override
+         public void keyguardDonePending(int targetUserId) {
+-            Trace.beginSection("KeyguardViewMediator.mViewMediatorCallback#keyguardDonePending");
+-            Log.d(TAG, "keyguardDonePending");
++            Log.d(TAG, "keyguardDonePending: " + targetUserId);
+             if (targetUserId != mSelectedUserInteractor.getSelectedUserId()) {
+-                Trace.endSection();
+                 return;
+             }
+-
+-            mKeyguardDonePending = true;
++            Trace.beginSection("KeyguardViewMediator.mViewMediatorCallback#keyguardDonePending");
++            mKeyguardDonePendingForUser = targetUserId;
+             mHideAnimationRun = true;
+             mHideAnimationRunning = true;
+             mKeyguardViewControllerLazy.get()
+-                    .startPreHideAnimation(mHideAnimationFinishedRunnable);
++                    .startPreHideAnimation(new OnHideAnimationFinished(targetUserId));
+             mHandler.sendEmptyMessageDelayed(KEYGUARD_DONE_PENDING_TIMEOUT,
+                     KEYGUARD_DONE_PENDING_TIMEOUT_MS);
+             Trace.endSection();
+@@ -957,9 +967,10 @@ public class KeyguardViewMediator implements CoreStartable,
+         @Override
+         public void readyForKeyguardDone() {
+             Trace.beginSection("KeyguardViewMediator.mViewMediatorCallback#readyForKeyguardDone");
+-            if (mKeyguardDonePending) {
+-                mKeyguardDonePending = false;
+-                tryKeyguardDone();
++            if (mKeyguardDonePendingForUser != NO_KEYGUARD_DONE_PENDING) {
++                int user = mKeyguardDonePendingForUser;
++                mKeyguardDonePendingForUser = NO_KEYGUARD_DONE_PENDING;
++                tryKeyguardDone(user);
+             }
+             Trace.endSection();
+         }
+@@ -2648,7 +2659,7 @@ public class KeyguardViewMediator implements CoreStartable,
+      * expecting the keyguard to go away when called.
+      */
+     public void hideWithAnimation(IRemoteAnimationRunner runner) {
+-        if (!mKeyguardDonePending) {
++        if (mKeyguardDonePendingForUser == NO_KEYGUARD_DONE_PENDING) {
+             return;
+         }
+ 
+@@ -2860,10 +2871,17 @@ public class KeyguardViewMediator implements CoreStartable,
+         mTransitionBootInteractor.start();
+     }
+ 
+-    private void tryKeyguardDone() {
+-        Log.d(TAG, "tryKeyguardDone: pending - " + mKeyguardDonePending + ", animRan - "
+-                + mHideAnimationRun + " animRunning - " + mHideAnimationRunning);
+-        if (!mKeyguardDonePending && mHideAnimationRun && !mHideAnimationRunning) {
++    private void tryKeyguardDone(int userId) {
++        String logUserId;
++        if (mKeyguardDonePendingForUser == NO_KEYGUARD_DONE_PENDING) {
++            logUserId = "NO_KEYGUARD_DONE_PENDING";
++        } else {
++            logUserId = "" + mKeyguardDonePendingForUser;
++        }
++        Log.d(TAG, "tryKeyguardDone: pendingForUser - " + logUserId
++                + ", animRan - " + mHideAnimationRun + " animRunning - " + mHideAnimationRunning);
++        if (mKeyguardDonePendingForUser == NO_KEYGUARD_DONE_PENDING && mHideAnimationRun
++                && !mHideAnimationRunning) {
+             handleKeyguardDone();
+         } else if (mSurfaceBehindRemoteAnimationRunning) {
+             // We're already running the keyguard exit animation, likely due to an in-progress swipe
+@@ -2874,7 +2892,7 @@ public class KeyguardViewMediator implements CoreStartable,
+             mHideAnimationRun = true;
+             mHideAnimationRunning = true;
+             mKeyguardViewControllerLazy.get()
+-                    .startPreHideAnimation(mHideAnimationFinishedRunnable);
++                    .startPreHideAnimation(new OnHideAnimationFinished(userId));
+         }
+     }
+ 
+@@ -3148,6 +3166,15 @@ public class KeyguardViewMediator implements CoreStartable,
+                 // will be in order.
+                 final int keyguardFlag = flags;
+                 mUiBgExecutor.execute(() -> {
++                    int currentUserId = mSelectedUserInteractor.getSelectedUserId();
++                    if (mGoingAwayRequestedForUserId != currentUserId) {
++                        Log.e(TAG, "Not executing goingAwayRunnable() due to userId mismatch. "
++                                + "Requested: " + mGoingAwayRequestedForUserId + ", current: "
++                                + currentUserId);
++                        mUpdateMonitor.setKeyguardGoingAway(false);
++                        mKeyguardViewControllerLazy.get().setKeyguardGoingAwayState(false);
++                        return;
++                    }
+                     if (ENABLE_NEW_KEYGUARD_SHELL_TRANSITIONS) {
+                         startKeyguardTransition(
+                                 false /* keyguardShowing */, false /* aodShowing */);
+@@ -3169,12 +3196,6 @@ public class KeyguardViewMediator implements CoreStartable,
+         mKeyguardTransitions.startKeyguardTransition(keyguardShowing, aodShowing);
+     }
+ 
+-    private final Runnable mHideAnimationFinishedRunnable = () -> {
+-        Log.d(TAG, "mHideAnimationFinishedRunnable#run");
+-        mHideAnimationRunning = false;
+-        tryKeyguardDone();
+-    };
+-
+     private void setUnlockAndWakeFromDream(boolean updatedValue,
+             @WakeAndUnlockUpdateReason int reason) {
+         if (!mOrderUnlockAndWake) {
+@@ -3297,6 +3318,12 @@ public class KeyguardViewMediator implements CoreStartable,
+             mHiding = false;
+             if (mLockPatternUtils.isSecure(currentUserId)) {
+                 doKeyguardLocked(null);
++                if (!KeyguardWmStateRefactor.isEnabled()) {
++                    mKeyguardInteractor.showKeyguard();
++                    mShadeController.get().instantCollapseShade();
++                    setShowingLocked(true /* showing */, true /* force */,
++                            "handleStartKeyguardExitAnimation - mismatch");
++                }
+             } else {
+                 resetStateLocked();
+                 dismiss(null, null);
+@@ -3874,7 +3901,7 @@ public class KeyguardViewMediator implements CoreStartable,
+     }
+ 
+     private void resetKeyguardDonePendingLocked() {
+-        mKeyguardDonePending = false;
++        mKeyguardDonePendingForUser = NO_KEYGUARD_DONE_PENDING;
+         mHandler.removeMessages(KEYGUARD_DONE_PENDING_TIMEOUT);
+     }
+ 
+@@ -4023,7 +4050,7 @@ public class KeyguardViewMediator implements CoreStartable,
+         pw.print("  mDozing: "); pw.println(mDozing);
+         pw.print("  mAodShowing: "); pw.println(mAodShowing);
+         pw.print("  mWaitingUntilKeyguardVisible: "); pw.println(mWaitingUntilKeyguardVisible);
+-        pw.print("  mKeyguardDonePending: "); pw.println(mKeyguardDonePending);
++        pw.print("  mKeyguardDonePendingForUser: "); pw.println(mKeyguardDonePendingForUser);
+         pw.print("  mHideAnimationRun: "); pw.println(mHideAnimationRun);
+         pw.print("  mPendingReset: "); pw.println(mPendingReset);
+         pw.print("  mPendingLock: "); pw.println(mPendingLock);
+@@ -4354,4 +4381,26 @@ public class KeyguardViewMediator implements CoreStartable,
+             mRemoteCallback = remoteCallback;
+         }
+     }
++
++    private class OnHideAnimationFinished implements Runnable {
++        private final int mUserId;
++        public OnHideAnimationFinished(int userId) {
++            mUserId = userId;
++        }
++
++        public void run() {
++            Log.d(TAG, "OnHideAnimationFinished.run(" + mUserId + ")");
++            mHideAnimationRunning = false;
++            int currentUserId = mSelectedUserInteractor.getSelectedUserId();
++            if (mUserId != currentUserId) {
++                Log.e(TAG, "Not executing OnHideAnimationFinished.run() due to userId mismatch. "
++                        + "Requested: " + mUserId + ", current: " + currentUserId);
++                mShadeController.get().instantCollapseShade();
++                resetStateLocked();
++                return;
++            }
++
++            tryKeyguardDone(mUserId);
++        }
++    }
+ }
+diff --git a/packages/SystemUI/tests/src/com/android/systemui/keyguard/KeyguardViewMediatorTest.java b/packages/SystemUI/tests/src/com/android/systemui/keyguard/KeyguardViewMediatorTest.java
+index 41fdaa74e57b..1b5559166671 100644
+--- a/packages/SystemUI/tests/src/com/android/systemui/keyguard/KeyguardViewMediatorTest.java
++++ b/packages/SystemUI/tests/src/com/android/systemui/keyguard/KeyguardViewMediatorTest.java
+@@ -1436,6 +1436,65 @@ public class KeyguardViewMediatorTest extends SysuiTestCase {
+         assertTrue(mViewMediator.isShowingAndNotOccluded());
+     }
+ 
++    @Test
++    public void biometricAuthSuccessForCurrentUserDoesProceed() {
++        final int currentUser = 25;
++        setCurrentUser(currentUser, true);
++
++        mViewMediator.mUpdateCallback.onBiometricAuthenticated(currentUser, null, false);
++
++        verify(mDevicePolicyManager).reportSuccessfulBiometricAttempt(currentUser);
++    }
++
++    @Test
++    public void biometricAuthSuccessForDifferentUserDoesNotProceed() {
++        final int newUser = 40;
++        setCurrentUser(newUser, true);
++
++        final int oldUser = 25;
++        mViewMediator.mUpdateCallback.onBiometricAuthenticated(oldUser, null, false);
++
++        verify(mDevicePolicyManager, never()).reportSuccessfulBiometricAttempt(anyInt());
++    }
++
++    @Test
++    public void testDonePendingExecutesOnHideAnimationFinished() {
++        final int currentUser = 25;
++        setCurrentUser(currentUser, true);
++        mViewMediator.mViewMediatorCallback.keyguardDonePending(currentUser);
++
++        final ArgumentCaptor<Runnable> onHideAnimationFinished =
++                ArgumentCaptor.forClass(Runnable.class);
++        verify(mStatusBarKeyguardViewManager).startPreHideAnimation(
++                onHideAnimationFinished.capture());
++
++        onHideAnimationFinished.getValue().run();
++
++        // This is executed when the user is incorrect. Should not be called
++        verify(mShadeController, never()).instantCollapseShade();
++    }
++
++    @Test
++    public void testDonePendingExecutesOnHideAnimationFinishedButTerminatesWhenUserHasChanged() {
++        final int currentUser = 25;
++        setCurrentUser(currentUser, true);
++        mViewMediator.mViewMediatorCallback.keyguardDonePending(currentUser);
++
++        final ArgumentCaptor<Runnable> onHideAnimationFinished =
++                ArgumentCaptor.forClass(Runnable.class);
++        verify(mStatusBarKeyguardViewManager).startPreHideAnimation(
++                onHideAnimationFinished.capture());
++
++        // User switched before runnable could execute
++        final int newUser = 40;
++        setCurrentUser(newUser, true);
++
++        onHideAnimationFinished.getValue().run();
++
++        // This is executed when the user is incorrect
++        verify(mShadeController).instantCollapseShade();
++    }
++
+     @Test
+     public void testBouncerSwipeDown() {
+         mViewMediator.getViewMediatorCallback().onBouncerSwipeDown();
+-- 
+2.53.0.335.g19a08e0c02-goog
+

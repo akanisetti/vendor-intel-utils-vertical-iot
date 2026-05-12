@@ -1,0 +1,60 @@
+From 3a1bc0825c5226a844d6fbcdaf2f89fea82fafb7 Mon Sep 17 00:00:00 2001
+From: Brian Delwiche <delwiche@google.com>
+Date: Tue, 8 Apr 2025 23:48:37 +0000
+Subject: [PATCH] Remove flag bonded_device_smp_failure_handling
+
+Flag has been in Nextfood for nine weeks per Gantry and should be safe
+to remove.
+
+This is a cherry-pick of the reland version and is required because the 25Q2 branch was cut after the fix was in place but before the flag was removed.
+
+Test: mmm packages/modules/Bluetooth
+Flag: EXEMPT removing flag com.android.bluetooth.flags.bonded_device_smp_failure_handling
+Bug: 385181815
+Change-Id: I2cc107a3de1b84cd45af13209ed45cfcec5a5216
+(cherry picked from commit 77cc20f000ef4e69fdc1297f6f99e9b379ab5733)
+DISABLE_TOPIC_PROTECTOR
+---
+ flags/pairing.aconfig           | 10 ----------
+ system/stack/btm/btm_ble_sec.cc |  4 ----
+ 2 files changed, 14 deletions(-)
+
+diff --git a/flags/pairing.aconfig b/flags/pairing.aconfig
+index faae7d2618..aff4cbe0ab 100644
+--- a/flags/pairing.aconfig
++++ b/flags/pairing.aconfig
+@@ -141,16 +141,6 @@ flag {
+     }
+ }
+ 
+-flag {
+-    name: "bonded_device_smp_failure_handling"
+-    namespace: "bluetooth"
+-    description: "Don't remove bond on SMP failure for bonded devices in peripheral role"
+-    bug: "385181815"
+-    metadata {
+-        purpose: PURPOSE_BUGFIX
+-    }
+-}
+-
+ flag {
+     name: "peripheral_auth_req"
+     namespace: "bluetooth"
+diff --git a/system/stack/btm/btm_ble_sec.cc b/system/stack/btm/btm_ble_sec.cc
+index 679e937eef..5ae3a755fc 100644
+--- a/system/stack/btm/btm_ble_sec.cc
++++ b/system/stack/btm/btm_ble_sec.cc
+@@ -1637,10 +1637,6 @@ void btm_ble_connection_established(const RawAddress& bda) {
+ 
+ static bool btm_ble_complete_evt_ignore(const tBTM_SEC_DEV_REC* p_dev_rec,
+                                         const tBTM_LE_EVT_DATA* p_data) {
+-  if (!com::android::bluetooth::flags::bonded_device_smp_failure_handling()) {
+-    return false;
+-  }
+-
+   // Peripheral role: Encryption request results in SMP Security request. SMP may generate a
+   // SMP_COMPLT_EVT failure event cases like below:
+   // 1) Some central devices don't handle cross-over between encryption and SMP security request
+-- 
+2.53.0.335.g19a08e0c02-goog
+

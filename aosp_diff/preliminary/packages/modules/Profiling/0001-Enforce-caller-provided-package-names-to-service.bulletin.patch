@@ -1,0 +1,95 @@
+From aef103928d0380e0a4bb24e13768a844e9698413 Mon Sep 17 00:00:00 2001
+From: Yisroel Forta <yforta@google.com>
+Date: Tue, 5 Aug 2025 15:41:57 -0700
+Subject: [PATCH] Enforce caller provided package names to service
+
+Service accepts package names from the manager side, but these package
+names need to be validated to belong to the calling UID.
+
+Audit IProfilingService for any other potential instances of processes
+supplying incorrect information.
+
+Bug: 425360742
+Test: run profiling cts/mcts
+Flag: EXEMPT: bugfix
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:87f9c22235634653a9eec65712c2e2c8d79c7470)
+Merged-In: I8a9a663776c7d4ea8bbb6ca789d805256625674c
+Change-Id: I8a9a663776c7d4ea8bbb6ca789d805256625674c
+---
+ .../os/profiling/ProfilingService.java        | 39 +++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/service/java/com/android/os/profiling/ProfilingService.java b/service/java/com/android/os/profiling/ProfilingService.java
+index e12c59f..8d9cbf1 100644
+--- a/service/java/com/android/os/profiling/ProfilingService.java
++++ b/service/java/com/android/os/profiling/ProfilingService.java
+@@ -962,6 +962,39 @@ public class ProfilingService extends IProfilingService.Stub {
+         return filenames;
+     }
+ 
++    /**
++     * Enforce that the caller's UID matches the provided package name.
++     *
++     * @throws SecurityException if the package name does not match the calling UID.
++     */
++    private void enforceCallerMatchesPackageName(String packageName) {
++        if (packageName == null || packageName.isEmpty()) {
++            // Empty package cannot be valid.
++            throw new SecurityException("Package name empty, is not associated with caller.");
++        }
++
++        int callingUid = Binder.getCallingUid();
++        String[] uidPackages = mContext.getPackageManager().getPackagesForUid(callingUid);
++        if (uidPackages == null || uidPackages.length == 0) {
++            // Failed to get packages for this uid, cannot validate package name.
++            throw new SecurityException("Failed to resolve package name for uid: " + callingUid);
++        }
++
++        boolean packageNameInUidList = false;
++        for (int i = 0; i < uidPackages.length; i++) {
++            if (packageName.equals(uidPackages[i])) {
++                packageNameInUidList = true;
++                break;
++            }
++        }
++
++        if (!packageNameInUidList) {
++            // Package name is not associated with calling uid, reject request.
++            throw new SecurityException("Package name " + packageName + " not associated with "
++                    + "calling uid: " + callingUid);
++        }
++    }
++
+     /**
+      * This method validates the request, arguments, whether the app is allowed to profile now,
+      * and if so, starts the profiling.
+@@ -1177,6 +1210,8 @@ public class ProfilingService extends IProfilingService.Stub {
+      */
+     public void addProfilingTriggers(List<ProfilingTriggerValueParcel> triggers,
+             String packageName) {
++        enforceCallerMatchesPackageName(packageName);
++
+         int uid = Binder.getCallingUid();
+         for (int i = 0; i < triggers.size(); i++) {
+             ProfilingTriggerValueParcel trigger = triggers.get(i);
+@@ -1189,6 +1224,8 @@ public class ProfilingService extends IProfilingService.Stub {
+      * name and the uid of the caller.
+      */
+     public void removeProfilingTriggers(int[] triggerTypesToRemove, String packageName) {
++        enforceCallerMatchesPackageName(packageName);
++
+         SparseArray<ProfilingTriggerData> triggers =
+                 mAppTriggers.get(packageName, Binder.getCallingUid());
+ 
+@@ -1209,6 +1246,8 @@ public class ProfilingService extends IProfilingService.Stub {
+      * Remove all triggers from a process with the provided packagename and the uid of the caller.
+      */
+     public void clearProfilingTriggers(String packageName) {
++        enforceCallerMatchesPackageName(packageName);
++
+         mAppTriggers.remove(packageName, Binder.getCallingUid());
+     }
+ 
+-- 
+2.53.0.335.g19a08e0c02-goog
+

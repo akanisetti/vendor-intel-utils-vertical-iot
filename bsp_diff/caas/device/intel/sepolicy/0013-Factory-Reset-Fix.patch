@@ -1,0 +1,36 @@
+From c2828cd54fc20b6cb4b8553426cbdd7f4f6136b8 Mon Sep 17 00:00:00 2001
+From: gdonthu <gangadhar.donthu@intel.com>
+Date: Mon, 6 Apr 2026 10:22:55 +0000
+Subject: [PATCH] Factory Reset Fix
+
+Allow e2fsck to check and mke2fs to format the teedata partition
+
+Signed-off-by: gdonthu <gangadhar.donthu@intel.com>
+Co-authored-by: Jadeja, Anshumansinh <anshumansinh.jadeja@intel.com>
+Co-authored-by: Krishna, Anisetti Avinash <anisetti.avinash.krishna@intel.com>
+---
+ tee/trusty/tee.te | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/tee/trusty/tee.te b/tee/trusty/tee.te
+index ca36048..23f123d 100644
+--- a/tee/trusty/tee.te
++++ b/tee/trusty/tee.te
+@@ -14,3 +14,14 @@ allow tee tee_device:blk_file rw_file_perms;
+ allow tee gsi_metadata_file:dir search;
+ allow tee metadata_file:dir search;
+ set_prop(tee, vendor_trusty_storage_prop)
++
++#============= e2fs ==============
++# Allow mke2fs to format the teedata partition (formattable fstab flag).
++allow e2fs tee_device:blk_file { open read write ioctl };
++allowxperm e2fs tee_device:blk_file ioctl {
++    BLKSECDISCARD BLKDISCARD BLKPBSZGET BLKDISCARDZEROES BLKROGET
++};
++
++#============= fsck ==============
++# Allow e2fsck to check teedata partition.
++allow fsck tee_device:blk_file { ioctl open read write };
+-- 
+2.34.1
+

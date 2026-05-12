@@ -1,0 +1,102 @@
+From 740256b41ba113708655f82dc5664291bf79edd0 Mon Sep 17 00:00:00 2001
+From: Song Chun Fan <schfan@google.com>
+Date: Tue, 11 Nov 2025 00:03:48 +0000
+Subject: [PATCH] [UidMigration] fix update uninstallation with
+ sharedUserMaxSdkVersion
+
+When a system app is re-enabled after the update is uninstalled, when
+the system app has shared uid, the current code doesn't support
+directly reusing the disabled package setting. Instead, the preloaded
+version is re-scanned and installed as a new app, which can bring
+breaking behavior of changed UIDs when the manifest has
+sharedUserMaxSdkVersion.
+
+This change fixes the bug where registerExistingAppId fails when it
+comes to shared uid, therefore directly reuses the disabled package
+setting, consistent with the behavior for non-shared-uid system apps.
+
+FLAG: EXEMPT BUGFIX
+Test: manually with system-app-test.sh
+BUG: 454062218
+
+Change-Id: I9187ee77bac2a00d679a1a3cc7de2df564f38684
+Merged-In: I9187ee77bac2a00d679a1a3cc7de2df564f38684
+
+
+(cherry picked from commit 6b5ea2f7fbf50313d46e54e0d8f8c18c398e4869)
+
+Change-Id: I417cec27697a210416027e862a5e5d207d268b82
+---
+ .../core/java/com/android/server/pm/Settings.java  | 14 +++++++++-----
+ .../src/com/android/server/pm/MockSystem.kt        |  2 +-
+ 2 files changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/services/core/java/com/android/server/pm/Settings.java b/services/core/java/com/android/server/pm/Settings.java
+index 92257f1ee2dd..ab13d7e766e8 100644
+--- a/services/core/java/com/android/server/pm/Settings.java
++++ b/services/core/java/com/android/server/pm/Settings.java
+@@ -916,8 +916,8 @@ public final class Settings implements Watchable, Snappable, ResilientAtomicFile
+         p.getPkgState().setUpdatedSystemApp(false);
+         final AndroidPackageInternal pkg = p.getPkg();
+         PackageSetting ret = addPackageLPw(name, p.getRealName(), p.getPath(), p.getAppId(),
+-                p.getFlags(), p.getPrivateFlags(), mDomainVerificationManager.generateNewId(),
+-                pkg == null ? false : pkg.isSdkLibrary());
++                    p.getFlags(), p.getPrivateFlags(), mDomainVerificationManager.generateNewId(),
++                    pkg == null ? false : pkg.isSdkLibrary(), p.hasSharedUser());
+         if (ret != null) {
+             ret.setLegacyNativeLibraryPath(p.getLegacyNativeLibraryPath());
+             ret.setPrimaryCpuAbi(p.getPrimaryCpuAbiLegacy());
+@@ -937,6 +937,7 @@ public final class Settings implements Watchable, Snappable, ResilientAtomicFile
+             ret.setRestrictUpdateHash(p.getRestrictUpdateHash());
+             ret.setScannedAsStoppedSystemApp(p.isScannedAsStoppedSystemApp());
+             ret.setInstallSource(p.getInstallSource());
++            ret.setSharedUserAppId(p.getSharedUserAppId());
+         }
+         mDisabledSysPackages.remove(name);
+         return ret;
+@@ -958,7 +959,8 @@ public final class Settings implements Watchable, Snappable, ResilientAtomicFile
+     }
+ 
+     PackageSetting addPackageLPw(String name, String realName, File codePath, int uid,
+-            int pkgFlags, int pkgPrivateFlags, @NonNull UUID domainSetId, boolean isSdkLibrary) {
++            int pkgFlags, int pkgPrivateFlags, @NonNull UUID domainSetId, boolean isSdkLibrary,
++            boolean hasSharedUser) {
+         PackageSetting p = mPackages.get(name);
+         if (p != null) {
+             if (p.getAppId() == uid) {
+@@ -971,7 +973,8 @@ public final class Settings implements Watchable, Snappable, ResilientAtomicFile
+         p = new PackageSetting(name, realName, codePath, pkgFlags, pkgPrivateFlags, domainSetId)
+                 .setAppId(uid);
+         if ((uid == Process.INVALID_UID && isSdkLibrary && Flags.disallowSdkLibsToBeApps())
+-                || mAppIds.registerExistingAppId(uid, p, name)) {
++                || mAppIds.registerExistingAppId(uid, p, name)
++                || hasSharedUser) {
+             mPackages.put(name, p);
+             return p;
+         }
+@@ -4266,7 +4269,8 @@ public final class Settings implements Watchable, Snappable, ResilientAtomicFile
+             } else if (appId > 0 || (appId == Process.INVALID_UID && isSdkLibrary
+                     && Flags.disallowSdkLibsToBeApps())) {
+                 packageSetting = addPackageLPw(name.intern(), realName, new File(codePathStr),
+-                        appId, pkgFlags, pkgPrivateFlags, domainSetId, isSdkLibrary);
++                        appId, pkgFlags, pkgPrivateFlags, domainSetId, isSdkLibrary,
++                        /* hasSharedUser= */ false);
+                 if (PackageManagerService.DEBUG_SETTINGS)
+                     Log.i(PackageManagerService.TAG, "Reading package " + name + ": appId="
+                             + appId + " pkg=" + packageSetting);
+diff --git a/services/tests/mockingservicestests/src/com/android/server/pm/MockSystem.kt b/services/tests/mockingservicestests/src/com/android/server/pm/MockSystem.kt
+index 1b2ab2702d49..9a73ba3c155e 100644
+--- a/services/tests/mockingservicestests/src/com/android/server/pm/MockSystem.kt
++++ b/services/tests/mockingservicestests/src/com/android/server/pm/MockSystem.kt
+@@ -168,7 +168,7 @@ class MockSystem(withSession: (StaticMockitoSessionBuilder) -> Unit = {}) {
+             null
+         }
+         whenever(mocks.settings.addPackageLPw(nullable(), nullable(), nullable(), nullable(),
+-                nullable(), nullable(), nullable(), nullable())) {
++                nullable(), nullable(), nullable(), nullable(), nullable())) {
+             val name: String = getArgument(0)
+             val pendingAdd = mPendingPackageAdds.firstOrNull { it.first == name }
+                     ?: return@whenever null
+-- 
+2.53.0.335.g19a08e0c02-goog
+

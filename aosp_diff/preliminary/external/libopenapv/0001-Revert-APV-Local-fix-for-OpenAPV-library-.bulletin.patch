@@ -1,0 +1,126 @@
+From 2322800890cd83d0f152de9947fae62793fe7927 Mon Sep 17 00:00:00 2001
+From: Fyodor Kyslov <kyslov@google.com>
+Date: Tue, 22 Apr 2025 19:44:54 +0000
+Subject: [PATCH] Revert "APV: Local fix for OpenAPV library"
+
+This reverts commit fb6a5eabd18266640d7ca6df588c97252460ba68.
+
+Test: build
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:62d3d98862d5ac302ef074af5c6a6162fea02c7a
+Merged-In: I0299a4576c7f542a6fa014a28e8f7d3d4dc5afe6
+Change-Id: I0299a4576c7f542a6fa014a28e8f7d3d4dc5afe6
+All commits must go together
+---
+ src/oapv.c      | 15 ---------------
+ src/oapv_bs.c   | 20 --------------------
+ src/oapv_bs.h   |  1 -
+ util/apv.hexpat |  2 --
+ version.txt     |  2 +-
+ 5 files changed, 1 insertion(+), 39 deletions(-)
+
+diff --git a/src/oapv.c b/src/oapv.c
+index a797c6d..8fe2fa8 100644
+--- a/src/oapv.c
++++ b/src/oapv.c
+@@ -1301,8 +1301,6 @@ int oapve_encode(oapve_t eid, oapv_frms_t *ifrms, oapvm_t mid, oapv_bitb_t *bitb
+     oapv_bs_t bs_pbu_beg;
+     oapv_bsw_write(bs, 0, 32);
+ 
+-    oapv_bsw_write(bs, 0x61507631, 32); // signature ('aPv1')
+-
+     for(i = 0; i < ifrms->num_frms; i++) {
+         frm = &ifrms->frm[i];
+ 
+@@ -1955,13 +1953,6 @@ int oapvd_decode(oapvd_t did, oapv_bitb_t *bitb, oapv_frms_t *ofrms, oapvm_t mid
+     ctx = dec_id_to_ctx(did);
+     oapv_assert_rv(ctx, OAPV_ERR_INVALID_ARGUMENT);
+ 
+-    // read signature ('aPv1')
+-    oapv_assert_rv(bitb->ssize > 4, OAPV_ERR_MALFORMED_BITSTREAM);
+-    u32 signature = oapv_bsr_read_direct(bitb->addr, 32);
+-    oapv_assert_rv(signature == 0x61507631, OAPV_ERR_MALFORMED_BITSTREAM);
+-    cur_read_size += 4;
+-    stat->read += 4;
+-
+     do {
+         u32 remain = bitb->ssize - cur_read_size;
+         oapv_assert_gv((remain >= 8), ret, OAPV_ERR_MALFORMED_BITSTREAM, ERR);
+@@ -2074,12 +2065,6 @@ int oapvd_info(void *au, int au_size, oapv_au_info_t *aui)
+ 
+     DUMP_SET(0);
+ 
+-    // read signature ('aPv1')
+-    oapv_assert_rv(au_size > 4, OAPV_ERR_MALFORMED_BITSTREAM);
+-    u32 signature = oapv_bsr_read_direct(au, 32);
+-    oapv_assert_rv(signature == 0x61507631, OAPV_ERR_MALFORMED_BITSTREAM);
+-    cur_read_size += 4;
+-
+     /* 'au' address contains series of PBU */
+     do {
+         oapv_bs_t bs;
+diff --git a/src/oapv_bs.c b/src/oapv_bs.c
+index 968a798..978f9b3 100644
+--- a/src/oapv_bs.c
++++ b/src/oapv_bs.c
+@@ -370,26 +370,6 @@ int oapv_bsr_read1(oapv_bs_t *bs)
+     return code;
+ }
+ 
+-u32 oapv_bsr_read_direct(void *addr, int len)
+-{
+-    u32 code = 0;
+-    int shift = 24;
+-    u8 *p = (u8 *)addr;
+-    int byte = (len + 7) >> 3;
+-
+-    oapv_assert(len <= 32);
+-
+-    while(byte) {
+-        code |= *(p) << shift;
+-        shift -= 8;
+-        byte--;
+-        p++;
+-    }
+-    code = code >> (32 - len);
+-    return code;
+-}
+-
+-
+ ///////////////////////////////////////////////////////////////////////////////
+ // end of decoder code
+ #endif // ENABLE_DECODER
+diff --git a/src/oapv_bs.h b/src/oapv_bs.h
+index 81ee317..351d018 100644
+--- a/src/oapv_bs.h
++++ b/src/oapv_bs.h
+@@ -139,7 +139,6 @@ void *oapv_bsr_sink(oapv_bs_t *bs);
+ void oapv_bsr_move(oapv_bs_t *bs, u8 *pos);
+ u32 oapv_bsr_read(oapv_bs_t *bs, int size);
+ int oapv_bsr_read1(oapv_bs_t *bs);
+-u32 oapv_bsr_read_direct(void *addr, int len);
+ 
+ ///////////////////////////////////////////////////////////////////////////////
+ // end of decoder code
+diff --git a/util/apv.hexpat b/util/apv.hexpat
+index 86431cd..dd4ae2c 100644
+--- a/util/apv.hexpat
++++ b/util/apv.hexpat
+@@ -207,8 +207,6 @@ struct AccessUnit {
+     au_end = $ + au_size;
+     
+     pbu_count = 0; // reset number of PBU
+-
+-    char signature[4]; // 'aPv1'
+     PBU pbu[while($ < au_end)] [[inline]];
+ };
+ 
+diff --git a/version.txt b/version.txt
+index 5edad9a..db4afdf 100644
+--- a/version.txt
++++ b/version.txt
+@@ -1 +1 @@
+-v0.1.11.3.1
++v0.1.11.1
+-- 
+2.53.0.335.g19a08e0c02-goog
+

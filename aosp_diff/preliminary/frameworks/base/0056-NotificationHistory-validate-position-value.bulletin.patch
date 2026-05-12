@@ -1,0 +1,36 @@
+From 27e0f2b515ca65729a84999e792cf7e8240025a9 Mon Sep 17 00:00:00 2001
+From: Devin Moore <devinmoore@google.com>
+Date: Wed, 12 Mar 2025 21:42:44 +0000
+Subject: [PATCH] NotificationHistory validate position value
+
+We get a position value in a parcel and verify it is smaller than that
+parcel's data size before setting it.
+
+Flag: EXEMPT bug fix
+Ignore-AOSP-First: security fix
+Test: atest NotificationHistoryTest
+Bug: 399155883
+Change-Id: Ica98d82d7d7c1c9c0defcff8d96bf5f36e8f5d36
+(cherry picked from commit fd4045126ff01cec3d65c053a0c2c01dc231a0f5)
+---
+ core/java/android/app/NotificationHistory.java | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/core/java/android/app/NotificationHistory.java b/core/java/android/app/NotificationHistory.java
+index eadb7e330c84..ac68df07ef0f 100644
+--- a/core/java/android/app/NotificationHistory.java
++++ b/core/java/android/app/NotificationHistory.java
+@@ -256,6 +256,10 @@ public final class NotificationHistory implements Parcelable {
+             mParcel.setDataPosition(0);
+             mParcel.appendFrom(data, data.dataPosition(), listByteLength);
+             mParcel.setDataSize(mParcel.dataPosition());
++            if (positionInParcel > mParcel.dataSize()) {
++                throw new IllegalStateException(
++                    "Obtained an invalid position value(" + positionInParcel + " from Parcel.");
++            }
+             mParcel.setDataPosition(positionInParcel);
+         }
+     }
+-- 
+2.53.0.335.g19a08e0c02-goog
+

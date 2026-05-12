@@ -1,0 +1,334 @@
+From 3b41dfeec7ebfcd313ff26b7f27b7e7971af4497 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Mat=C3=ADas=20Hern=C3=A1ndez?= <matiashe@google.com>
+Date: Wed, 20 Aug 2025 15:57:28 +0200
+Subject: [PATCH] Limit the number of services (NLSes, etc) that can be
+ approved per user
+
+Trying to activate additional packages/components will be silently rejected.
+
+Bug: 428701593
+Test: atest ManagedServicesTest NotificationManagerServiceTest
+Flag: com.android.server.notification.limit_managed_services_count
+Change-Id: Iddd8044997c41f97369b768f4da5e49efc43ad06
+Merged-In: Iddd8044997c41f97369b768f4da5e49efc43ad06
+(cherry picked from commit a132684a093d9e1750100b39d4e4168f2d27d349)
+---
+ .../server/notification/ManagedServices.java  | 59 ++++++++++++-----
+ .../NotificationManagerService.java           | 34 +++++++---
+ .../notification/ManagedServicesTest.java     | 63 +++++++++++++++++++
+ .../NotificationManagerServiceTest.java       | 27 ++++++++
+ 4 files changed, 160 insertions(+), 23 deletions(-)
+
+diff --git a/services/core/java/com/android/server/notification/ManagedServices.java b/services/core/java/com/android/server/notification/ManagedServices.java
+index 62e26e189a35..159d33999739 100644
+--- a/services/core/java/com/android/server/notification/ManagedServices.java
++++ b/services/core/java/com/android/server/notification/ManagedServices.java
+@@ -133,6 +133,13 @@ abstract public class ManagedServices {
+     static final int APPROVAL_BY_PACKAGE = 0;
+     static final int APPROVAL_BY_COMPONENT = 1;
+ 
++    /**
++     * Maximum number of entries allowed in the lists of packages/components contained in
++     * {@link #mApproved} or {@link #mUserSetServices}. For the first, this effectively limits
++     * the number of services (e.g. NLSes) that will be bound per user.
++     */
++    private static final int MAX_SERVICE_ENTRIES = 100;
++
+     protected final Context mContext;
+     protected final Object mMutex;
+     private final UserProfiles mUserProfiles;
+@@ -915,16 +922,22 @@ abstract public class ManagedServices {
+         }
+     }
+ 
+-    protected void setPackageOrComponentEnabled(String pkgOrComponent, int userId,
++    protected boolean setPackageOrComponentEnabled(String pkgOrComponent, int userId,
+             boolean isPrimary, boolean enabled) {
+-        setPackageOrComponentEnabled(pkgOrComponent, userId, isPrimary, enabled, true);
++        return setPackageOrComponentEnabled(pkgOrComponent, userId, isPrimary, enabled, true);
+     }
+ 
+-    protected void setPackageOrComponentEnabled(String pkgOrComponent, int userId,
++    /**
++     * Changes the enabled state of a managed service.
++     *
++     * @return true if the change (enabling or disabling) was applied; false otherwise
++     */
++    protected boolean setPackageOrComponentEnabled(String pkgOrComponent, int userId,
+             boolean isPrimary, boolean enabled, boolean userSet) {
+         Slog.i(TAG,
+                 (enabled ? " Allowing " : "Disallowing ") + mConfig.caption + " "
+                         + pkgOrComponent + " (userSet: " + userSet + ")");
++        boolean changed = false;
+         synchronized (mApproved) {
+             ArrayMap<Boolean, ArraySet<String>> allowedByType = mApproved.get(userId);
+             if (allowedByType == null) {
+@@ -940,24 +953,42 @@ abstract public class ManagedServices {
+ 
+             if (approvedItem != null) {
+                 if (enabled) {
+-                    approved.add(approvedItem);
++                    if (approved.size() < MAX_SERVICE_ENTRIES) {
++                        approved.add(approvedItem);
++                        changed = true;
++                    } else {
++                        Slog.w(TAG, TextUtils.formatSimple(
++                                "Failed to allow %s %s because there are too many already",
++                                mConfig.caption, pkgOrComponent));
++                    }
+                 } else {
+                     approved.remove(approvedItem);
++                    changed = true;
+                 }
+             }
+-            ArraySet<String> userSetServices = mUserSetServices.get(userId);
+-            if (userSetServices == null) {
+-                userSetServices = new ArraySet<>();
+-                mUserSetServices.put(userId, userSetServices);
+-            }
+-            if (userSet) {
+-                userSetServices.add(pkgOrComponent);
+-            } else {
+-                userSetServices.remove(pkgOrComponent);
++
++            if (changed) {
++                ArraySet<String> userSetServices = mUserSetServices.get(userId);
++                if (userSetServices == null) {
++                    userSetServices = new ArraySet<>();
++                    mUserSetServices.put(userId, userSetServices);
++                }
++                if (userSet) {
++                    if (userSetServices.size() < MAX_SERVICE_ENTRIES) {
++                        userSetServices.add(pkgOrComponent);
++                    }
++                } else {
++                    userSetServices.remove(pkgOrComponent);
++                }
++
+             }
+         }
+ 
+-        rebindServices(false, userId);
++        if (changed) {
++            rebindServices(false, userId);
++        }
++
++        return changed;
+     }
+ 
+     private String getApprovedValue(String pkgOrComponent) {
+diff --git a/services/core/java/com/android/server/notification/NotificationManagerService.java b/services/core/java/com/android/server/notification/NotificationManagerService.java
+index 09689e315458..3f2af4e24d6f 100644
+--- a/services/core/java/com/android/server/notification/NotificationManagerService.java
++++ b/services/core/java/com/android/server/notification/NotificationManagerService.java
+@@ -6689,8 +6689,11 @@ public class NotificationManagerService extends SystemService {
+             try {
+                 if (mAllowedManagedServicePackages.test(
+                         pkg, userId, mConditionProviders.getRequiredPermission())) {
+-                    mConditionProviders.setPackageOrComponentEnabled(
+-                            pkg, userId, true, granted);
++                    boolean changed = mConditionProviders.setPackageOrComponentEnabled(pkg, userId,
++                            /* isPrimary= */ true, granted);
++                    if (!changed) {
++                        return;
++                    }
+ 
+                     getContext().sendBroadcastAsUser(new Intent(
+                             ACTION_NOTIFICATION_POLICY_ACCESS_GRANTED_CHANGED)
+@@ -6960,10 +6963,15 @@ public class NotificationManagerService extends SystemService {
+             try {
+                 if (mAllowedManagedServicePackages.test(
+                         listener.getPackageName(), userId, mListeners.getRequiredPermission())) {
++                    boolean changed = mListeners.setPackageOrComponentEnabled(
++                            listener.flattenToString(), userId, /* isPrimary= */ true, granted,
++                            userSet);
++                    if (!changed) {
++                        return;
++                    }
++
+                     mConditionProviders.setPackageOrComponentEnabled(listener.flattenToString(),
+                             userId, false, granted, userSet);
+-                    mListeners.setPackageOrComponentEnabled(listener.flattenToString(),
+-                            userId, true, granted, userSet);
+ 
+                     getContext().sendBroadcastAsUser(new Intent(
+                             ACTION_NOTIFICATION_POLICY_ACCESS_GRANTED_CHANGED)
+@@ -12695,19 +12703,20 @@ public class NotificationManagerService extends SystemService {
+         }
+ 
+         @Override
+-        protected void setPackageOrComponentEnabled(String pkgOrComponent, int userId,
++        protected boolean setPackageOrComponentEnabled(String pkgOrComponent, int userId,
+                 boolean isPrimary, boolean enabled, boolean userSet) {
+             // Ensures that only one component is enabled at a time
+             if (enabled) {
+                 List<ComponentName> allowedComponents = getAllowedComponents(userId);
+                 if (!allowedComponents.isEmpty()) {
+                     ComponentName currentComponent = CollectionUtils.firstOrNull(allowedComponents);
+-                    if (currentComponent.flattenToString().equals(pkgOrComponent)) return;
++                    if (currentComponent.flattenToString().equals(pkgOrComponent)) return false;
+                     setNotificationAssistantAccessGrantedForUserInternal(
+                             currentComponent, userId, false, userSet);
+                 }
+             }
+-            super.setPackageOrComponentEnabled(pkgOrComponent, userId, isPrimary, enabled, userSet);
++            return super.setPackageOrComponentEnabled(pkgOrComponent, userId, isPrimary, enabled,
++                    userSet);
+         }
+ 
+         private boolean isVerboseLogEnabled() {
+@@ -13054,9 +13063,14 @@ public class NotificationManagerService extends SystemService {
+         }
+ 
+         @Override
+-        protected void setPackageOrComponentEnabled(String pkgOrComponent, int userId,
++        protected boolean setPackageOrComponentEnabled(String pkgOrComponent, int userId,
+                 boolean isPrimary, boolean enabled, boolean userSet) {
+-            super.setPackageOrComponentEnabled(pkgOrComponent, userId, isPrimary, enabled, userSet);
++            boolean changed = super.setPackageOrComponentEnabled(pkgOrComponent, userId, isPrimary,
++                    enabled, userSet);
++            if (!changed) {
++                return false;
++            }
++
+             String pkgName = getPackageName(pkgOrComponent);
+             if (redactSensitiveNotificationsFromUntrustedListeners()) {
+                 int uid = mPackageManagerInternal.getPackageUid(pkgName, 0, userId);
+@@ -13076,6 +13090,8 @@ public class NotificationManagerService extends SystemService {
+                     new Intent(ACTION_NOTIFICATION_LISTENER_ENABLED_CHANGED)
+                             .addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY),
+                     UserHandle.of(userId), null);
++
++            return true;
+         }
+ 
+         @Override
+diff --git a/services/tests/uiservicestests/src/com/android/server/notification/ManagedServicesTest.java b/services/tests/uiservicestests/src/com/android/server/notification/ManagedServicesTest.java
+index 9c85b04fc4ff..cff652c642ee 100644
+--- a/services/tests/uiservicestests/src/com/android/server/notification/ManagedServicesTest.java
++++ b/services/tests/uiservicestests/src/com/android/server/notification/ManagedServicesTest.java
+@@ -33,6 +33,7 @@ import static com.android.server.notification.ManagedServices.APPROVAL_BY_PACKAG
+ import static com.android.server.notification.NotificationManagerService.privateSpaceFlagsEnabled;
+ 
+ import static com.google.common.truth.Truth.assertThat;
++import static com.google.common.truth.Truth.assertWithMessage;
+ 
+ import static junit.framework.Assert.assertEquals;
+ import static junit.framework.Assert.assertFalse;
+@@ -2534,6 +2535,68 @@ public class ManagedServicesTest extends UiServiceTestCase {
+         assertThat(listener.enabledAndUserMatches(visibleBackgroundUserId)).isFalse();
+     }
+ 
++    @Test
++    public void setPackageOrComponentEnabled_tooManyPackages_stopsAdding() {
++        ManagedServices service = new TestManagedServices(getContext(), mLock, mUserProfiles,
++                mIpm, APPROVAL_BY_PACKAGE);
++        int userId = 0;
++
++        for (int i = 1; i <= 100; i++) {
++            assertWithMessage("Trying pkg" + i)
++                    .that(service.setPackageOrComponentEnabled("pkg" + i, userId, true, true))
++                    .isTrue();
++            assertThat(service.isPackageAllowed("pkg" + i, userId)).isTrue();
++        }
++
++        // And finally, monsieur, a wafer-thin mint.
++        assertThat(service.setPackageOrComponentEnabled("toomany", userId, true, true)).isFalse();
++        assertThat(service.isPackageAllowed("toomany", userId)).isFalse();
++
++        // We can still DISABLE packages though.
++        assertThat(service.isPackageAllowed("pkg33", userId)).isTrue();
++        assertThat(service.setPackageOrComponentEnabled("pkg33", userId, true, false)).isTrue();
++        assertThat(service.isPackageAllowed("pkg33", userId)).isFalse();
++
++        // And that allows adding new ones.
++        assertThat(service.setPackageOrComponentEnabled("onemore", userId, true, true)).isTrue();
++        assertThat(service.isPackageAllowed("onemore", userId)).isTrue();
++    }
++
++    @Test
++    public void setPackageOrComponentEnabled_tooManyChanges_stopsAddingToUserSet() {
++        ManagedServices service = new TestManagedServices(getContext(), mLock, mUserProfiles,
++                mIpm, APPROVAL_BY_PACKAGE);
++        int userId = 0;
++
++        for (int i = 1; i <= 100; i++) {
++            assertWithMessage("Enabling pkg" + i)
++                    .that(service.setPackageOrComponentEnabled("pkg" + i, userId, true, true))
++                    .isTrue();
++            assertWithMessage("Disabling pkg" + i)
++                    .that(service.setPackageOrComponentEnabled("pkg" + i, userId, true, false))
++                    .isTrue();
++            assertThat(service.isPackageAllowed("pkg" + i, userId)).isFalse();
++            assertThat(service.isPackageOrComponentUserSet("pkg" + i, userId)).isTrue();
++        }
++
++        // Too many disabled services.
++        assertThat(service.setPackageOrComponentEnabled("toomany", userId, true, true)).isTrue();
++        assertThat(service.isPackageAllowed("toomany", userId)).isTrue();
++        assertThat(service.isPackageOrComponentUserSet("toomany", userId)).isFalse();
++        assertThat(service.setPackageOrComponentEnabled("toomany", userId, true, false)).isTrue();
++        assertThat(service.isPackageAllowed("toomany", userId)).isFalse();
++        assertThat(service.isPackageOrComponentUserSet("toomany", userId)).isFalse();
++
++        // We make space only when packages are uninstalled.
++        service.onPackagesChanged(/* removingPackage= */ true, new String[] { "pkg22" },
++                new int[] { 22 });
++
++        // And that allows tracking new ones.
++        assertThat(service.setPackageOrComponentEnabled("onemore", userId, true, true)).isTrue();
++        assertThat(service.setPackageOrComponentEnabled("onemore", userId, true, false)).isTrue();
++        assertThat(service.isPackageOrComponentUserSet("onemore", userId)).isTrue();
++    }
++
+     private void mockServiceInfoWithMetaData(List<ComponentName> componentNames,
+             ManagedServices service, ArrayMap<ComponentName, Bundle> metaDatas)
+             throws RemoteException {
+diff --git a/services/tests/uiservicestests/src/com/android/server/notification/NotificationManagerServiceTest.java b/services/tests/uiservicestests/src/com/android/server/notification/NotificationManagerServiceTest.java
+index 6edc3b0b7091..f8fa280d3b6d 100644
+--- a/services/tests/uiservicestests/src/com/android/server/notification/NotificationManagerServiceTest.java
++++ b/services/tests/uiservicestests/src/com/android/server/notification/NotificationManagerServiceTest.java
+@@ -722,6 +722,18 @@ public class NotificationManagerServiceTest extends UiServiceTestCase {
+         mPolicyFile.finishWrite(fos);
+ 
+         // Setup managed services
++        when(mListeners.setPackageOrComponentEnabled(any(), anyInt(), anyBoolean(), anyBoolean()))
++                .thenReturn(true);
++        when(mListeners.setPackageOrComponentEnabled(any(), anyInt(), anyBoolean(), anyBoolean(),
++                anyBoolean())).thenReturn(true);
++        when(mAssistants.setPackageOrComponentEnabled(any(), anyInt(), anyBoolean(), anyBoolean()))
++                .thenReturn(true);
++        when(mAssistants.setPackageOrComponentEnabled(any(), anyInt(), anyBoolean(), anyBoolean(),
++                anyBoolean())).thenReturn(true);
++        when(mConditionProviders.setPackageOrComponentEnabled(any(), anyInt(), anyBoolean(),
++                anyBoolean())).thenReturn(true);
++        when(mConditionProviders.setPackageOrComponentEnabled(any(), anyInt(), anyBoolean(),
++                anyBoolean(), anyBoolean())).thenReturn(true);
+         when(mNlf.isTypeAllowed(anyInt())).thenReturn(true);
+         when(mNlf.isPackageAllowed(any())).thenReturn(true);
+         when(mNlf.isPackageAllowed(null)).thenReturn(true);
+@@ -6027,6 +6039,21 @@ public class NotificationManagerServiceTest extends UiServiceTestCase {
+                 c.flattenToString(), user.getIdentifier(), true, /* enabled= */ false, true);
+     }
+ 
++    @Test
++    public void testSetListenerAccessForUser_tooManyListeners_skipsFollowups() throws Exception {
++        UserHandle user = UserHandle.of(mContext.getUserId() + 10);
++        ComponentName c = ComponentName.unflattenFromString("package/Component");
++        when(mListeners.setPackageOrComponentEnabled(any(), anyInt(), anyBoolean(), anyBoolean(),
++                anyBoolean())).thenReturn(false);
++
++        mBinderService.setNotificationListenerAccessGrantedForUser(
++                c, user.getIdentifier(), /* enabled= */ true, true);
++
++        verify(mConditionProviders, never()).setPackageOrComponentEnabled(any(), anyInt(),
++                anyBoolean(), anyBoolean(), anyBoolean());
++        verify(mContext, never()).sendBroadcastAsUser(any(), any(), any());
++    }
++
+     @Test
+     public void testSetAssistantAccessForUser() throws Exception {
+         UserInfo ui = new UserInfo();
+-- 
+2.53.0.335.g19a08e0c02-goog
+

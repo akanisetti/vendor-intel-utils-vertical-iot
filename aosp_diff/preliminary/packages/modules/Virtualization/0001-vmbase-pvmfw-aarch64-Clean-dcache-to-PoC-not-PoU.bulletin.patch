@@ -1,0 +1,67 @@
+From ab5f74693d42e114af5ac238cca0bcb4b17698ac Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Pierre-Cl=C3=A9ment=20Tosi?= <ptosi@google.com>
+Date: Tue, 28 Oct 2025 09:46:06 +0000
+Subject: [PATCH] vmbase,pvmfw: aarch64: Clean dcache to PoC not PoU
+
+Some SoCs (with a unified cache before the PoC) might not flush the data
+to main memory when performing CMOs to PoU so perform them to PoC.
+
+Test: b/434562039#comment35
+Bug: 434562039
+Bug: 455777515
+Flag: EXEMPT CVE_FIX
+Change-Id: Id2398e9bcf8dcf7f7a10d254d8eb411d39e109db
+Merged-In: Id2398e9bcf8dcf7f7a10d254d8eb411d39e109db
+(cherry picked from commit a6f64040dba5a3aae3f67c68e2a754a5c946610d)
+---
+ guest/pvmfw/src/arch/aarch64/payload.rs | 6 +++---
+ libs/libvmbase/src/arch.rs              | 2 +-
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/guest/pvmfw/src/arch/aarch64/payload.rs b/guest/pvmfw/src/arch/aarch64/payload.rs
+index 77e9a31fc..8c2242eac 100644
+--- a/guest/pvmfw/src/arch/aarch64/payload.rs
++++ b/guest/pvmfw/src/arch/aarch64/payload.rs
+@@ -91,7 +91,7 @@ pub fn jump_to_payload(entrypoint: usize, slices: &MemorySlices) -> ! {
+             "b.lo 0b",
+ 
+             // Flush d-cache over .data & .bss (including skipped region).
+-            "0: dc cvau, {cache_line}",
++            "0: dc cvac, {cache_line}",
+             "add {cache_line}, {cache_line}, {dcache_line_size}",
+             "cmp {cache_line}, {scratch_end}",
+             "b.lo 0b",
+@@ -103,7 +103,7 @@ pub fn jump_to_payload(entrypoint: usize, slices: &MemorySlices) -> ! {
+             "b.lo 0b",
+ 
+             // Flush d-cache over stack region.
+-            "0: dc cvau, {cache_line}",
++            "0: dc cvac, {cache_line}",
+             "add {cache_line}, {cache_line}, {dcache_line_size}",
+             "cmp {cache_line}, {stack_end}",
+             "b.lo 0b",
+@@ -115,7 +115,7 @@ pub fn jump_to_payload(entrypoint: usize, slices: &MemorySlices) -> ! {
+             "b.lo 0b",
+ 
+             // Flush d-cache over EH stack region.
+-            "0: dc cvau, {cache_line}",
++            "0: dc cvac, {cache_line}",
+             "add {cache_line}, {cache_line}, {dcache_line_size}",
+             "cmp {cache_line}, {eh_stack_end}",
+             "b.lo 0b",
+diff --git a/libs/libvmbase/src/arch.rs b/libs/libvmbase/src/arch.rs
+index 29d3a32ba..e25745b7a 100644
+--- a/libs/libvmbase/src/arch.rs
++++ b/libs/libvmbase/src/arch.rs
+@@ -47,7 +47,7 @@ pub(crate) fn flush_region(start: usize, size: usize) {
+             let end = start + size;
+             let start = crate::util::unchecked_align_down(start, line_size);
+             for line in (start..end).step_by(line_size) {
+-                crate::dc!("cvau", line);
++                crate::dc!("cvac", line);
+             }
+         } else {
+             compile_error!("Unsupported target_arch")
+-- 
+2.53.0.335.g19a08e0c02-goog
+

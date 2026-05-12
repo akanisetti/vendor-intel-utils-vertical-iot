@@ -1,0 +1,134 @@
+From d7d378d5834223312f248051c7f434c81f64d951 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Mon, 20 Apr 2026 09:24:26 +0000
+Subject: [PATCH] Add staticlocation mixin group
+
+Add staticlocation mixin group with configuration options to enable/disable
+the Intel static location HAL feature. Includes documentation, build
+configuration, and product configuration files for both true and false
+states.
+
+Tracked-On: NIACP3-1182
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ groups/device-specific/caas/BoardConfig.mk        |  1 +
+ groups/device-specific/caas/files.spec            |  1 +
+ .../caas/framework_compatibility_matrix.xml       | 10 ++++++++++
+ groups/staticlocation/default                     |  1 +
+ groups/staticlocation/doc.spec                    | 15 +++++++++++++++
+ groups/staticlocation/false/empty_dir             |  2 ++
+ groups/staticlocation/true/BoardConfig.mk         |  2 ++
+ groups/staticlocation/true/product.mk             | 11 +++++++++++
+ 8 files changed, 43 insertions(+)
+ create mode 100644 groups/device-specific/caas/framework_compatibility_matrix.xml
+ create mode 120000 groups/staticlocation/default
+ create mode 100644 groups/staticlocation/doc.spec
+ create mode 100644 groups/staticlocation/false/empty_dir
+ create mode 100644 groups/staticlocation/true/BoardConfig.mk
+ create mode 100644 groups/staticlocation/true/product.mk
+
+diff --git a/groups/device-specific/caas/BoardConfig.mk b/groups/device-specific/caas/BoardConfig.mk
+index 70d19616..fa717c53 100644
+--- a/groups/device-specific/caas/BoardConfig.mk
++++ b/groups/device-specific/caas/BoardConfig.mk
+@@ -45,6 +45,7 @@ BOARD_USES_GENERIC_AUDIO := false
+ DEVICE_MANIFEST_FILE := ${TARGET_DEVICE_DIR}/manifest.xml
+ DEVICE_MATRIX_FILE   := ${TARGET_DEVICE_DIR}/compatibility_matrix.xml
+ DEVICE_FRAMEWORK_MANIFEST_FILE := ${TARGET_DEVICE_DIR}/framework_manifest.xml
++DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE := ${TARGET_DEVICE_DIR}/framework_compatibility_matrix.xml
+ BUILD_BROKEN_USES_BUILD_HOST_STATIC_LIBRARY := true
+ BUILD_BROKEN_USES_BUILD_HOST_SHARED_LIBRARY := true
+ BUILD_BROKEN_USES_BUILD_HOST_EXECUTABLE := true
+diff --git a/groups/device-specific/caas/files.spec b/groups/device-specific/caas/files.spec
+index 679d9289..0984f016 100644
+--- a/groups/device-specific/caas/files.spec
++++ b/groups/device-specific/caas/files.spec
+@@ -7,6 +7,7 @@ compatibility_matrix.xml: "add compatibility for ota verify"
+ flash_cmd.sh: "ELK mode flash tool"
+ manifest.xml: "define hidl interface"
+ framework_manifest.xml: "define hidl framework interface"
++framework_compatibility_matrix.xml: "define framework compatibility matrix"
+ overlay: "configurations for SystemUI"
+ system.prop: "system properties file"
+ {{ref_target}}.mk: "product definition file"
+diff --git a/groups/device-specific/caas/framework_compatibility_matrix.xml b/groups/device-specific/caas/framework_compatibility_matrix.xml
+new file mode 100644
+index 00000000..aa0deb00
+--- /dev/null
++++ b/groups/device-specific/caas/framework_compatibility_matrix.xml
+@@ -0,0 +1,10 @@
++<compatibility-matrix version="1.0" type="framework">
++    <hal format="aidl" optional="true">
++        <name>vendor.intel.location</name>
++        <version>1</version>
++        <interface>
++            <name>ILocationHal</name>
++            <instance>default</instance>
++        </interface>
++    </hal>
++</compatibility-matrix>
+diff --git a/groups/staticlocation/default b/groups/staticlocation/default
+new file mode 120000
+index 00000000..02e4a84d
+--- /dev/null
++++ b/groups/staticlocation/default
+@@ -0,0 +1 @@
++false
+\ No newline at end of file
+diff --git a/groups/staticlocation/doc.spec b/groups/staticlocation/doc.spec
+new file mode 100644
+index 00000000..8e6ea0e7
+--- /dev/null
++++ b/groups/staticlocation/doc.spec
+@@ -0,0 +1,15 @@
++=== Overview
++
++staticlocation is used for Intel static location HAL integration.
++
++
++==== Options
++
++--- true
++Enable Intel static location HAL service, sepolicy, and default config.
++
++--- false
++Empty dir (no static location support).
++
++--- default
++When not explicitly selected in mixin spec file, the default option will be used.
+diff --git a/groups/staticlocation/false/empty_dir b/groups/staticlocation/false/empty_dir
+new file mode 100644
+index 00000000..76338526
+--- /dev/null
++++ b/groups/staticlocation/false/empty_dir
+@@ -0,0 +1,2 @@
++# Empty directory - no static location support
++# placeholder
+diff --git a/groups/staticlocation/true/BoardConfig.mk b/groups/staticlocation/true/BoardConfig.mk
+new file mode 100644
+index 00000000..7b7a5f12
+--- /dev/null
++++ b/groups/staticlocation/true/BoardConfig.mk
+@@ -0,0 +1,2 @@
++# Static location HAL sepolicy
++BOARD_SEPOLICY_DIRS += $(INTEL_PATH_SEPOLICY)/staticlocation
+diff --git a/groups/staticlocation/true/product.mk b/groups/staticlocation/true/product.mk
+new file mode 100644
+index 00000000..552dec27
+--- /dev/null
++++ b/groups/staticlocation/true/product.mk
+@@ -0,0 +1,11 @@
++# Location HAL vendor modules
++PRODUCT_PACKAGES += \
++    vendor.intel.location.hal
++
++# Location control service (AIDL Java bindings)
++PRODUCT_PACKAGES += \
++    vendor.intel.location-V1-java
++
++# SELinux policy
++PRODUCT_PACKAGES += \
++    vendor_hal_location_sepolicy
+-- 
+2.34.1
+

@@ -1,0 +1,67 @@
+From 39f03f3f8f9c6e92e8cfe384db1025fb573ab23a Mon Sep 17 00:00:00 2001
+From: Bhakthavatsala Raghavendra <bhaktha@google.com>
+Date: Wed, 9 Apr 2025 14:32:47 -0700
+Subject: [PATCH] Remove flag save_peer_csrk_after_ltk_gen
+
+This is a backport of ag/32978033, required to complete security fix for b#288144143 without regressions on 25Q2-staging.
+
+Test: mmm packages/modules/Bluetooth
+Flag: EXEMPT removing save_peer_csrk_after_ltk_gen
+Bug: 288144143
+Change-Id: Id260fa7ef7a982e93649b063378773c69c23e91d
+(cherry picked from commit 11acef3e45abeb5aa366e8176756f9ccf5e8727a)
+---
+ flags/pairing.aconfig       | 10 ----------
+ system/stack/smp/smp_act.cc |  8 +-------
+ 2 files changed, 1 insertion(+), 17 deletions(-)
+
+diff --git a/flags/pairing.aconfig b/flags/pairing.aconfig
+index aff4cbe0ab..f5b1f3a5b9 100644
+--- a/flags/pairing.aconfig
++++ b/flags/pairing.aconfig
+@@ -71,16 +71,6 @@ flag {
+     }
+ }
+ 
+-flag {
+-    name: "save_peer_csrk_after_ltk_gen"
+-    namespace: "bluetooth"
+-    description: "save peer csrk after ltk generated so that right security level is marked as part of peer csrk"
+-    bug: "365567905"
+-    metadata {
+-        purpose: PURPOSE_BUGFIX
+-    }
+-}
+-
+ flag {
+     name: "wait_for_lea_disc_on_le_acl_stat"
+     namespace: "bluetooth"
+diff --git a/system/stack/smp/smp_act.cc b/system/stack/smp/smp_act.cc
+index cfc696a62c..b9faeea6ca 100644
+--- a/system/stack/smp/smp_act.cc
++++ b/system/stack/smp/smp_act.cc
+@@ -1099,9 +1099,7 @@ void smp_proc_srk_info(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
+ 
+   smp_update_key_mask(p_cb, SMP_SEC_KEY_TYPE_CSRK, true);
+ 
+-  if (com::android::bluetooth::flags::save_peer_csrk_after_ltk_gen()) {
+-    smp_key_distribution_by_transport(p_cb, NULL);
+-  }
++  smp_key_distribution_by_transport(p_cb, NULL);
+ 
+   /* save CSRK to security record */
+   tBTM_LE_KEY_VALUE le_key = {
+@@ -1120,10 +1118,6 @@ void smp_proc_srk_info(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
+   if ((p_cb->peer_auth_req & SMP_AUTH_BOND) && (p_cb->loc_auth_req & SMP_AUTH_BOND)) {
+     btm_sec_save_le_key(p_cb->pairing_bda, BTM_LE_KEY_PCSRK, &le_key, true);
+   }
+-
+-  if (!com::android::bluetooth::flags::save_peer_csrk_after_ltk_gen()) {
+-    smp_key_distribution_by_transport(p_cb, NULL);
+-  }
+ }
+ 
+ /*******************************************************************************
+-- 
+2.53.0.335.g19a08e0c02-goog
+

@@ -1,0 +1,35 @@
+From 8eebea12db1815135398dfcc4c0276966c2790f9 Mon Sep 17 00:00:00 2001
+From: Himanshu Arora <hmarora@google.com>
+Date: Thu, 30 Oct 2025 10:30:43 +0000
+Subject: [PATCH] Prevent a malicious selector from launching an arbitrary
+ activity.
+
+PickActivity reuses the incoming intent to show more apps that can handle the request. If the original intent has a selector, it can be used to launch an arbitrary activity with the permissions of DocumentsUI.
+This change fixes the vulnerability by clearing the selector on the copied intent.
+
+Bug: 447135012
+Flag: EXEMPT BUGFIX
+Test: manual
+Merged-In: I3e2eeaab8990a20fe639a165630ed1773e47fb3c
+Change-Id: I3e2eeaab8990a20fe639a165630ed1773e47fb3c
+(cherry picked from commit 32d6a7338dc3f655832c2832dc93d2cc66a2021e)
+---
+ src/com/android/documentsui/picker/PickActivity.java | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/com/android/documentsui/picker/PickActivity.java b/src/com/android/documentsui/picker/PickActivity.java
+index 4f875072e..016f07199 100644
+--- a/src/com/android/documentsui/picker/PickActivity.java
++++ b/src/com/android/documentsui/picker/PickActivity.java
+@@ -236,6 +236,8 @@ public class PickActivity extends BaseActivity implements ActionHandler.Addons {
+         final Intent moreApps = new Intent(intent);
+         moreApps.setComponent(null);
+         moreApps.setPackage(null);
++        // Clear the selector to prevent a malicious selector from launching an arbitrary activity.
++        moreApps.setSelector(null);
+         if (mState.supportsCrossProfile) {
+             if (mConfigStore.isPrivateSpaceInDocsUIEnabled() && SdkLevel.isAtLeastS()) {
+                 mState.canForwardToProfileIdMap = mUserManagerState.getCanForwardToProfileIdMap(
+-- 
+2.53.0.335.g19a08e0c02-goog
+

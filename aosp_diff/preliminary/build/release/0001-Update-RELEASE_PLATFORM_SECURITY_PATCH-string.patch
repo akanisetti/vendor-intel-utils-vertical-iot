@@ -1,28 +1,27 @@
-From da310d7a5d83dbdb35a994856f86ca675c45a0a7 Mon Sep 17 00:00:00 2001
-From: "Alam, SahibeX" <sahibex.alam@intel.com>
-Date: Tue, 2 Sep 2025 13:48:40 +0000
+From f54d3ad5af062626f2545dbbdcf892feaa06b5cd Mon Sep 17 00:00:00 2001
+From: ptumaskx <pradyumnax.tumaskar@intel.com>
+Date: Tue, 17 Mar 2026 06:16:31 +0000
 Subject: [PATCH] Update RELEASE_PLATFORM_SECURITY_PATCH string
 
 Security_patch_level needs to be updated
 When ASB Security patches are integrated
 
-Tracked-On: OAM-133671
-Signed-off-by: Alam, SahibeX <sahibex.alam@intel.com>
+Tracked-On: NIACP3-1216
+Signed-off-by: ptumaskx <pradyumnax.tumaskar@intel.com>
 ---
  flag_values/bp2a/RELEASE_PLATFORM_SECURITY_PATCH.textproto | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/flag_values/bp2a/RELEASE_PLATFORM_SECURITY_PATCH.textproto b/flag_values/bp2a/RELEASE_PLATFORM_SECURITY_PATCH.textproto
-index 8d4adba7..75819762 100644
+index 8d4adba77..f0369e286 100644
 --- a/flag_values/bp2a/RELEASE_PLATFORM_SECURITY_PATCH.textproto
 +++ b/flag_values/bp2a/RELEASE_PLATFORM_SECURITY_PATCH.textproto
 @@ -1,4 +1,4 @@
  name: "RELEASE_PLATFORM_SECURITY_PATCH"
  value {
 -  string_value: "2025-06-05"
-+  string_value: "2025-12-01"
++  string_value: "2026-03-01"
  }
 -- 
 2.34.1
-
 

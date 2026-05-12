@@ -1,0 +1,57 @@
+From 9c184d461fd647178bea74450cf4c3e2643f9527 Mon Sep 17 00:00:00 2001
+From: darshilshah <darshilshah@google.com>
+Date: Mon, 7 Jul 2025 10:35:03 +0000
+Subject: [PATCH] Restore calling identity when exception is thrown
+
+MediaProvider#updateInternal parses uri that can throw
+NumberFormatException after which calling identity is not restored.
+
+MediaProvider#getResultForGetMediaUri can throw
+IllegalArguementException if documentUri's authority is incorrect, after
+which calling identity is not restored.
+
+Bug: 417195606
+Bug: 418225717
+Test: EXEMPT bugfix
+Flag: EXEMPT bugfix
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:bb834ffbc6bbede6ca1ad49ca1301e6e567c551b)
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:b92a39f830516b5e9a1e5ba529e8f9ba0380ada3)
+Merged-In: Ia295e56530a44c437db3a159e97c12d1a239b547
+Change-Id: Ia295e56530a44c437db3a159e97c12d1a239b547
+---
+ src/com/android/providers/media/MediaProvider.java | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/src/com/android/providers/media/MediaProvider.java b/src/com/android/providers/media/MediaProvider.java
+index 2872e4a7e..46e961b52 100644
+--- a/src/com/android/providers/media/MediaProvider.java
++++ b/src/com/android/providers/media/MediaProvider.java
+@@ -7674,6 +7674,7 @@ public class MediaProvider extends ContentProvider {
+ 
+         if (!authority.equals(MediaDocumentsProvider.AUTHORITY)
+                 && !authority.equals(DocumentsContract.EXTERNAL_STORAGE_PROVIDER_AUTHORITY)) {
++            restoreCallingIdentity(token);
+             throw new IllegalArgumentException("Provider for this Uri is not supported.");
+         }
+ 
+@@ -8978,8 +8979,15 @@ public class MediaProvider extends ContentProvider {
+             }
+ 
+             final LocalCallingIdentity token = clearLocalCallingIdentity();
+-            final Uri genericUri = MediaStore.Files.getContentUri(volumeName,
+-                    ContentUris.parseId(uri));
++
++            final Uri genericUri;
++            try {
++                genericUri = MediaStore.Files.getContentUri(volumeName, ContentUris.parseId(uri));
++            } catch (NumberFormatException e) {
++                restoreLocalCallingIdentity(token);
++                throw e;
++            }
++
+             try (Cursor c = queryForSingleItem(genericUri,
+                     sPlacementColumns.toArray(new String[0]), userWhere, userWhereArgs, null)) {
+                 for (int i = 0; i < c.getColumnCount(); i++) {
+-- 
+2.53.0.335.g19a08e0c02-goog
+

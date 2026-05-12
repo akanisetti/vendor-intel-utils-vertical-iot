@@ -1,0 +1,28 @@
+From baef3d1ba565c908fff99864d28acf54c7753586 Mon Sep 17 00:00:00 2001
+From: gdonthu <gangadhar.donthu@intel.com>
+Date: Wed, 11 Mar 2026 06:48:09 +0000
+Subject: [PATCH] Use KeyMint HAL in Rust for Trusty
+
+Signed-off-by: gdonthu <gangadhar.donthu@intel.com>
+Co-authored-by: Jadeja, Anshumansinh <anshumansinh.jadeja@intel.com>
+Co-authored-by: Krishna, Anisetti Avinash <anisetti.avinash.krishna@intel.com>
+---
+ groups/tee/trusty/product.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/groups/tee/trusty/product.mk b/groups/tee/trusty/product.mk
+index ee8b4b0c..4070e7b8 100644
+--- a/groups/tee/trusty/product.mk
++++ b/groups/tee/trusty/product.mk
+@@ -5,7 +5,7 @@ PRODUCT_PACKAGES += \
+ 	libinteltrustystorage \
+ 	libinteltrustystorageinterface \
+ 	android.hardware.gatekeeper-service.trusty \
+-	android.hardware.security.keymint-service.trusty \
++	android.hardware.security.keymint-service.rust.trusty \
+ 	keybox_provisioning \
+ 	RemoteProvisioner \
+ 	rpmb_dev
+-- 
+2.34.1
+

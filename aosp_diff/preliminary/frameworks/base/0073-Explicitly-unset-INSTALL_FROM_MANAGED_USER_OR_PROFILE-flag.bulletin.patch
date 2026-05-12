@@ -1,0 +1,34 @@
+From 990428772d4718853382ec4c5feda2b7bd6f923f Mon Sep 17 00:00:00 2001
+From: Sanjana Sunil <sanjanasunil@google.com>
+Date: Wed, 26 Nov 2025 14:40:09 +0000
+Subject: [PATCH] Explicitly unset INSTALL_FROM_MANAGED_USER_OR_PROFILE flag
+
+If the flag is not explicitly unset, an app could set this flag, leading
+to unexpected behaviour if the install is not actually from a managed
+user or profile.
+
+Bug: 459461121
+Test: atest PackageManagerShellCommandInstallTest#testSessionCreationWithManagedUserOrProfileFlag_notFromManagedProfile
+Flag: EXEMPT BUGFIX
+Change-Id: I21bbbf628e97244d469eb23ce0558dbf560b7618
+Merged-In: I21bbbf628e97244d469eb23ce0558dbf560b7618
+---
+ .../java/com/android/server/pm/PackageInstallerService.java     | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/services/core/java/com/android/server/pm/PackageInstallerService.java b/services/core/java/com/android/server/pm/PackageInstallerService.java
+index 2d0bb258e89f..a0ad5d1aaa30 100644
+--- a/services/core/java/com/android/server/pm/PackageInstallerService.java
++++ b/services/core/java/com/android/server/pm/PackageInstallerService.java
+@@ -1027,6 +1027,8 @@ public class PackageInstallerService extends IPackageInstaller.Stub implements
+         }
+ 
+         final var dpmi = LocalServices.getService(DevicePolicyManagerInternal.class);
++        // Only the system should be able to set this flag - so ensure it is unset when not needed.
++        params.installFlags &= ~PackageManager.INSTALL_FROM_MANAGED_USER_OR_PROFILE;
+         if (dpmi != null && dpmi.isUserOrganizationManaged(userId)) {
+             params.installFlags |= PackageManager.INSTALL_FROM_MANAGED_USER_OR_PROFILE;
+         }
+-- 
+2.53.0.335.g19a08e0c02-goog
+

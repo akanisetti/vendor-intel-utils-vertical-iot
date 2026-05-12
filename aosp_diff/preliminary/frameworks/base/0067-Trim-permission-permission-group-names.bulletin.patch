@@ -1,0 +1,49 @@
+From 08ea2a452c271ccf258d63efc0126c7fa13d3312 Mon Sep 17 00:00:00 2001
+From: Nate Myren <ntmyren@google.com>
+Date: Wed, 5 Nov 2025 14:36:49 -0800
+Subject: [PATCH] Trim permission, permission group names
+
+Bug: 453649815
+Test: atest AppSecurityTests
+Flag: EXEMPT CVE_FIX
+Change-Id: I673ad83d05c9825177967e4f0a960e8841610b71
+(cherry picked from commit 595cf99ecd42927eebf804638a4623313f3f14db)
+---
+ .../internal/pm/pkg/component/ParsedPermissionUtils.java   | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/core/java/com/android/internal/pm/pkg/component/ParsedPermissionUtils.java b/core/java/com/android/internal/pm/pkg/component/ParsedPermissionUtils.java
+index d4dabf51d4c7..0dd0969ae35e 100644
+--- a/core/java/com/android/internal/pm/pkg/component/ParsedPermissionUtils.java
++++ b/core/java/com/android/internal/pm/pkg/component/ParsedPermissionUtils.java
+@@ -152,6 +152,8 @@ public class ParsedPermissionUtils {
+             }
+         }
+ 
++        permission.setName(permission.getName().trim());
++
+         permission.setProtectionLevel(
+                 PermissionInfo.fixProtectionLevel(permission.getProtectionLevel()));
+ 
+@@ -199,6 +201,8 @@ public class ParsedPermissionUtils {
+             sa.recycle();
+         }
+ 
++        permission.setName(permission.getName().trim());
++
+         int index = permission.getName().indexOf('.');
+         if (index > 0) {
+             index = permission.getName().indexOf('.', index + 1);
+@@ -248,7 +252,8 @@ public class ParsedPermissionUtils {
+                     .setBackgroundRequestDetailRes(sa.getResourceId(R.styleable.AndroidManifestPermissionGroup_backgroundRequestDetail, 0))
+                     .setRequestRes(sa.getResourceId(R.styleable.AndroidManifestPermissionGroup_request, 0))
+                     .setPriority(sa.getInt(R.styleable.AndroidManifestPermissionGroup_priority, 0))
+-                    .setFlags(sa.getInt(R.styleable.AndroidManifestPermissionGroup_permissionGroupFlags,0));
++                    .setFlags(sa.getInt(R.styleable.AndroidManifestPermissionGroup_permissionGroupFlags,0))
++                    .setName(permissionGroup.getName().trim());
+             // @formatter:on
+         } finally {
+             sa.recycle();
+-- 
+2.53.0.335.g19a08e0c02-goog
+

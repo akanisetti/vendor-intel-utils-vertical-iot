@@ -1,0 +1,598 @@
+From feb931006ee2d56c146156d5bb1491117841ccf3 Mon Sep 17 00:00:00 2001
+From: Shawn Lin <shawnlin@google.com>
+Date: Tue, 14 Oct 2025 08:08:58 +0000
+Subject: [PATCH] Fixed "Unlock your phone" unexpectedlly turned ON after OTA
+
+If the new settings key is not set, we should use the values of the old
+keys as default value.
+
+Bug: 444673089
+Test: atest FaceSettingsAppsPreferenceControllerTest
+        FaceSettingsKeyguardUnlockPreferenceControllerTest
+        FingerprintSettingsAppsPreferenceControllerTest
+        FingerprintSettingsKeyguardUnlockPreferenceControllerTest
+Flag: EXEMPT BUGFIX
+Change-Id: I345defc78500c244e29e8595f5fbc705b95f4ba6
+(cherry picked from commit 05f0884146a093e6311d7a30232d6850a28368ef)
+---
+ .../FaceSettingsAppsPreferenceController.java |  17 ++-
+ ...ngsKeyguardUnlockPreferenceController.java |  13 ++
+ ...printSettingsAppsPreferenceController.java |  17 ++-
+ ...ngsKeyguardUnlockPreferenceController.java |  13 ++
+ ...eSettingsAppsPreferenceControllerTest.java | 116 ++++++++++++++++++
+ ...eyguardUnlockPreferenceControllerTest.java |  90 ++++++++++++++
+ ...tSettingsAppsPreferenceControllerTest.java |  76 ++++++++++++
+ ...eyguardUnlockPreferenceControllerTest.java |  90 ++++++++++++++
+ 8 files changed, 428 insertions(+), 4 deletions(-)
+ create mode 100644 tests/robotests/src/com/android/settings/biometrics/face/FaceSettingsAppsPreferenceControllerTest.java
+ create mode 100644 tests/robotests/src/com/android/settings/biometrics/face/FaceSettingsKeyguardUnlockPreferenceControllerTest.java
+ create mode 100644 tests/robotests/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsAppsPreferenceControllerTest.java
+ create mode 100644 tests/robotests/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsKeyguardUnlockPreferenceControllerTest.java
+
+diff --git a/src/com/android/settings/biometrics/face/FaceSettingsAppsPreferenceController.java b/src/com/android/settings/biometrics/face/FaceSettingsAppsPreferenceController.java
+index 9500c25a8e..78d9ffaf7c 100644
+--- a/src/com/android/settings/biometrics/face/FaceSettingsAppsPreferenceController.java
++++ b/src/com/android/settings/biometrics/face/FaceSettingsAppsPreferenceController.java
+@@ -16,6 +16,7 @@
+ 
+ package com.android.settings.biometrics.face;
+ 
++import static android.provider.Settings.Secure.BIOMETRIC_APP_ENABLED;
+ import static android.provider.Settings.Secure.FACE_APP_ENABLED;
+ 
+ import android.app.settings.SettingsEnums;
+@@ -31,6 +32,7 @@ import com.android.settings.biometrics.activeunlock.ActiveUnlockStatusUtils;
+ 
+ public class FaceSettingsAppsPreferenceController extends
+         FaceSettingsPreferenceController {
++    private static final int NOT_SET = -1;
+     private static final int ON = 1;
+     private static final int OFF = 0;
+     private static final int DEFAULT = ON;
+@@ -40,12 +42,23 @@ public class FaceSettingsAppsPreferenceController extends
+     public FaceSettingsAppsPreferenceController(@NonNull Context context, @NonNull String key) {
+         super(context, key);
+         mFaceManager = Utils.getFaceManagerOrNull(context);
++
++        // For OTA case: if FACE_APP_ENABLED is not set and BIOMETRIC_APP_ENABLED is set, set the
++        // default value of the former to that of the latter.
++        final int defValue = Settings.Secure.getIntForUser(mContext.getContentResolver(),
++                FACE_APP_ENABLED, NOT_SET, getUserId());
++        final int oldDefValue = Settings.Secure.getIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_APP_ENABLED, NOT_SET, getUserId());
++        if (defValue == NOT_SET && oldDefValue != NOT_SET) {
++            Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                    FACE_APP_ENABLED, oldDefValue, getUserId());
++        }
+     }
+ 
+     @Override
+     public boolean isChecked() {
+-        return Settings.Secure.getIntForUser(mContext.getContentResolver(), FACE_APP_ENABLED,
+-                DEFAULT, getUserId()) == ON;
++        return Settings.Secure.getIntForUser(mContext.getContentResolver(),
++                FACE_APP_ENABLED, DEFAULT, getUserId()) == ON;
+     }
+ 
+     @Override
+diff --git a/src/com/android/settings/biometrics/face/FaceSettingsKeyguardUnlockPreferenceController.java b/src/com/android/settings/biometrics/face/FaceSettingsKeyguardUnlockPreferenceController.java
+index 5ff15232a0..46731b9445 100644
+--- a/src/com/android/settings/biometrics/face/FaceSettingsKeyguardUnlockPreferenceController.java
++++ b/src/com/android/settings/biometrics/face/FaceSettingsKeyguardUnlockPreferenceController.java
+@@ -16,6 +16,7 @@
+ 
+ package com.android.settings.biometrics.face;
+ 
++import static android.provider.Settings.Secure.BIOMETRIC_KEYGUARD_ENABLED;
+ import static android.provider.Settings.Secure.FACE_KEYGUARD_ENABLED;
+ 
+ import android.app.settings.SettingsEnums;
+@@ -31,6 +32,7 @@ import com.android.settings.biometrics.activeunlock.ActiveUnlockStatusUtils;
+ 
+ public class FaceSettingsKeyguardUnlockPreferenceController extends
+         FaceSettingsPreferenceController {
++    private static final int NOT_SET = -1;
+     private static final int ON = 1;
+     private static final int OFF = 0;
+     private static final int DEFAULT = ON;
+@@ -41,6 +43,17 @@ public class FaceSettingsKeyguardUnlockPreferenceController extends
+             @NonNull Context context, @NonNull String key) {
+         super(context, key);
+         mFaceManager = Utils.getFaceManagerOrNull(context);
++
++        // For OTA case: if FACE_KEYGUARD_ENABLED is not set and BIOMETRIC_KEYGUARD_ENABLED is set,
++        // set the default value of the former to that of the latter.
++        final int defValue = Settings.Secure.getIntForUser(mContext.getContentResolver(),
++                FACE_KEYGUARD_ENABLED, NOT_SET, getUserId());
++        final int oldDefValue = Settings.Secure.getIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_KEYGUARD_ENABLED, NOT_SET, getUserId());
++        if (defValue == NOT_SET && oldDefValue != NOT_SET) {
++            Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                    FACE_KEYGUARD_ENABLED, oldDefValue, getUserId());
++        }
+     }
+ 
+     @Override
+diff --git a/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsAppsPreferenceController.java b/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsAppsPreferenceController.java
+index 63fc3dcef2..574d406e38 100644
+--- a/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsAppsPreferenceController.java
++++ b/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsAppsPreferenceController.java
+@@ -16,6 +16,7 @@
+ 
+ package com.android.settings.biometrics.fingerprint;
+ 
++import static android.provider.Settings.Secure.BIOMETRIC_APP_ENABLED;
+ import static android.provider.Settings.Secure.FINGERPRINT_APP_ENABLED;
+ 
+ import android.app.settings.SettingsEnums;
+@@ -31,6 +32,7 @@ import com.android.settings.biometrics.activeunlock.ActiveUnlockStatusUtils;
+ 
+ public class FingerprintSettingsAppsPreferenceController
+         extends FingerprintSettingsPreferenceController {
++    private static final int NOT_SET = -1;
+     private static final int ON = 1;
+     private static final int OFF = 0;
+     private static final int DEFAULT = ON;
+@@ -41,12 +43,23 @@ public class FingerprintSettingsAppsPreferenceController
+             @NonNull Context context, @NonNull String key) {
+         super(context, key);
+         mFingerprintManager = Utils.getFingerprintManagerOrNull(context);
++
++        // For OTA case: if FINGERPRINT_APP_ENABLED is not set and BIOMETRIC_APP_ENABLED is set,
++        // set the default value of the former to that of the latter.
++        final int defValue = Settings.Secure.getIntForUser(mContext.getContentResolver(),
++                FINGERPRINT_APP_ENABLED, NOT_SET, getUserId());
++        final int oldDefValue = Settings.Secure.getIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_APP_ENABLED, NOT_SET, getUserId());
++        if (defValue == NOT_SET && oldDefValue != NOT_SET) {
++            Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                    FINGERPRINT_APP_ENABLED, oldDefValue, getUserId());
++        }
+     }
+ 
+     @Override
+     public boolean isChecked() {
+-        return Settings.Secure.getIntForUser(mContext.getContentResolver(), FINGERPRINT_APP_ENABLED,
+-                DEFAULT, getUserId()) == ON;
++        return Settings.Secure.getIntForUser(mContext.getContentResolver(),
++                FINGERPRINT_APP_ENABLED, DEFAULT, getUserId()) == ON;
+     }
+ 
+     @Override
+diff --git a/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsKeyguardUnlockPreferenceController.java b/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsKeyguardUnlockPreferenceController.java
+index 56ef2c3db8..89bea9b5fd 100644
+--- a/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsKeyguardUnlockPreferenceController.java
++++ b/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsKeyguardUnlockPreferenceController.java
+@@ -16,6 +16,7 @@
+ 
+ package com.android.settings.biometrics.fingerprint;
+ 
++import static android.provider.Settings.Secure.BIOMETRIC_KEYGUARD_ENABLED;
+ import static android.provider.Settings.Secure.FINGERPRINT_KEYGUARD_ENABLED;
+ 
+ import android.app.settings.SettingsEnums;
+@@ -32,6 +33,7 @@ import com.android.settings.biometrics.activeunlock.ActiveUnlockStatusUtils;
+ public class FingerprintSettingsKeyguardUnlockPreferenceController
+         extends FingerprintSettingsPreferenceController {
+ 
++    private static final int NOT_SET = -1;
+     private static final int ON = 1;
+     private static final int OFF = 0;
+     private static final int DEFAULT = ON;
+@@ -42,6 +44,17 @@ public class FingerprintSettingsKeyguardUnlockPreferenceController
+             @NonNull Context context, @NonNull String key) {
+         super(context, key);
+         mFingerprintManager = Utils.getFingerprintManagerOrNull(context);
++
++        // For OTA case: if FINGERPRINT_KEYGUARD_ENABLED is not set and BIOMETRIC_KEYGUARD_ENABLED
++        // is set, set the default value of the former to that of the latter.
++        final int defValue = Settings.Secure.getIntForUser(mContext.getContentResolver(),
++                FINGERPRINT_KEYGUARD_ENABLED, NOT_SET, getUserId());
++        final int oldDefValue = Settings.Secure.getIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_KEYGUARD_ENABLED, NOT_SET, getUserId());
++        if (defValue == NOT_SET && oldDefValue != NOT_SET) {
++            Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                    FINGERPRINT_KEYGUARD_ENABLED, oldDefValue, getUserId());
++        }
+     }
+ 
+     @Override
+diff --git a/tests/robotests/src/com/android/settings/biometrics/face/FaceSettingsAppsPreferenceControllerTest.java b/tests/robotests/src/com/android/settings/biometrics/face/FaceSettingsAppsPreferenceControllerTest.java
+new file mode 100644
+index 0000000000..676031c495
+--- /dev/null
++++ b/tests/robotests/src/com/android/settings/biometrics/face/FaceSettingsAppsPreferenceControllerTest.java
+@@ -0,0 +1,116 @@
++/*
++ * Copyright (C) 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.settings.biometrics.face;
++
++import static android.provider.Settings.Secure.BIOMETRIC_APP_ENABLED;
++import static android.provider.Settings.Secure.FACE_APP_ENABLED;
++
++import static com.google.common.truth.Truth.assertThat;
++
++import static org.mockito.Mockito.when;
++
++import android.content.Context;
++import android.hardware.biometrics.ComponentInfoInternal;
++import android.hardware.biometrics.SensorProperties;
++import android.hardware.face.FaceManager;
++import android.hardware.face.FaceSensorProperties;
++import android.hardware.face.FaceSensorPropertiesInternal;
++import android.provider.Settings;
++
++import androidx.test.core.app.ApplicationProvider;
++
++import com.android.settings.testutils.FakeFeatureFactory;
++import com.android.settings.testutils.shadow.ShadowSecureSettings;
++import com.android.settings.testutils.shadow.ShadowUtils;
++
++import org.junit.After;
++import org.junit.Before;
++import org.junit.Rule;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.mockito.Mock;
++import org.mockito.Spy;
++import org.mockito.junit.MockitoJUnit;
++import org.mockito.junit.MockitoRule;
++import org.robolectric.RobolectricTestRunner;
++import org.robolectric.annotation.Config;
++
++import java.util.ArrayList;
++
++@RunWith(RobolectricTestRunner.class)
++@Config(shadows = {ShadowSecureSettings.class})
++public class FaceSettingsAppsPreferenceControllerTest {
++    @Rule
++    public final MockitoRule mMockitoRule = MockitoJUnit.rule();
++    @Spy
++    private Context mContext = ApplicationProvider.getApplicationContext();
++    @Mock
++    private FaceManager mFaceManager;
++    private FaceSettingsAppsPreferenceController mController;
++
++    private FaceSensorPropertiesInternal mConvenienceSensorProperty =
++            new FaceSensorPropertiesInternal(
++                    0 /* sensorId */,
++                    SensorProperties.STRENGTH_CONVENIENCE,
++                    1 /* maxEnrollmentsPerUser */,
++                    new ArrayList<ComponentInfoInternal>(),
++                    FaceSensorProperties.TYPE_UNKNOWN,
++                    true /* supportsFaceDetection */,
++                    true /* supportsSelfIllumination */,
++                    true /* resetLockoutRequiresChallenge */);
++    private FakeFeatureFactory mFeatureFactory;
++
++    @Before
++    public void setUp() {
++        when(mContext.getSystemService(Context.FACE_SERVICE)).thenReturn(mFaceManager);
++        final ArrayList<FaceSensorPropertiesInternal> list = new ArrayList<>();
++        list.add(mConvenienceSensorProperty);
++        when(mFaceManager.getSensorPropertiesInternal()).thenReturn(list);
++        mFeatureFactory = FakeFeatureFactory.setupForTest();
++    }
++
++    @After
++    public void tearDown() {
++        ShadowUtils.reset();
++    }
++
++    @Test
++    public void isChecked_BiometricAppEnableOff_FaceAppEnabledNotSet_returnFalse() {
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_APP_ENABLED, 0, mContext.getUserId());
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                FACE_APP_ENABLED, -1, mContext.getUserId());
++
++        mController = new FaceSettingsAppsPreferenceController(
++                mContext, "biometric_settings_face_app");
++
++        assertThat(mController.isChecked()).isFalse();
++    }
++
++    @Test
++    public void isChecked_BiometricAppEnableOff_FaceAppEnabledOn_returnTrue() {
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_APP_ENABLED, 0, mContext.getUserId());
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                FACE_APP_ENABLED, 1, mContext.getUserId());
++
++        mController = new FaceSettingsAppsPreferenceController(
++                mContext, "biometric_settings_face_app");
++
++        assertThat(mController.isChecked()).isTrue();
++    }
++}
+diff --git a/tests/robotests/src/com/android/settings/biometrics/face/FaceSettingsKeyguardUnlockPreferenceControllerTest.java b/tests/robotests/src/com/android/settings/biometrics/face/FaceSettingsKeyguardUnlockPreferenceControllerTest.java
+new file mode 100644
+index 0000000000..837f31e3bd
+--- /dev/null
++++ b/tests/robotests/src/com/android/settings/biometrics/face/FaceSettingsKeyguardUnlockPreferenceControllerTest.java
+@@ -0,0 +1,90 @@
++/*
++ * Copyright (C) 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.settings.biometrics.face;
++
++import static android.provider.Settings.Secure.BIOMETRIC_KEYGUARD_ENABLED;
++import static android.provider.Settings.Secure.FACE_KEYGUARD_ENABLED;
++
++import static com.google.common.truth.Truth.assertThat;
++
++import static org.mockito.Mockito.when;
++
++import android.content.Context;
++import android.os.UserManager;
++import android.provider.Settings;
++
++import androidx.test.core.app.ApplicationProvider;
++
++import com.android.settings.testutils.FakeFeatureFactory;
++import com.android.settings.testutils.shadow.ShadowSecureSettings;
++
++import org.junit.Before;
++import org.junit.Rule;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.mockito.Mock;
++import org.mockito.Spy;
++import org.mockito.junit.MockitoJUnit;
++import org.mockito.junit.MockitoRule;
++import org.robolectric.RobolectricTestRunner;
++import org.robolectric.annotation.Config;
++
++@RunWith(RobolectricTestRunner.class)
++@Config(shadows = {ShadowSecureSettings.class})
++public class FaceSettingsKeyguardUnlockPreferenceControllerTest {
++    @Rule
++    public final MockitoRule mMockitoRule = MockitoJUnit.rule();
++    @Spy
++    Context mContext = ApplicationProvider.getApplicationContext();
++    private FaceSettingsKeyguardUnlockPreferenceController mController;
++    private FakeFeatureFactory mFeatureFactory;
++    @Mock
++    private UserManager mUserManager;
++
++    @Before
++    public void setUp() {
++
++        mFeatureFactory = FakeFeatureFactory.setupForTest();
++        when(mContext.getSystemService(UserManager.class)).thenReturn(mUserManager);
++    }
++
++    @Test
++    public void isChecked_BiometricKeyguardEnabledOff_FaceKeyguardEnabledNotSet_returnFalse() {
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_KEYGUARD_ENABLED, 0, mContext.getUserId());
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                FACE_KEYGUARD_ENABLED, -1, mContext.getUserId());
++
++        mController = new FaceSettingsKeyguardUnlockPreferenceController(
++                mContext, "biometric_settings_face_keyguard");
++
++        assertThat(mController.isChecked()).isFalse();
++    }
++
++    @Test
++    public void isChecked_BiometricKeyguardEnabledOff_FaceKeyguardEnabledOn_returnTrue() {
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_KEYGUARD_ENABLED, 0, mContext.getUserId());
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                FACE_KEYGUARD_ENABLED, 1, mContext.getUserId());
++
++        mController = new FaceSettingsKeyguardUnlockPreferenceController(
++                mContext, "biometric_settings_face_keyguard");
++
++        assertThat(mController.isChecked()).isTrue();
++    }
++}
+diff --git a/tests/robotests/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsAppsPreferenceControllerTest.java b/tests/robotests/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsAppsPreferenceControllerTest.java
+new file mode 100644
+index 0000000000..841cec2f3d
+--- /dev/null
++++ b/tests/robotests/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsAppsPreferenceControllerTest.java
+@@ -0,0 +1,76 @@
++/*
++ * Copyright (C) 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.settings.biometrics.fingerprint;
++
++import static android.provider.Settings.Secure.BIOMETRIC_APP_ENABLED;
++import static android.provider.Settings.Secure.FINGERPRINT_APP_ENABLED;
++
++import static com.google.common.truth.Truth.assertThat;
++
++import android.content.Context;
++import android.provider.Settings;
++
++import androidx.test.core.app.ApplicationProvider;
++
++import com.android.settings.testutils.FakeFeatureFactory;
++import com.android.settings.testutils.shadow.ShadowSecureSettings;
++
++import org.junit.Before;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.robolectric.RobolectricTestRunner;
++import org.robolectric.annotation.Config;
++
++@RunWith(RobolectricTestRunner.class)
++@Config(shadows = {ShadowSecureSettings.class})
++public class FingerprintSettingsAppsPreferenceControllerTest {
++    private Context mContext;
++    private FingerprintSettingsAppsPreferenceController mController;
++    private FakeFeatureFactory mFeatureFactory;
++
++    @Before
++    public void setUp() {
++        mContext = ApplicationProvider.getApplicationContext();
++        mFeatureFactory = FakeFeatureFactory.setupForTest();
++    }
++
++    @Test
++    public void isChecked_BiometricAppEnableOff_FingerprintAppEnabledNotSet_returnFalse() {
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_APP_ENABLED, 0, mContext.getUserId());
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                FINGERPRINT_APP_ENABLED, -1, mContext.getUserId());
++
++        mController = new FingerprintSettingsAppsPreferenceController(
++                mContext, "biometric_settings_fingerprint_app");
++
++        assertThat(mController.isChecked()).isFalse();
++    }
++
++    @Test
++    public void isChecked_BiometricAppEnableOff_FingerprintAppEnabledOn_returnTrue() {
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_APP_ENABLED, 0, mContext.getUserId());
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                FINGERPRINT_APP_ENABLED, 1, mContext.getUserId());
++
++        mController = new FingerprintSettingsAppsPreferenceController(
++                mContext, "biometric_settings_fingerprint_app");
++
++        assertThat(mController.isChecked()).isTrue();
++    }
++}
+diff --git a/tests/robotests/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsKeyguardUnlockPreferenceControllerTest.java b/tests/robotests/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsKeyguardUnlockPreferenceControllerTest.java
+new file mode 100644
+index 0000000000..119fda8bbf
+--- /dev/null
++++ b/tests/robotests/src/com/android/settings/biometrics/fingerprint/FingerprintSettingsKeyguardUnlockPreferenceControllerTest.java
+@@ -0,0 +1,90 @@
++/*
++ * Copyright (C) 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.settings.biometrics.fingerprint;
++
++import static android.provider.Settings.Secure.BIOMETRIC_KEYGUARD_ENABLED;
++import static android.provider.Settings.Secure.FINGERPRINT_KEYGUARD_ENABLED;
++
++import static com.google.common.truth.Truth.assertThat;
++
++import static org.mockito.Mockito.when;
++
++import android.content.Context;
++import android.os.UserManager;
++import android.provider.Settings;
++
++import androidx.test.core.app.ApplicationProvider;
++
++import com.android.settings.testutils.FakeFeatureFactory;
++import com.android.settings.testutils.shadow.ShadowSecureSettings;
++
++import org.junit.Before;
++import org.junit.Rule;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.mockito.Mock;
++import org.mockito.Spy;
++import org.mockito.junit.MockitoJUnit;
++import org.mockito.junit.MockitoRule;
++import org.robolectric.RobolectricTestRunner;
++import org.robolectric.annotation.Config;
++
++@RunWith(RobolectricTestRunner.class)
++@Config(shadows = {ShadowSecureSettings.class})
++public class FingerprintSettingsKeyguardUnlockPreferenceControllerTest {
++    @Rule
++    public final MockitoRule mMockitoRule = MockitoJUnit.rule();
++    @Spy
++    Context mContext = ApplicationProvider.getApplicationContext();
++    private FingerprintSettingsKeyguardUnlockPreferenceController mController;
++    private FakeFeatureFactory mFeatureFactory;
++    @Mock
++    private UserManager mUserManager;
++
++    @Before
++    public void setUp() {
++        mFeatureFactory = FakeFeatureFactory.setupForTest();
++        when(mContext.getSystemService(UserManager.class)).thenReturn(mUserManager);
++    }
++
++    @Test
++    public void
++            isChecked_BiometricKeyguardEnabledOff_FingerprintKeyguardEnabledNotSet_returnFalse() {
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_KEYGUARD_ENABLED, 0, mContext.getUserId());
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                FINGERPRINT_KEYGUARD_ENABLED, -1, mContext.getUserId());
++
++        mController = new FingerprintSettingsKeyguardUnlockPreferenceController(
++                mContext, "biometric_settings_fingerprint_keyguard");
++
++        assertThat(mController.isChecked()).isFalse();
++    }
++
++    @Test
++    public void isChecked_BiometricKeyguardEnabledOff_FingerprintKeyguardEnabledOn_returnTrue() {
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                BIOMETRIC_KEYGUARD_ENABLED, 0, mContext.getUserId());
++        Settings.Secure.putIntForUser(mContext.getContentResolver(),
++                FINGERPRINT_KEYGUARD_ENABLED, 1, mContext.getUserId());
++
++        mController = new FingerprintSettingsKeyguardUnlockPreferenceController(
++                mContext, "biometric_settings_fingerprint_keyguard");
++
++        assertThat(mController.isChecked()).isTrue();
++    }
++}
+-- 
+2.53.0.335.g19a08e0c02-goog
+

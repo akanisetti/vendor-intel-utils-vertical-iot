@@ -1,0 +1,6108 @@
+From 2101eead79db44325953c0350db9bf1c868a44f0 Mon Sep 17 00:00:00 2001
+From: John Reck <jreck@google.com>
+Date: Tue, 9 Dec 2025 11:40:14 -0500
+Subject: [PATCH] Update to DNG SDK 1.7.1 2410
+
+Bug: 465781139
+Test: make
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:403d0a45641560631b0d6a9653c94a22163e3008
+Merged-In: Ia850e7c3a3ab1b35dd619cc78159663df3b2b2c8
+Change-Id: Ia850e7c3a3ab1b35dd619cc78159663df3b2b2c8
+---
+ source/dng_abort_sniffer.cpp        |   20 +
+ source/dng_abort_sniffer.h          |   18 +-
+ source/dng_area_task.cpp            |    1 +
+ source/dng_area_task.h              |    1 +
+ source/dng_big_table.cpp            |   95 ++-
+ source/dng_big_table.h              |   36 +-
+ source/dng_bmff.cpp                 |    6 +-
+ source/dng_camera_profile.cpp       |   35 +-
+ source/dng_classes.h                |    9 +
+ source/dng_errors.h                 |   14 +-
+ source/dng_exceptions.cpp           |    6 +
+ source/dng_exceptions.h             |   88 +-
+ source/dng_exif.cpp                 |    4 +-
+ source/dng_file_stream.cpp          |    8 +-
+ source/dng_fingerprint.cpp          |   86 +-
+ source/dng_fingerprint.h            |  128 ++-
+ source/dng_flags.h                  |  125 ++-
+ source/dng_gain_map.cpp             |   54 +-
+ source/dng_gain_map.h               |    2 +-
+ source/dng_host.cpp                 |   29 +-
+ source/dng_hue_sat_map.cpp          |   35 +-
+ source/dng_ifd.cpp                  |   57 +-
+ source/dng_ifd.h                    |    4 +
+ source/dng_image_writer.cpp         |  145 +++-
+ source/dng_image_writer.h           |   22 +-
+ source/dng_info.cpp                 |   31 +-
+ source/dng_info.h                   |    2 +
+ source/dng_jpeg_image.cpp           |   19 +-
+ source/dng_jxl.cpp                  | 1217 ++++++++++++++++++++-------
+ source/dng_jxl.h                    |    4 +
+ source/dng_linearization_info.cpp   |   89 +-
+ source/dng_linearization_info.h     |    5 +
+ source/dng_lossless_jpeg_shared.cpp |    4 +-
+ source/dng_matrix.cpp               |   39 +
+ source/dng_matrix.h                 |    7 +-
+ source/dng_memory_stream.cpp        |   12 +-
+ source/dng_misc_opcodes.cpp         |  128 +--
+ source/dng_negative.cpp             |   96 ++-
+ source/dng_negative.h               |   13 +-
+ source/dng_parse_utils.cpp          |    3 +-
+ source/dng_pixel_buffer.cpp         |   60 ++
+ source/dng_preview.cpp              |   74 +-
+ source/dng_preview.h                |   21 +
+ source/dng_read_image.cpp           |   23 +-
+ source/dng_render.cpp               |    7 +-
+ source/dng_resample.cpp             |   46 +-
+ source/dng_safe_arithmetic.h        |    8 +-
+ source/dng_shared.cpp               |   53 +-
+ source/dng_shared.h                 |    3 +
+ source/dng_stream.cpp               |  189 ++++-
+ source/dng_stream.h                 |   84 +-
+ source/dng_string.cpp               |   12 +-
+ source/dng_string.h                 |   17 +
+ source/dng_tag_codes.h              |    3 +
+ source/dng_tag_values.h             |    4 +
+ source/dng_update_meta.cpp          |    8 +-
+ source/dng_validate.cpp             |    7 +-
+ source/dng_xmp.cpp                  |   48 ++
+ source/dng_xmp.h                    |    9 +
+ source/dng_xmp_sdk.cpp              |   37 +-
+ source/dng_xmp_sdk.h                |    5 +
+ 61 files changed, 2721 insertions(+), 694 deletions(-)
+
+diff --git a/source/dng_abort_sniffer.cpp b/source/dng_abort_sniffer.cpp
+index 8590546..a7f1d32 100644
+--- a/source/dng_abort_sniffer.cpp
++++ b/source/dng_abort_sniffer.cpp
+@@ -316,3 +316,23 @@ void dng_abort_sniffer::UpdateProgress (real64 /* fract */)
+ 	}
+ 
+ /*****************************************************************************/
++/*****************************************************************************/
++/*****************************************************************************/
++
++dng_sniffer_task:: ~dng_sniffer_task ()
++	{
++
++	try
++		{
++
++		if (fSniffer)
++			fSniffer->EndTask ();
++
++		}
++
++	catch (...)
++		{
++
++		}
++
++	}
+diff --git a/source/dng_abort_sniffer.h b/source/dng_abort_sniffer.h
+index 2a7bc47..497fb1e 100644
+--- a/source/dng_abort_sniffer.h
++++ b/source/dng_abort_sniffer.h
+@@ -139,6 +139,16 @@ class dng_abort_sniffer
+ 			return 0.1;
+ 			}
+ 
++		// Intended to be called as a hint that the upcoming task is about to
++		// take a long time and may block the thread, so if the goal is to
++		// provide some initial visual hint to the user (e.g., an
++		// indeterminate progress UX, etc.), now would be a good time to do
++		// so. The default implementation does nothing.
++
++		virtual void SniffSlowHint ()
++			{
++			}
++
+ 	protected:
+ 	
+ 		/// Should be implemented by derived classes to check for an user
+@@ -200,12 +210,8 @@ class dng_sniffer_task: private dng_uncopyable
+ 				fSniffer->StartTask (name, fract);
+ 			}
+ 			
+-		~dng_sniffer_task ()
+-			{
+-			if (fSniffer)
+-				fSniffer->EndTask ();
+-			}
+-		
++		virtual ~dng_sniffer_task ();
++
+ 		/// Check for pending user cancellation or other abort. ThrowUserCanceled
+ 		/// will be called if one is pending.
+ 
+diff --git a/source/dng_area_task.cpp b/source/dng_area_task.cpp
+index 7eac4a4..21a9401 100644
+--- a/source/dng_area_task.cpp
++++ b/source/dng_area_task.cpp
+@@ -552,6 +552,7 @@ class dng_range_parallel_func_task: public dng_range_parallel_task
+ 			r.fBegin	   = startIndex;
+ 			r.fEnd		   = stopIndex;
+ 			r.fSniffer	   = sniffer;
++			r.fAllocator   = &fHost.Allocator ();
+ 
+ 			fFunc (r);
+ 
+diff --git a/source/dng_area_task.h b/source/dng_area_task.h
+index e6d6db7..0bd24d4 100644
+--- a/source/dng_area_task.h
++++ b/source/dng_area_task.h
+@@ -369,6 +369,7 @@ class dng_range_parallel_task: public dng_area_task, dng_uncopyable
+ 			int32 fBegin;
+ 			int32 fEnd;
+ 			dng_abort_sniffer *fSniffer;
++			dng_memory_allocator *fAllocator;
+ 			};
+ 		
+ 		typedef std::function<void(const range &)> function_t;
+diff --git a/source/dng_big_table.cpp b/source/dng_big_table.cpp
+index d53595b..e8988a9 100644
+--- a/source/dng_big_table.cpp
++++ b/source/dng_big_table.cpp
+@@ -943,9 +943,7 @@ const dng_fingerprint & dng_big_table::Fingerprint () const
+ dng_fingerprint dng_big_table::ComputeFingerprint () const
+ 	{
+ 	
+-	dng_md5_printer_stream stream;
+-
+-	stream.SetLittleEndian ();
++	dng_md5_printer_le_stream stream;
+ 
+ 	PutStream (stream, true);
+ 
+@@ -2695,6 +2693,7 @@ void dng_image_table_jxl_compression_info::Compress (dng_host &host,
+ 								 false,		 // has transparency
+ 								 true,		 // allow big tiff
+ 								 nullptr,	 // gain map,
++								 nullptr,	 // gain map metadata block
+ 								 fPreferHalfFloat);
+ 	
+ 	#else
+@@ -2866,15 +2865,15 @@ dng_fingerprint dng_image_table::ComputeFingerprint () const
+ 		
+ 		dng_memory_stream tempStream (host->Allocator ());
+ 
++		tempStream.SetLittleEndian ();
++		
+ 		PutStream (tempStream, true);
+ 
+ 		tempStream.Flush ();
+ 
+ 		tempStream.SetReadPosition (0);
+ 		
+-		dng_md5_printer_stream stream;
+-
+-		stream.SetLittleEndian ();
++		dng_md5_printer_le_stream stream;
+ 
+ 		tempStream.CopyToStream (stream,
+ 								 tempStream.Length ());
+@@ -2892,9 +2891,7 @@ dng_fingerprint dng_image_table::ComputeFingerprint () const
+ 		
+ 		AutoPtr<dng_host> host (MakeHost (nullptr));
+ 		
+-		dng_md5_printer_stream stream;
+-
+-		stream.SetLittleEndian ();
++		dng_md5_printer_le_stream stream;
+ 
+ 		stream.Put_uint32 (btt_ImageTable);
+ 
+@@ -2914,7 +2911,7 @@ dng_fingerprint dng_image_table::ComputeFingerprint () const
+ 													 *fImage,
+ 													 fImage->PixelType ());
+ 													 
+-		stream.Put (imageDigest.data, 16);
++		stream.Put (imageDigest);
+ 
+ 		return stream.Result ();
+ 
+@@ -3150,6 +3147,8 @@ void dng_image_table::PutCompressedStream (dng_stream &stream,
+ 
+ 		dng_memory_stream tempStream (host->Allocator ());
+ 
++		tempStream.SetLittleEndian ();
++		
+ 		info.Compress (*host,
+ 					   tempStream,
+ 					   *tiffImage);
+@@ -3196,6 +3195,8 @@ void dng_image_table::CompressImage (const dng_image_table_compression_info &inf
+ 
+ 	dng_memory_stream tempStream (host->Allocator ());
+ 
++	tempStream.SetLittleEndian ();
++
+ 	tempStream.SetSniffer (sniffer);
+ 
+ 	PutCompressedStream (tempStream,
+@@ -3522,7 +3523,7 @@ bool dng_packed_image_table::GetStream (dng_stream &stream)
+ 
+ 	// Read digest.
+ 
+-	stream.Get (fTableDigest.data, 16);
++	stream.Get (fTableDigest);
+ 
+ 	// Read size.
+ 
+@@ -3585,7 +3586,7 @@ void dng_packed_image_table::PutStream (dng_stream &stream,
+ 
+ 	// Write digest.
+ 
+-	stream.Put (fTableDigest.data, 16);
++	stream.Put (fTableDigest);
+ 
+ 	// Write properties.
+ 
+@@ -4304,38 +4305,35 @@ void dng_masked_rgb_table::PutStream (dng_stream &stream) const
+ 
+ /*****************************************************************************/
+ 
+-void dng_masked_rgb_table::AddDigest (dng_md5_printer &printer) const
++void dng_masked_rgb_table::AddDigest (dng_md5_printer_stream &printer) const
+ 	{
+ 
+ 	// Header.
+ 
+-	printer.Process ("dng_masked_rgb_table", 20);
++	printer.ProcessPtr ("dng_masked_rgb_table", 20);
+ 
+ 	// Name.
+ 
+ 	uint32 nameLen = SemanticName ().Length ();
+ 	
+-	printer.Process (&nameLen,
+-					 (uint32) sizeof (nameLen));
++	printer.Put_uint32 (nameLen);
+ 
+ 	if (nameLen > 0)
+ 		{
+ 		
+-		printer.Process (SemanticName ().Get (), nameLen);
++		printer.ProcessPtr (SemanticName ().Get (), nameLen);
+ 		
+ 		}
+ 
+ 	// Pixel type.
+ 
+-	printer.Process (&fPixelType,
+-					 (uint32) sizeof (fPixelType));
++	printer.Put_uint32 (fPixelType);
+ 
+ 	// Table digest.
+ 	
+ 	dng_fingerprint tableDigest = fTable.Fingerprint ();
+ 
+-	printer.Process (tableDigest.data,
+-					 sizeof (tableDigest.data));
++	printer.Process (tableDigest);
+ 	
+ 	}
+ 
+@@ -4359,6 +4357,8 @@ void dng_masked_rgb_table_render_data::Initialize (const dng_negative &negative,
+ 
+ 	fUseSequentialMethod = tables.UseSequentialMethod ();
+ 
++	fInputDigest.Clear (); // Null fingerprint for profile case
++
+ 	// Find correspondence between RGBTables and SemanticMasks tags. It is
+ 	// still possible that we have a NOP situation if every table uses a mask
+ 	// name that is not found in SemanticMasks.
+@@ -4815,19 +4815,18 @@ void dng_masked_rgb_tables::Validate () const
+ 
+ /*****************************************************************************/
+ 
+-void dng_masked_rgb_tables::AddDigest (dng_md5_printer &printer) const
++void dng_masked_rgb_tables::AddDigest (dng_md5_printer_stream &printer) const
+ 	{
+ 
+ 	// Header.
+ 	
+-	printer.Process ("dng_masked_rgb_tables", 21);
++	printer.ProcessPtr ("dng_masked_rgb_tables", 21);
+ 
+ 	// Number of tables.
+ 
+-	uint32 numTables = (uint32) fTables.size ();
++	const uint32 numTables = (uint32) fTables.size ();
+ 
+-	printer.Process (&numTables,
+-					 (uint32) sizeof (numTables));
++	printer.Put_uint32 (numTables);
+ 
+ 	// Process each table.
+ 
+@@ -4838,8 +4837,7 @@ void dng_masked_rgb_tables::AddDigest (dng_md5_printer &printer) const
+ 
+ 	// Composite method.
+ 
+-	printer.Process (&fCompositeMethod,
+-					 (uint32) sizeof (fCompositeMethod));
++	printer.Put_uint32 (uint32 (fCompositeMethod));
+ 
+ 	}
+ 
+@@ -5280,15 +5278,14 @@ void dng_rgb_to_rgb_table_data::Process_32 (dng_pixel_buffer &buffer,
+ 
+ /*****************************************************************************/
+ 
+-void dng_rgb_to_rgb_table_data::AddDigest (dng_md5_printer &printer) const
++void dng_rgb_to_rgb_table_data::AddDigest (dng_md5_printer_stream &printer) const
+ 	{
+ 
+ 		{
+ 
+ 		const dng_fingerprint tableFingerPrint = fTable.Fingerprint ();
+ 
+-		printer.Process (tableFingerPrint.data,
+-						 dng_fingerprint::kDNGFingerprintSize);
++		printer.Process (tableFingerPrint);
+ 
+ 		}
+ 
+@@ -5298,9 +5295,20 @@ void dng_rgb_to_rgb_table_data::AddDigest (dng_md5_printer &printer) const
+ 		for (uint32 i = 0; i < 3; i++)
+ 			{
+ 
++			#if 1
++
++			static_assert (sizeof (fEncodeMatrix [i] [0]) == 8, "matrix coeffs not 8 bytes");
++
++			printer.Put_swap8 (fEncodeMatrix [i], uint32 (3 * sizeof (fEncodeMatrix [i] [0])));
++			printer.Put_swap8 (fDecodeMatrix [i], uint32 (3 * sizeof (fEncodeMatrix [i] [0])));
++
++			#else
++
+ 			printer.Process (fEncodeMatrix [i], 3 * sizeof (fEncodeMatrix [i] [0]));
+ 			printer.Process (fDecodeMatrix [i], 3 * sizeof (fEncodeMatrix [i] [0]));
+ 
++			#endif
++
+ 			}
+ 
+ 		}
+@@ -5308,12 +5316,26 @@ void dng_rgb_to_rgb_table_data::AddDigest (dng_md5_printer &printer) const
+ 	if (fEncodeTable.Get () && fDecodeTable.Get ())
+ 		{
+ 
++		#if 1
++
++		static_assert (sizeof (fEncodeTable->Table () [0]) == 4, "table data not 4 bytes");
++
++		printer.Put_swap4 (fEncodeTable->Table (),
++						   uint32 ((2 + fEncodeTable->Count ()) * sizeof (fEncodeTable->Table () [0])));
++
++		printer.Put_swap4 (fDecodeTable->Table (),
++						   uint32 ((2 + fEncodeTable->Count ()) * sizeof (fEncodeTable->Table () [0])));
++
++		#else
++
+ 		printer.Process (fEncodeTable->Table (),
+ 						 (2 + fEncodeTable->Count ()) * sizeof (fEncodeTable->Table () [0]));
+ 
+ 		printer.Process (fDecodeTable->Table (),
+ 						 (2 + fEncodeTable->Count ()) * sizeof (fEncodeTable->Table () [0]));
+ 
++		#endif
++		
+ 		}
+ 
+ 	if (fTable.Dimensions () != 3)
+@@ -5322,9 +5344,20 @@ void dng_rgb_to_rgb_table_data::AddDigest (dng_md5_printer &printer) const
+ 		for (uint32 i = 0; i < 3; i++)
+ 			{
+ 
++			static_assert (sizeof (fTable1D [i]->Table () [0]) == 4, "table data not 4 bytes");
++
++			#if 1
++
++			printer.Put_swap4 (fTable1D [i]->Table (),
++							   uint32 ((2 + fTable1D [i]->Count ()) * sizeof (fTable1D [i]->Table () [0])));
++
++			#else
++
+ 			printer.Process (fTable1D [i]->Table (),
+ 							 (2 + fTable1D [i]->Count ()) * sizeof (fTable1D [i]->Table () [0]));
+ 
++			#endif
++			
+ 			}
+ 
+ 		}
+diff --git a/source/dng_big_table.h b/source/dng_big_table.h
+index 3b21626..a669fcb 100644
+--- a/source/dng_big_table.h
++++ b/source/dng_big_table.h
+@@ -25,6 +25,12 @@
+ 
+ /*****************************************************************************/
+ 
++// TODO(erichan): rename this
++
++#define qDebugMaskedRGBTableRender (qDNGValidate && 0)
++
++/*****************************************************************************/
++
+ void dng_big_table_cache_flush ();
+ 
+ void dng_big_table_cache_clear ();
+@@ -109,8 +115,7 @@ class dng_big_table
+ 		
+ 		dng_memory_block * EncodeAsString (dng_memory_allocator &allocator) const;
+ 
+-		bool ExtractFromCache (const dng_fingerprint &fingerprint);
+-
++		virtual bool ExtractFromCache (const dng_fingerprint &fingerprint);
+ 		
+ 		#if qDNGUseXMP
+ 		
+@@ -146,6 +151,14 @@ class dng_big_table
+ 		virtual dng_fingerprint ComputeFingerprint () const;
+ 
+ 		void RecomputeFingerprint ();
++
++		// Use this only in very specific cases (e.g., for custom cache
++		// extraction).
++
++		void SetFingerprintDirect (const dng_fingerprint &digest)
++			{
++			fFingerprint = digest;
++			}
+ 		
+ 		virtual bool UseCompression () const
+ 			{
+@@ -1170,6 +1183,11 @@ class dng_packed_image_table : public dng_big_table
+ 
+ 	public:
+ 
++		const dng_fingerprint & TableDigest () const
++			{
++			return fTableDigest;
++			}
++
+ 		const dng_image_table & Table () const;
+ 
+ 		const dng_image & Image () const
+@@ -1349,7 +1367,7 @@ class dng_masked_rgb_table: private dng_uncopyable
+ 		
+ 		void PutStream (dng_stream &stream) const;
+ 
+-		void AddDigest (dng_md5_printer &printer) const;
++		void AddDigest (dng_md5_printer_stream &printer) const;
+ 
+ 		const dng_string & SemanticName () const
+ 			{
+@@ -1424,7 +1442,7 @@ class dng_masked_rgb_tables: private dng_uncopyable
+ 
+ 		void Validate () const;
+ 
+-		void AddDigest (dng_md5_printer &printer) const;
++		void AddDigest (dng_md5_printer_stream &printer) const;
+ 
+ 		void PutStream (dng_stream &stream) const;
+ 
+@@ -1491,7 +1509,7 @@ class dng_rgb_to_rgb_table_data
+ 								 uint32 bufferStartPlane,
+ 								 bool needOverrange);
+ 
+-		void AddDigest (dng_md5_printer &printer) const;
++		void AddDigest (dng_md5_printer_stream &printer) const;
+ 
+ 	};
+ 
+@@ -1530,6 +1548,14 @@ class dng_masked_rgb_table_render_data
+ 
+ 		uint32 fBackgroundTableIndex = 0;
+ 
++		// Digest representing the inputs used to compute the masks and tables.
++		// In cases where the masks and tables are loaded from the negative,
++		// this fingerprint can be set to null. It is intended for cases where
++		// the tables and/or masks are computed dynamically based on other settings.
++		// This digest represents those other settings.
++
++		dng_fingerprint fInputDigest;
++
+ 	public:
+ 
+ 		void Initialize (const dng_negative &negative,
+diff --git a/source/dng_bmff.cpp b/source/dng_bmff.cpp
+index 966a9af..584cc8f 100644
+--- a/source/dng_bmff.cpp
++++ b/source/dng_bmff.cpp
+@@ -294,8 +294,7 @@ void dng_bmff_io::UpdateBigTables (dng_host &host,
+ 
+ 				dng_fingerprint digest;
+ 
+-				tableStream.Get (digest.data,
+-								 uint32 (sizeof (digest.data)));
++				tableStream.Get (digest);
+ 
+ 				if (digest.IsValid () &&
+ 					(digests.find (digest) == digests.end ()))
+@@ -378,8 +377,7 @@ void dng_bmff_io::UpdateBigTables (dng_host &host,
+ 
+ 		// Write fingerprint.
+ 
+-		memStream.Put (fingerprint.data,
+-					   uint32 (sizeof (fingerprint.data)));
++		memStream.Put (fingerprint);
+ 
+ 		// Write table data.
+ 
+diff --git a/source/dng_camera_profile.cpp b/source/dng_camera_profile.cpp
+index 02f8405..d5dc962 100644
+--- a/source/dng_camera_profile.cpp
++++ b/source/dng_camera_profile.cpp
+@@ -69,21 +69,20 @@ dng_string StripProfileGroupPrefix (const dng_string &name)
+ void dng_camera_profile_id::AddDigest (dng_md5_printer &printer) const
+ 	{
+ 	
+-	printer.Process ("DCPI", 4);
++	printer.ProcessPtr ("DCPI", 4);
+ 
+ 	if (Name ().NotEmpty ())
+ 		{
+ 		
+-		printer.Process (Name ().Get (),
+-						 Name ().Length ());
++		printer.ProcessPtr (Name ().Get (),
++							Name ().Length ());
+ 		
+ 		}
+ 
+ 	if (Fingerprint ().IsValid ())
+ 		{
+ 		
+-		printer.Process (fFingerprint.data,
+-						 uint32 (sizeof (fFingerprint.data)));
++		printer.Process (fFingerprint);
+ 		
+ 		}
+ 	
+@@ -516,6 +515,8 @@ static void FingerprintMatrix (dng_md5_printer_stream &printer,
+ 	
+ 	// Tag's Put routine doesn't write the header, only the data
+ 
++	// The Put routine handles endian byte swapping if needed.
++
+ 	tag.Put (printer);
+ 
+ 	}
+@@ -563,12 +564,10 @@ dng_fingerprint dng_camera_profile::CalculateFingerprint (bool renderDataOnly) c
+ 	
+ 	DNG_ASSERT (!fWasStubbed, "CalculateFingerprint on stubbed profile");
+ 
+-	dng_md5_printer_stream printer;
+-
+ 	// MD5 hash is always calculated on little endian data.
+ 
+-	printer.SetLittleEndian ();
+-	
++	dng_md5_printer_le_stream printer;
++
+ 	// The data that we fingerprint closely matches that saved
+ 	// by the profile_tag_set class in dng_image_writer.cpp, with
+ 	// the exception of the fingerprint itself.
+@@ -784,8 +783,7 @@ dng_fingerprint dng_camera_profile::CalculateFingerprint (bool renderDataOnly) c
+ 			
+ 			dng_fingerprint digest = pgtm->GetFingerprint ();
+ 
+-			printer.Put (digest.data,
+-						 uint32 (sizeof (digest.data)));
++			printer.Put (digest);
+ 			
+ 			}
+ 
+@@ -803,8 +801,7 @@ dng_fingerprint dng_camera_profile::CalculateFingerprint (bool renderDataOnly) c
+ 			printer.Put ("hdr", 3);
+ 
+ 			if (range.fHintMaxOutputValue != 1.0f)
+-				printer.Put (&range.fHintMaxOutputValue,
+-							 uint32 (sizeof (range.fHintMaxOutputValue)));
++				printer.Put_real32 (range.fHintMaxOutputValue);
+ 			
+ 			}
+ 			
+@@ -815,14 +812,13 @@ dng_fingerprint dng_camera_profile::CalculateFingerprint (bool renderDataOnly) c
+ 	if (HasMaskedRGBTables ())
+ 		{
+ 		
+-		dng_md5_printer rgbTablesPrinter;
++		dng_md5_printer_le_stream rgbTablesPrinter;
+ 		
+ 		MaskedRGBTables ().AddDigest (rgbTablesPrinter);
+ 		
+ 		auto rgbTableDigest = rgbTablesPrinter.Result ();
+ 		
+-		printer.Put (rgbTableDigest.data,
+-					 uint32 (sizeof (rgbTableDigest.data)));
++		printer.Put (rgbTableDigest);
+ 		
+ 		}
+ 
+@@ -835,18 +831,15 @@ dng_fingerprint dng_camera_profile::CalculateFingerprint (bool renderDataOnly) c
+ dng_fingerprint dng_camera_profile::UniqueID () const
+ 	{
+ 
+-	dng_md5_printer_stream printer;
+-
+ 	// MD5 hash is always calculated on little endian data.
+ 
+-	printer.SetLittleEndian ();
++	dng_md5_printer_le_stream printer;
+ 
+ 	// Start with the existing fingerprint.
+  
+ 	dng_fingerprint fingerprint = Fingerprint ();
+ 	
+-	printer.Put (fingerprint.data,
+-				 (uint32) sizeof (fingerprint.data));
++	printer.Put (fingerprint);
+ 
+ 	// Also include the UniqueCameraModelRestriction tag.
+ 
+diff --git a/source/dng_classes.h b/source/dng_classes.h
+index 84a29b5..c3fef23 100644
+--- a/source/dng_classes.h
++++ b/source/dng_classes.h
+@@ -18,6 +18,7 @@
+ /*****************************************************************************/
+ 
+ #include <memory>
++#include <vector>
+ 
+ /*****************************************************************************/
+ 
+@@ -75,6 +76,8 @@ class dng_matrix;
+ class dng_matrix_3by3;
+ class dng_matrix_4by3;
+ class dng_md5_printer;
++class dng_md5_printer_le_stream;
++class dng_md5_printer_stream;
+ class dng_memory_allocator;
+ class dng_memory_block;
+ class dng_memory_data;
+@@ -137,8 +140,14 @@ typedef std::shared_ptr<dng_masked_rgb_table> dng_masked_rgb_table_sptr;
+ typedef std::shared_ptr<dng_rgb_to_rgb_table_data> dng_rgb_to_rgb_table_data_sptr;
+ typedef std::shared_ptr<dng_masked_rgb_table_render_data> dng_masked_rgb_table_render_data_sptr;
+ 
++typedef std::shared_ptr<dng_image> dng_image_sptr;
++typedef std::weak_ptr<dng_image>   dng_image_wptr;
++
+ typedef std::shared_ptr<const dng_image> const_dng_image_sptr;
+ 
++typedef std::shared_ptr<dng_pixel_buffer> dng_pixel_buffer_sptr;
++typedef std::vector<dng_pixel_buffer_sptr> dng_pixel_buffer_vec;
++
+ typedef std::shared_ptr<const dng_memory_block> const_dng_memory_block_sptr;
+ 
+ /*****************************************************************************/
+diff --git a/source/dng_errors.h b/source/dng_errors.h
+index 607c656..5d6fd8b 100644
+--- a/source/dng_errors.h
++++ b/source/dng_errors.h
+@@ -31,8 +31,12 @@ typedef std::atomic<dng_error_code> dng_atomic_error_code;
+ 
+ enum
+ 	{
+-	dng_error_none					= 0,		//!< No error. Success.
+-	dng_error_unknown				= 100000,	//!< Logic or program error or other unclassifiable error.
++		
++	dng_error_none       = 0,		            //!< No error. Success.
++
++	dng_error_sdk_first  = 100000,
++	
++	dng_error_unknown    = dng_error_sdk_first,	//!< Logic or program error or other unclassifiable error.
+ 	dng_error_not_yet_implemented,				//!< Functionality requested is not yet implemented.
+ 	dng_error_silent,							//!< An error which should not be signalled to user.
+ 	dng_error_user_canceled,					//!< Processing stopped by user (or host application) request
+@@ -51,6 +55,12 @@ enum
+ 	dng_error_overflow,							//!< Arithmetic overflow.
+ 	dng_error_jxl_encoder,						//!< JPEG XL encoder error.
+ 	dng_error_jxl_decoder,						//!< JPEG XL decoder error.
++
++	// Count of number of error codes in the DNG SDK, including dng_error_none.
++	
++	dng_error_sdk_end,
++	dng_error_sdk_count = dng_error_sdk_end - dng_error_sdk_first + 1,
++	
+ 	};
+ 	
+ /*****************************************************************************/
+diff --git a/source/dng_exceptions.cpp b/source/dng_exceptions.cpp
+index 15276bd..9fdef87 100644
+--- a/source/dng_exceptions.cpp
++++ b/source/dng_exceptions.cpp
+@@ -206,13 +206,19 @@ void Throw_dng_error (dng_error_code err,
+ 		
+ 	#else
+ 	
++	#if !qDNGVerboseExceptions
+ 	(void) message;
+ 	(void) sub_message;
++	#endif
+ 	(void) silent;
+ 	
+ 	#endif
+ 	
++	#if qDNGVerboseExceptions
++	throw dng_exception (err, message, sub_message);
++	#else
+ 	throw dng_exception (err);
++	#endif
+ 	
+ 	}
+ 
+diff --git a/source/dng_exceptions.h b/source/dng_exceptions.h
+index dcf9b3e..68107b2 100644
+--- a/source/dng_exceptions.h
++++ b/source/dng_exceptions.h
+@@ -20,13 +20,47 @@
+ #include "dng_errors.h"
+ #include "dng_flags.h"
+ 
++#include <exception>
++#include <string>
++
+ /*****************************************************************************/
+ 
++// DNG_NO_RETURN
++// DNG_NO_RETURN_ENABLED
++
++#if defined(DNG_NO_RETURN) != defined(DNG_NO_RETURN_ENABLED)
++#error DNG_NO_RETURN and DNG_NO_RETURN_ENABLED must both be defined or undefined here.
++#endif
++
++// Use DNG_NO_RETURN in header file declaration of a function that
++// does not return.
++//
++// It should be placed
++//     * before the return type of the function, AND
++//     * before any 'inline' keyword, AND
++//     * before any 'static' keyword.
++//  as the gcc version supports this and the C++11 version requires it.
++
++// If DNG_NO_RETURN not defined, attempt to define using C++11 attribute.
++
++#ifndef DNG_NO_RETURN
++#if defined(__cplusplus)
++#if __cplusplus >= 201103L
++#define DNG_NO_RETURN [[noreturn]]
++#define DNG_NO_RETURN_ENABLED 1
++#endif
++#endif
++#endif
++
++// If DNG_NO_RETURN still not defined, use GCC version or define to nothing.
++
+ #ifndef DNG_NO_RETURN
+ #ifdef __GNUC__
+ #define DNG_NO_RETURN __attribute__((noreturn))
++#define DNG_NO_RETURN_ENABLED 1
+ #else
+ #define DNG_NO_RETURN
++#define DNG_NO_RETURN_ENABLED 0
+ #endif
+ #endif
+ 
+@@ -48,12 +82,14 @@ void ReportError (const char *message,
+ 
+ /// \brief All exceptions thrown by the DNG SDK use this exception class.
+ 
+-class dng_exception
++class dng_exception : public std::exception
+ 	{
+ 	
+ 	private:
+ 	
+ 		dng_error_code fErrorCode;
++		
++		std::string fErrorMsg;
+ 	
+ 	public:
+ 	
+@@ -63,10 +99,43 @@ class dng_exception
+ 		dng_exception (dng_error_code code)
+ 		
+ 			: fErrorCode (code)
++
+ 			
+ 			{
++			fErrorMsg = "dng_error: ";
++			fErrorMsg += std::to_string (fErrorCode);
+ 			}
+ 		
++		#if qDNGVerboseExceptions
++		
++		dng_exception (dng_error_code code,
++					   const char *message,
++					   const char *sub_message)
++
++			: fErrorCode (code)
++
++			{
++			
++			fErrorMsg = "dng_error: ";
++			fErrorMsg += std::to_string (fErrorCode);
++			
++			if (message)
++				{
++				fErrorMsg += ": ";
++				fErrorMsg += message;
++				}
++			
++			if (sub_message)
++				{
++				fErrorMsg += " (";
++				fErrorMsg += sub_message;
++				fErrorMsg += ")";
++				}
++			
++			}
++		
++		#endif	// qDNGVerboseExceptions
++
+ 		virtual ~dng_exception ()
+ 			{ 
+ 			}
+@@ -79,16 +148,21 @@ class dng_exception
+ 			return fErrorCode;
+ 			}
+ 
++		virtual char const * what () const noexcept override
++			{
++			return fErrorMsg.c_str ();
++			}
++
+ 	};
+ 	
+ /******************************************************************************/
+ 
+ /// \brief Throw an exception based on an arbitrary error code.
+ 
+-void Throw_dng_error (dng_error_code err,
+-					  const char * message = NULL,
+-					  const char * sub_message = NULL,
+-					  bool silent = false) DNG_NO_RETURN;
++DNG_NO_RETURN void Throw_dng_error (dng_error_code err,
++									const char * message = NULL,
++									const char * sub_message = NULL,
++									bool silent = false);
+ 
+ /******************************************************************************/
+ 
+@@ -148,10 +222,10 @@ inline void ThrowNotYetImplemented (const char * sub_message = NULL)
+ /// \brief Convenience function to throw dng_exception with error code
+ /// dng_error_silent .
+ 
+-inline void ThrowSilentError ()
++inline void ThrowSilentError (const char *sub_message = NULL)
+ 	{
+ 	
+-	Throw_dng_error (dng_error_silent);
++	Throw_dng_error (dng_error_silent, NULL, sub_message);
+ 	
+ 	}
+ 
+diff --git a/source/dng_exif.cpp b/source/dng_exif.cpp
+index cdee762..36ffeed 100644
+--- a/source/dng_exif.cpp
++++ b/source/dng_exif.cpp
+@@ -3674,8 +3674,8 @@ bool dng_exif::Parse_ifd0_exif (dng_stream &stream,
+ 				else
+ 					return false;
+ 				
+-				f.data [j >> 1] *= 16;
+-				f.data [j >> 1] += (uint8) digit;
++				f.MutableData () [j >> 1] *= 16;
++				f.MutableData () [j >> 1] += (uint8) digit;
+ 					
+ 				}
+ 				
+diff --git a/source/dng_file_stream.cpp b/source/dng_file_stream.cpp
+index 39242a0..8fb984b 100644
+--- a/source/dng_file_stream.cpp
++++ b/source/dng_file_stream.cpp
+@@ -120,11 +120,9 @@ dng_file_stream::dng_file_stream (int fd,
+ 								  bool output,
+ 								  uint32 bufferSize)
+ 
+-	:	dng_stream ((dng_abort_sniffer *) NULL,
+-					bufferSize,
+-					0)
+-
+-	,	fFile (NULL)
++	:	dng_file_stream (fd,
++						 output ? "wb" : "rb",
++						 bufferSize)
+ 
+ 	{
+ 
+diff --git a/source/dng_fingerprint.cpp b/source/dng_fingerprint.cpp
+index 4dcd1f5..6113ca7 100644
+--- a/source/dng_fingerprint.cpp
++++ b/source/dng_fingerprint.cpp
+@@ -10,6 +10,9 @@
+ 
+ #include "dng_assertions.h"
+ #include "dng_flags.h"
++#include "dng_types.h"
++
++#include <cstdint>
+ 
+ /*****************************************************************************/
+ 
+@@ -41,6 +44,45 @@ dng_fingerprint::dng_fingerprint (const char *hex)
+ 		
+ /*****************************************************************************/
+ 
++dng_fingerprint::dng_fingerprint (const dng_fingerprint& print)
++
++	{
++
++	if (this != &print)
++		{
++
++		for (uint32 j = 0; j < kDNGFingerprintSize; j++)
++			{
++
++			data [j] = print.data [j];
++
++			}
++		}
++
++	}
++
++/*****************************************************************************/
++
++dng_fingerprint& dng_fingerprint::operator= (const dng_fingerprint& print)
++	{
++
++	if (this != &print)
++		{
++
++		for (uint32 j = 0; j < kDNGFingerprintSize; j++)
++			{
++
++			data [j] = print.data [j];
++
++			}
++		}
++
++	return *this;
++
++	}
++
++/*****************************************************************************/
++
+ bool dng_fingerprint::IsNull () const
+ 	{
+ 	
+@@ -309,8 +351,8 @@ void dng_md5_printer::Reset ()
+ 
+ /******************************************************************************/
+ 
+-void dng_md5_printer::Process (const void *data,
+-							   uint32 inputLen)
++void dng_md5_printer::ProcessPtr (const void *data,
++								  uint32 inputLen)
+ 	{
+ 	
+ 	DNG_ASSERT (!final, "Fingerprint already finalized!");
+@@ -363,6 +405,42 @@ void dng_md5_printer::Process (const void *data,
+ 			inputLen - i);
+ 	
+ 	}
++
++/*****************************************************************************/
++
++void dng_md5_printer::Process_bool (bool x)
++	{
++
++	// sizeof(bool) is implemention-defined, which makes it non-portable.
++
++	// std::uint8_t exists in standard C++ since C++11 and is guaranteed to be
++	// exactly 8 bits (1 byte) by the standard.
++	
++	std::uint8_t value = x ? 1 : 0;
++
++	static_assert (sizeof (value) == 1, "uint8_t not 1 byte?");
++
++	ProcessPtr (&value, 1);
++
++	}
++
++/*****************************************************************************/
++
++void dng_md5_printer::Process_size (size_t x)
++	{
++
++	// sizeof(size_t) is implemention-defined, which makes it non-portable.
++
++	// std::uint64_t exists in standard C++ since C++11 and is guaranteed to
++	// be exactly 64 bits (8 bytes) by the standard.
++
++	std::uint64_t value = (std::uint64_t) x;
++
++	static_assert (sizeof (value) == 8, "uint64_t not 8 bytes?");
++
++	ProcessPtr (&value, 8);
++	
++	}
+ 		
+ /******************************************************************************/
+ 
+@@ -391,11 +469,11 @@ const dng_fingerprint & dng_md5_printer::Result ()
+ 		
+ 		uint32 padLen = (index < 56) ? (56 - index) : (120 - index);
+ 		
+-		Process (PADDING, padLen);
++		ProcessPtr (PADDING, padLen);
+ 
+ 		// Append length (before padding)
+ 
+-		Process (bits, 8);
++		ProcessPtr (bits, 8);
+ 
+ 		// Store state in digest
+ 		
+diff --git a/source/dng_fingerprint.h b/source/dng_fingerprint.h
+index c19fb25..3d8fb75 100644
+--- a/source/dng_fingerprint.h
++++ b/source/dng_fingerprint.h
+@@ -33,11 +33,16 @@
+ 
+ class dng_fingerprint
+ 	{
++
++	friend struct dng_fingerprint_less_than;
++	friend class dng_md5_printer;
+ 	
+ 	public:
+ 	
+ 		static const size_t kDNGFingerprintSize = 16;
+ 
++	private:
++		
+ 		uint8 data [kDNGFingerprintSize];
+ 		
+ 	public:
+@@ -46,6 +51,10 @@ class dng_fingerprint
+ 		
+ 		explicit dng_fingerprint (const char *hex);
+ 		
++		dng_fingerprint (const dng_fingerprint& print);
++
++		dng_fingerprint& operator= (const dng_fingerprint& print);
++
+ 		/// Check if fingerprint is all zeros.
+ 
+ 		bool IsNull () const;
+@@ -64,6 +73,16 @@ class dng_fingerprint
+ 			*this = dng_fingerprint ();
+ 			}
+ 
++		const uint8 * Data () const
++			{
++			return data;
++			}
++
++		uint8 * MutableData ()
++			{
++			return data;
++			}
++
+ 		/// Test if two fingerprints are equal.
+ 			
+ 		bool operator== (const dng_fingerprint &print) const;
+@@ -196,10 +215,12 @@ typedef std::vector<dng_fingerprint> dng_fingerprint_vector;
+ class dng_md5_printer
+ 	{
+ 	
+-	public:
++	protected:
+ 	
+ 		dng_md5_printer ();
+ 		
++	public:
++	
+ 		virtual ~dng_md5_printer ()
+ 			{
+ 			}
+@@ -212,22 +233,48 @@ class dng_md5_printer
+ 		/// \param data The data to be hashed.
+ 		/// \param inputLen The length of data, in bytes.
+ 
+-		void Process (const void *data,
+-					  uint32 inputLen);
++		virtual void ProcessPtr (const void *data,
++								 uint32 inputLen);
+ 					  
+ 		/// Append the string to the stream to be hashed.
+ 		/// \param text The string to be hashed.
+ 
+-		void Process (const char *text)
++		void ProcessString (const char *text)
+ 			{
+ 			
+-			Process (text, (uint32) strlen (text));
++			ProcessPtr (text, (uint32) strlen (text));
+ 			
+ 			}
++
++		void Process (const dng_fingerprint &digest)
++			{
++
++			ProcessPtr (digest.data,
++						uint32 (sizeof (digest.data)));
++
++			}
++
++		void Process (const dng_string &str)
++			{
++
++			ProcessPtr (str.Get	   (),
++						str.Length ());
++
++			}
++
++		/// Process the Boolean value x.
++		/// \param x The value to be hashed.
++
++		void Process_bool (bool x);
++		
++		/// Process the size_t value x.
++		/// \param x The value to be hashed.
++
++		void Process_size (size_t x);
+ 		
+ 		/// Get the fingerprint (i.e., result of the hash).
+ 
+-		const dng_fingerprint & Result ();
++		virtual const dng_fingerprint & Result ();
+ 		
+ 	private:
+ 	
+@@ -348,7 +395,7 @@ class dng_md5_printer
+ 
+ /// \brief A dng_stream based interface to the MD5 printing logic.
+ 
+-class dng_md5_printer_stream : public dng_stream, dng_md5_printer
++class dng_md5_printer_stream : public dng_stream, public dng_md5_printer
+ 	{
+ 	
+ 	private:
+@@ -366,23 +413,37 @@ class dng_md5_printer_stream : public dng_stream, dng_md5_printer
+ 			{
+ 			}
+ 
+-		virtual uint64 DoGetLength ()
++		void ProcessPtr (const void *data,
++						 uint32 inputLen) override
++			{
++			
++			// Force data to be flushed, which ensures that interleaved
++			// Process* and Put* calls get serialized correctly.
++
++			Flush ();
++			
++			dng_md5_printer::ProcessPtr (data,
++										 inputLen);
++			
++			}
++					  
++		uint64 DoGetLength () override
+ 			{
+ 			
+ 			return fNextOffset;
+ 			
+ 			}
+ 	
+-		virtual void DoRead (void * /* data */,
+-							 uint32 /* count */,
+-							 uint64 /* offset */)
++		void DoRead (void * /* data */,
++					 uint32 /* count */,
++					 uint64 /* offset */) override
+ 			{
+ 			
+ 			ThrowProgramError ();
+ 			
+ 			}
+ 							 
+-		virtual void DoSetLength (uint64 length)
++		void DoSetLength (uint64 length) override
+ 			{
+ 			
+ 			if (length != fNextOffset)
+@@ -392,9 +453,9 @@ class dng_md5_printer_stream : public dng_stream, dng_md5_printer
+ 				
+ 			}
+ 							 
+-		virtual void DoWrite (const void *data,
+-							  uint32 count2,
+-							  uint64 offset)
++		void DoWrite (const void *data,
++					  uint32 count2,
++					  uint64 offset) override
+ 			{
+ 			
+ 			if (offset != fNextOffset)
+@@ -402,13 +463,13 @@ class dng_md5_printer_stream : public dng_stream, dng_md5_printer
+ 				ThrowProgramError ();
+ 				}
+ 				
+-			Process (data, count2);
++			dng_md5_printer::ProcessPtr (data, count2);
+ 			
+ 			fNextOffset += count2;
+ 			
+ 			}
+ 
+-		const dng_fingerprint & Result ()
++		const dng_fingerprint & Result () override
+ 			{
+ 			
+ 			Flush ();
+@@ -421,6 +482,37 @@ class dng_md5_printer_stream : public dng_stream, dng_md5_printer
+ 
+ /*****************************************************************************/
+ 
+-#endif
++/// \brief A version of dng_md5_printer_stream that is always little-endian.
++
++class dng_md5_printer_le_stream : public dng_md5_printer_stream
++	{
++
++	public:
++
++		dng_md5_printer_le_stream ()
++			{
++			SetLittleEndian ();
++			}
++	
++	};
++
++/*****************************************************************************/
++
++// A MD5 printer intended to be used directly with no portability requirements.
++
++class dng_md5_direct_printer: public dng_md5_printer
++	{
++
++	public:
++
++		dng_md5_direct_printer ()
++			{
++			}
++
++	};
++
++/*****************************************************************************/
++
++#endif	// __dng_fingerprint__
+ 	
+ /*****************************************************************************/
+diff --git a/source/dng_flags.h b/source/dng_flags.h
+index f625725..bc764e2 100644
+--- a/source/dng_flags.h
++++ b/source/dng_flags.h
+@@ -19,6 +19,21 @@
+ 
+ /*****************************************************************************/
+ 
++// Update these for each public DNG SDK release.
++
++#define kDNGSDK_MajorVersion 1
++#define kDNGSDK_MinorVersion 7
++#define kDNGSDK_DotVersion   1
++
++#define kDNGSDK_VersionString "1.7.1"
++
++#define kDNGSDK_BuildVersion 2410
++#define kDNGSDK_BuildString  "2410"
++
++#define kDNGSDK_GetInfoVersion	"1.7.1 (" kDNGSDK_BuildString ")"
++
++/*****************************************************************************/
++
+ /// \def qMacOS 
+ /// 1 if compiling for Mac OS X.
+ 
+@@ -205,7 +220,7 @@
+ #ifndef qDNGBigEndian
+ 
+ #if defined(qDNGLittleEndian)
+-#define qDNGBigEndian !qDNGLittleEndian
++#define qDNGBigEndian (!qDNGLittleEndian)
+ 
+ #elif defined(__POWERPC__)
+ #define qDNGBigEndian 1
+@@ -244,7 +259,7 @@
+ #ifndef qXCodeRez
+ 
+ #ifndef qDNGLittleEndian
+-#define qDNGLittleEndian !qDNGBigEndian
++#define qDNGLittleEndian (!qDNGBigEndian)
+ #endif
+ 
+ #endif
+@@ -316,7 +331,7 @@
+ 
+ #ifdef __cplusplus
+ #if defined(__clang__) && !defined(__INTEL_LLVM_COMPILER)
+-#define DNG_ALWAYS_INLINE __attribute((__always_inline__)) inline
++#define DNG_ALWAYS_INLINE __attribute__((__always_inline__)) inline
+ #else
+ #define DNG_ALWAYS_INLINE inline
+ #endif
+@@ -324,6 +339,32 @@
+ 
+ /*****************************************************************************/
+ 
++// Switch statement [[fallthrough]]; attribute defined for C++17 and C23.
++//
++// This can be used to indicate an intentional "fall through".
++// For example, if one is seeing the clang diagnostic warning or error:
++//         Unannotated fall-through between switch labels
++// then if "fall through" is desired, this macro can be placed at the
++// point of "fall through".
++
++#if defined(__cplusplus)
++#if __cplusplus >= 201703L
++#define DNG_FALLTHROUGH [[fallthrough]];
++#else
++#define DNG_FALLTHROUGH
++#endif
++#elif defined(__STDC_VERSION__)
++#if __STDC_VERSION__ >= 202311L
++#define DNG_FALLTHROUGH [[fallthrough]];
++#else
++#define DNG_FALLTHROUGH
++#endif
++#else
++#define DNG_FALLTHROUGH
++#endif
++
++/*****************************************************************************/
++
+ /// \def qDNGThreadSafe 
+ /// 1 if target platform has thread support and threadsafe libraries, 0 otherwise.
+ 
+@@ -413,22 +454,90 @@
+ 
+ /*****************************************************************************/
+ 
++/// \def qDNGUsingAddressSanitizer
++/// Set to 1 when using the Address Sanitizer tool.
++
++#ifndef qDNGUsingAddressSanitizer
++#if defined(__clang__) && defined(__has_feature)
++#if __has_feature(address_sanitizer)
++#define qDNGUsingAddressSanitizer (1)
++#endif
++#endif
++#endif
++
++#ifndef qDNGUsingAddressSanitizer
++#if defined(__SANITIZE_ADDRESS__)
++#define qDNGUsingAddressSanitizer (1)
++#endif
++#endif
++
++#ifndef qDNGUsingAddressSanitizer
++#define qDNGUsingAddressSanitizer (0)
++#endif
++
++/*****************************************************************************/
++
++/// \def qDNGUsingThreadSanitizer
++/// Set to 1 when using the Thread Sanitizer tool.
++
++#ifndef qDNGUsingThreadSanitizer
++#if defined(__clang__) && defined(__has_feature)
++#if __has_feature(thread_sanitizer)
++#define qDNGUsingThreadSanitizer (1)
++#endif
++#endif
++#endif
++
++#ifndef qDNGUsingThreadSanitizer
++#if defined(__SANITIZE_THREAD__)
++#define qDNGUsingThreadSanitizer (1)
++#endif
++#endif
++
++#ifndef qDNGUsingThreadSanitizer
++#define qDNGUsingThreadSanitizer (0)
++#endif
++
++/*****************************************************************************/
++
++/// \def qDNGUsingUndefinedBehaviorSanitizer
++/// Set to 1 when using the UB Sanitizer tool.
++
++#ifndef qDNGUsingUndefinedBehaviorSanitizer
++#if defined(__clang__) && defined(__has_feature)
++#if __has_feature(undefined_behavior_sanitizer)
++#define qDNGUsingUndefinedBehaviorSanitizer (1)
++#endif
++#endif
++#endif
++
++// Currently no GCC macro available to check if UBSAN enabled.
++
++#ifndef qDNGUsingUndefinedBehaviorSanitizer
++#define qDNGUsingUndefinedBehaviorSanitizer (0)
++#endif
++
++/*****************************************************************************/
++
+ /// \def qDNGUsingSanitizer
+ /// Set to 1 when using a Sanitizer tool.
+ 
+ #ifndef qDNGUsingSanitizer
+-#define qDNGUsingSanitizer (0)
++#define qDNGUsingSanitizer ((qDNGUsingAddressSanitizer || qDNGUsingThreadSanitizer || qDNGUsingUndefinedBehaviorSanitizer) || 0)
+ #endif
+ 
+ /*****************************************************************************/
+ 
+ #ifndef DNG_ATTRIB_NO_SANITIZE
++// Disabled if RC_INVOKED is defined to quiet RC.EXE RC4011 warning.
++#ifndef RC_INVOKED
+ #if qDNGUsingSanitizer && defined(__clang__)
+ #define DNG_ATTRIB_NO_SANITIZE(type) __attribute__((no_sanitize(type)))
+ #else
+ #define DNG_ATTRIB_NO_SANITIZE(type)
+ #endif
+ #endif
++#endif
+ 
+ /*****************************************************************************/
+ 
+@@ -464,6 +573,14 @@
+ 
+ /*****************************************************************************/
+ 
++// Enable verbose exceptions
++
++#ifndef qDNGVerboseExceptions
++#define qDNGVerboseExceptions 1
++#endif
++
++/*****************************************************************************/
++
+ // Place deprecated flags into this file.
+ 
+ #include "dng_deprecated_flags.h"
+diff --git a/source/dng_gain_map.cpp b/source/dng_gain_map.cpp
+index 3cc623a..6295584 100644
+--- a/source/dng_gain_map.cpp
++++ b/source/dng_gain_map.cpp
+@@ -588,18 +588,18 @@ uint32 dng_gain_table_map::PutStreamSize () const
+ 
+ /*****************************************************************************/
+ 
+-void dng_gain_table_map::AddDigest (dng_md5_printer &printer) const
++void dng_gain_table_map::AddDigest (dng_md5_printer_stream &printer) const
+ 	{
+ 
+ 	if (SupportsVersion1 ())
+-		printer.Process ("ProfileGainTableMap", 19);
++		printer.ProcessPtr ("ProfileGainTableMap", 19);
+ 
+ 	else
+-		printer.Process ("ProfileGainTableMap2", 20);
++		printer.ProcessPtr ("ProfileGainTableMap2", 20);
+ 		
+ 	EnsureFingerprint ();
+ 
+-	printer.Process (fFingerprint.data, dng_fingerprint::kDNGFingerprintSize);
++	printer.Process (fFingerprint);
+ 
+ 	}
+ 
+@@ -611,7 +611,7 @@ void dng_gain_table_map::EnsureFingerprint () const
+ 	if (fFingerprint.IsNull ())
+ 		{
+ 
+-		dng_md5_printer_stream stream;
++		dng_md5_printer_le_stream stream;
+ 
+ 		PutStream (stream);
+ 
+@@ -1306,7 +1306,7 @@ void dng_opcode_GainMap::ProcessArea (dng_negative &negative,
+ 									  const dng_rect &imageBounds)
+ 	{
+ 
+-	dng_rect overlap = fAreaSpec.ScaledOverlap (dstArea);
++	const dng_rect overlap = fAreaSpec.ScaledOverlap (dstArea);
+ 	
+ 	if (overlap.NotEmpty ())
+ 		{
+@@ -1328,12 +1328,12 @@ void dng_opcode_GainMap::ProcessArea (dng_negative &negative,
+ 			
+ 			}
+ 		
+-		uint32 cols = overlap.W ();
+-		
+-		uint32 colPitch = fAreaSpec.ColPitch ();
+-		
+-		colPitch = Min_uint32 (colPitch, cols);
+-		
++		const uint32 rowPitch = Min_uint32 (fAreaSpec.RowPitch (), overlap.H ());
++		const uint32 colPitch = Min_uint32 (fAreaSpec.ColPitch (), overlap.W ());
++
++		const uint32 rows = (overlap.H () + rowPitch - 1) / rowPitch;
++		const uint32 cols = (overlap.W () + colPitch - 1) / colPitch;
++
+ 		for (uint32 plane = fAreaSpec.Plane ();
+ 			 plane < fAreaSpec.Plane () + fAreaSpec.Planes () &&
+ 			 plane < buffer.Planes ();
+@@ -1341,8 +1341,10 @@ void dng_opcode_GainMap::ProcessArea (dng_negative &negative,
+ 			{
+ 			
+ 			uint32 mapPlane = Min_uint32 (plane, fGainMap->Planes () - 1);
+-			
+-			for (int32 row = overlap.t; row < overlap.b; row += fAreaSpec.RowPitch ())
++
++			int32 row = overlap.t;
++
++			for (uint32 rowIdx = 0; rowIdx < rows; rowIdx++)
+ 				{
+ 				
+ 				real32 *dPtr = buffer.DirtyPixel_real32 (row, overlap.l, plane);
+@@ -1355,17 +1357,19 @@ void dng_opcode_GainMap::ProcessArea (dng_negative &negative,
+ 			  
+ 				if (blackLevel != 0)
+ 					{
+-					
+-					for (uint32 col = 0; col < cols; col += colPitch)
++
++					for (uint32 colIdx = 0, col = 0; colIdx < cols; colIdx++)
+ 						{
+ 
+ 						dPtr [col] = dPtr [col] * blackScale1 + blackOffset1;
+ 								
++						col += colPitch;
++
+ 						}
+ 						
+ 					}
+ 					
+-				for (uint32 col = 0; col < cols; col += colPitch)
++				for (uint32 colIdx = 0, col = 0; colIdx < cols; colIdx++)
+ 					{
+ 					
+ 					real32 gain = interp.Interpolate ();
+@@ -1377,25 +1381,31 @@ void dng_opcode_GainMap::ProcessArea (dng_negative &negative,
+ 						interp.Increment ();
+ 						}
+ 					
++					col += colPitch;
++
+ 					}
+ 				
+ 				if (blackLevel != 0)
+ 					{
+ 					
+-					for (uint32 col = 0; col < cols; col += colPitch)
++					for (uint32 colIdx = 0, col = 0; colIdx < cols; colIdx++)
+ 						{
+ 
+ 						dPtr [col] = dPtr [col] * blackScale2 + blackOffset2;
+ 							
++						col += colPitch;
++
+ 						}
+ 						
+ 					}
+-					
+-				}
++
++				row += rowPitch;
++
++				} // rows
+ 			
+-			}
++			} // planes
+ 		
+-		}
++		} // overlap not empty
+ 
+ 	}
+ 	
+diff --git a/source/dng_gain_map.h b/source/dng_gain_map.h
+index a5a8f48..6a69a34 100644
+--- a/source/dng_gain_map.h
++++ b/source/dng_gain_map.h
+@@ -335,7 +335,7 @@ class dng_gain_table_map: private dng_uncopyable
+ 
+ 		/// Add the gain table map to the given digest printer.
+ 
+-		void AddDigest (dng_md5_printer &printer) const;
++		void AddDigest (dng_md5_printer_stream &printer) const;
+ 
+ 		/// Fingerprint for the gain table map. Computed lazily.
+ 
+diff --git a/source/dng_host.cpp b/source/dng_host.cpp
+index e48a393..dba0389 100644
+--- a/source/dng_host.cpp
++++ b/source/dng_host.cpp
+@@ -655,9 +655,26 @@ dng_jxl_encode_settings *
+ 		case use_case_LosslessEnhancedImage:
+ 		case use_case_LosslessGainMap:
+ 			{
+-			settings->SetDistance (0.0f);
+-			settings->SetUseOriginalColorEncoding (true);
++			
++			// If we have special settings attached to the host, just use them.
++			
++			if (JXLEncodeSettings ())
++				{
++				
++				*settings = *JXLEncodeSettings ();
++				
++				}
++
++			else
++				{
++				
++				settings->SetDistance (0.0f);
++				settings->SetUseOriginalColorEncoding (true);
++
++				}
++
+ 			break;
++			
+ 			}
+ 			
+ 		case use_case_MainImage:
+@@ -733,7 +750,9 @@ dng_jxl_encode_settings *
+ 				}
+ 				
+ 			// Fall through
+-			
++
++			DNG_FALLTHROUGH
++
+ 			}
+ 			
+ 		case use_case_LosslessTransparency:
+@@ -760,7 +779,9 @@ dng_jxl_encode_settings *
+ 				}
+ 				
+ 			// Fall through
+-			
++
++			DNG_FALLTHROUGH
++
+ 			}
+ 			
+ 		case use_case_LosslessDepth:
+diff --git a/source/dng_hue_sat_map.cpp b/source/dng_hue_sat_map.cpp
+index bb58d54..54bee53 100644
+--- a/source/dng_hue_sat_map.cpp
++++ b/source/dng_hue_sat_map.cpp
+@@ -249,8 +249,8 @@ void dng_hue_sat_map::AssignNewUniqueRuntimeFingerprint ()
+ 
+ 	const uint64 uid = ++sRuntimeFingerprintCounter;
+ 
+-	dng_md5_printer printer;
+-	printer.Process (&uid, sizeof (uid));
++	dng_md5_printer_stream printer;
++	printer.Put_uint64 (uid);
+ 	fRuntimeFingerprint = printer.Result ();
+ 
+ 	}
+@@ -380,17 +380,15 @@ dng_hue_sat_map * dng_hue_sat_map::Interpolate (const dng_hue_sat_map &map1,
+ 
+ 		{
+ 
+-		dng_md5_printer printer;
++		dng_md5_printer_le_stream printer;
+ 
+-		printer.Process ("Interpolate", 11);
++		printer.ProcessPtr ("Interpolate", 11);
+ 
+-		printer.Process (&weight1, sizeof(weight1));
++		printer.Put_real64 (weight1);
+ 
+-		printer.Process (map1.RuntimeFingerprint ().data,
+-						 dng_fingerprint::kDNGFingerprintSize);
++		printer.Process (map1.RuntimeFingerprint ());
+ 
+-		printer.Process (map2.RuntimeFingerprint ().data,
+-						 dng_fingerprint::kDNGFingerprintSize);
++		printer.Process (map2.RuntimeFingerprint ());
+ 
+ 		result->SetRuntimeFingerprint (printer.Result ());
+ 
+@@ -513,21 +511,16 @@ dng_hue_sat_map * dng_hue_sat_map::Interpolate (const dng_hue_sat_map &map1,
+ 
+ 		{
+ 
+-		dng_md5_printer printer;
++		dng_md5_printer_le_stream printer;
+ 
+-		printer.Process ("Interpolate3", 12);
++		printer.ProcessPtr ("Interpolate3", 12);
+ 
+-		printer.Process (&weight1, sizeof (weight1));
+-		printer.Process (&weight2, sizeof (weight2));
++		printer.Put_real64 (weight1);
++		printer.Put_real64 (weight2);
+ 
+-		printer.Process (map1.RuntimeFingerprint ().data,
+-						 dng_fingerprint::kDNGFingerprintSize);
+-
+-		printer.Process (map2.RuntimeFingerprint ().data,
+-						 dng_fingerprint::kDNGFingerprintSize);
+-
+-		printer.Process (map3.RuntimeFingerprint ().data,
+-						 dng_fingerprint::kDNGFingerprintSize);
++		printer.Process (map1.RuntimeFingerprint ());
++		printer.Process (map2.RuntimeFingerprint ());
++		printer.Process (map3.RuntimeFingerprint ());
+ 
+ 		result->SetRuntimeFingerprint (printer.Result ());
+ 
+diff --git a/source/dng_ifd.cpp b/source/dng_ifd.cpp
+index a55b489..5e20dca 100644
+--- a/source/dng_ifd.cpp
++++ b/source/dng_ifd.cpp
+@@ -2218,7 +2218,7 @@ bool dng_ifd::ParseTag (dng_host &host,
+ 			if (!CheckTagCount (parentCode, tagCode, tagCount, 16))
+ 				return false;
+ 				
+-			stream.Get (fPreviewInfo.fSettingsDigest.data, 16);
++			stream.Get (fPreviewInfo.fSettingsDigest);
+ 				
+ 			#if qDNGValidate
+ 
+@@ -2790,7 +2790,7 @@ bool dng_ifd::ParseTag (dng_host &host,
+ 			if (pgtm && gVerbose)
+ 				{
+ 
+-				dng_md5_printer printer;
++				dng_md5_printer_le_stream printer;
+ 				
+ 				pgtm->AddDigest (printer);
+ 
+@@ -3144,6 +3144,38 @@ bool dng_ifd::ParseTag (dng_host &host,
+ 			
+ 			}
+ 
++		case tcGainMapMetadata_ISO_21496_1:
++			{
++			
++			if (!CheckTagType (parentCode, tagCode, tagType, ttUndefined))
++				return false;
++
++			constexpr uint32 kMaxTagCount = 4 * 1024 * 1024;
++
++			if (tagCount > kMaxTagCount)
++				ThrowBadFormat ("Gain map metadata block too large");
++
++			AutoPtr<dng_memory_block> block (host.Allocate (tagCount));
++			
++			stream.Get (block->Buffer (),
++						tagCount);
++
++			fGainMapMetadata.reset (block.Release ());
++			
++			#if qDNGValidate
++
++			if (gVerbose)
++				{
++				printf ("GainMapMetadata: %u bytes\n",
++						tagCount);
++				}
++				
++			#endif
++
++			break;
++			
++			}
++
+ 		default:
+ 			{
+ 			
+@@ -3456,7 +3488,8 @@ bool dng_ifd::IsValidDNG (dng_shared &shared,
+ 
+ 	bool isMainOrEnhancedIFD = isMainIFD || isEnhancedIFD;
+ 
+-	bool isGainMapIFD = (fNewSubFileType == sfGainMap);
++	bool isGainMapIFD = (fNewSubFileType == sfGainMap ||
++						 fNewSubFileType == sfPreviewGainMap);
+ 	
+ 	// Check NewSubFileType.
+ 	
+@@ -3483,6 +3516,7 @@ bool dng_ifd::IsValidDNG (dng_shared &shared,
+ 		fNewSubFileType != sfEnhancedImage	  &&
+ 		fNewSubFileType != sfAltPreviewImage  &&
+ 		fNewSubFileType != sfGainMap		  &&
++		fNewSubFileType != sfPreviewGainMap	  &&
+ 		fNewSubFileType != sfSemanticMask)
+ 		{
+ 		
+@@ -3630,7 +3664,8 @@ bool dng_ifd::IsValidDNG (dng_shared &shared,
+ 		
+ 		}
+ 
+-	else if (fNewSubFileType == sfGainMap)
++	else if (fNewSubFileType == sfGainMap ||
++			 fNewSubFileType == sfPreviewGainMap)
+ 		{
+ 		
+ 		if (fPhotometricInterpretation != piGainMap)
+@@ -3800,7 +3835,8 @@ bool dng_ifd::IsValidDNG (dng_shared &shared,
+ 	// Check ColorimetricReference.
+ 
+ 	if (isGainMapIFD &&
+-		(shared.fColorimetricReference == crSceneReferred))
++		(shared.fColorimetricReference == crSceneReferred) &&
++		(fNewSubFileType != sfPreviewGainMap))
+ 		{
+ 		
+ 		#if qDNGValidate
+@@ -5305,6 +5341,17 @@ bool dng_ifd::IsBaselineJPEG () const
+ 			break;
+ 			
+ 		}
++
++	// Some scanned TIFF files have JPEG + alpha channel. Treat these as
++	// baseline for purposes of reading. See CR-4205789.
++
++	if ((fCompression == ccJPEG) &&
++		(fPhotometricInterpretation == piRGB) &&
++		(fSamplesPerPixel == 3 ||
++		 fSamplesPerPixel == 4))
++		{
++		return true;
++		}
+ 		
+ 	return false;
+ 	
+diff --git a/source/dng_ifd.h b/source/dng_ifd.h
+index 60459d4..bdf2fa4 100644
+--- a/source/dng_ifd.h
++++ b/source/dng_ifd.h
+@@ -265,6 +265,10 @@ class dng_ifd
+ 		real32 fJXLDistance    = -1.0f;
+ 		int32  fJXLEffort      = -1;
+ 		int32  fJXLDecodeSpeed = -1;
++
++		// Metadata for ISO 21496-1.
++		
++		std::shared_ptr<const dng_memory_block> fGainMapMetadata;
+ 		
+ 	public:
+ 	
+diff --git a/source/dng_image_writer.cpp b/source/dng_image_writer.cpp
+index bf9b20c..b97ab74 100644
+--- a/source/dng_image_writer.cpp
++++ b/source/dng_image_writer.cpp
+@@ -167,7 +167,7 @@ static void SpoolAdobeData (dng_stream &stream,
+ 			
+ 			stream.Put_uint32 (16);
+ 			
+-			stream.Put (iptcDigest.data, 16);
++			stream.Put (iptcDigest);
+ 			
+ 			}
+ 			
+@@ -399,8 +399,8 @@ void tag_data_ptr::Put (dng_stream &stream) const
+ 				
+ 				}
+ 			
+-			// Entries don't need to be byte swapped.  Fall through
+-			// to non-byte swapped case.
++			// Entries don't need to be byte swapped.
++			// Default to non-byte swapped case.
+ 				
+ 			default:
+ 				{
+@@ -1546,7 +1546,7 @@ exif_tag_set::exif_tag_set (dng_tiff_directory &directory,
+ 			snprintf (fImageUniqueIDData + j * 2,
+ 					  33,
+ 					  "%02X",
+-					  (unsigned) exif.fImageUniqueID.data [j]);
++					  (unsigned) exif.fImageUniqueID.Data () [j]);
+ 					 
+ 			}
+ 		
+@@ -2524,11 +2524,18 @@ class profile_tag_set
+ 
+ 		AutoPtr<tag_owned_data_ptr> fRGBTablesTag;
+ 
++		bool fProfileDidWritePGTM = false;
++
+ 	public:
+ 	
+ 		profile_tag_set (dng_host &host,
+ 						 dng_tiff_directory &directory,
+ 						 const dng_camera_profile &profile);
++
++		bool ProfileDidWritePGTMToMainIFD () const
++			{
++			return fProfileDidWritePGTM;
++			}
+ 		
+ 	};
+ 	
+@@ -3027,6 +3034,8 @@ profile_tag_set::profile_tag_set (dng_host &host,
+ 
+ 			directory.Add (fProfileGainTableMapTag.Get ());
+ 
++			fProfileDidWritePGTM = true;
++
+ 			}
+ 
+ 		// ProfileDynamicRange.
+@@ -3315,7 +3324,7 @@ void big_table_tag_set::WriteData (dng_stream &stream)
+ 			const dng_fingerprint &fingerprint = it->first;
+ 			
+ 			memcpy (fDigestsBuffer->Buffer_uint8 () + index * 16,
+-					fingerprint.data,
++					fingerprint.Data (),
+ 					16);
+ 			
+ 			const dng_ref_counted_block &block = it->second;
+@@ -3342,8 +3351,8 @@ void big_table_tag_set::WriteData (dng_stream &stream)
+ 			for (const auto &group : fGroupIndex.Map ())			
+ 				{
+ 				
+-				memcpy (dPtr	 , group.first .data, 16);
+-				memcpy (dPtr + 16, group.second.data, 16);
++				memcpy (dPtr	 , group.first .Data (), 16);
++				memcpy (dPtr + 16, group.second.Data (), 16);
+ 
+ 				dPtr += 32;
+ 				
+@@ -5142,7 +5151,7 @@ void dng_write_tiles_task::Process (uint32 /* threadIndex */,
+ 				
+ 				tileStream.SetReadPosition (0);
+ 				
+-				dng_md5_printer_stream md5stream;
++				dng_md5_printer_le_stream md5stream;
+ 				
+ 				tileStream.CopyToStream (md5stream, tileByteCount);
+ 				
+@@ -5188,8 +5197,7 @@ void dng_write_tiles_task::Process (uint32 /* threadIndex */,
+ 			if (fNeedDigest)
+ 				{
+ 				
+-				fOverallPrinter.Process (tileDigest.data,
+-										 uint32 (sizeof (tileDigest.data)));
++				fOverallPrinter.Process (tileDigest);
+ 
+ 				}
+ 
+@@ -5550,7 +5558,7 @@ void dng_image_writer::WriteImage (dng_host &host,
+ 			subTileBlockBuffer.Reset (host.Allocate (uncompressedSize.Get ()));
+ 			}
+ 
+-		dng_md5_printer overallPrinter;
++		dng_md5_direct_printer overallPrinter;
+ 
+ 		const bool needDigest = (outDigest != nullptr);
+ 				
+@@ -5628,7 +5636,7 @@ void dng_image_writer::WriteImage (dng_host &host,
+ 
+ 					tileStream.SetReadPosition (0);
+ 					
+-					dng_md5_printer_stream md5stream;
++					dng_md5_printer_le_stream md5stream;
+ 					
+ 					tileStream.CopyToStream (md5stream, tileByteCount);
+ 					
+@@ -5636,8 +5644,7 @@ void dng_image_writer::WriteImage (dng_host &host,
+ 
+ 					// Update the overall digest.
+ 
+-					overallPrinter.Process (tileDigest.data,
+-											uint32 (sizeof (tileDigest.data)));
++					overallPrinter.Process (tileDigest);
+ 
+ 					// Copy the tile data to the main stream.
+ 					
+@@ -6481,7 +6488,6 @@ void dng_image_writer::CleanUpMetadata (dng_host &host,
+ 	#endif	// qDNGUseXMP
+ 
+ 	}
+-	
+ 
+ /*****************************************************************************/
+ 
+@@ -6547,7 +6553,10 @@ void dng_image_writer::WriteTIFF (dng_host &host,
+ 								  bool hasTransparency,
+ 								  bool allowBigTIFF,
+ 								  const dng_image *gainMapImage,
+-								  const bool useHalfFloat)
++								  const const_dng_memory_block_sptr gainMapMetadataBlock,
++								  const bool useHalfFloat,
++								  const void *gainMapAltProfileData,
++								  const uint32 gainMapAltProfileSize)
+ 	{
+ 	
+ 	const void *profileData = NULL;
+@@ -6579,7 +6588,10 @@ void dng_image_writer::WriteTIFF (dng_host &host,
+ 						  hasTransparency,
+ 						  allowBigTIFF,
+ 						  gainMapImage,
+-						  useHalfFloat);
++						  gainMapMetadataBlock,
++						  useHalfFloat,
++						  gainMapAltProfileData,
++						  gainMapAltProfileSize);
+ 	
+ 	}
+ 
+@@ -6711,7 +6723,10 @@ void dng_image_writer::WriteTIFFWithProfile (dng_host &host,
+ 											 bool hasTransparency,
+ 											 bool allowBigTIFF,
+ 											 const dng_image *gainMapImage,
+-											 const bool useHalfFloat)
++											 const const_dng_memory_block_sptr gainMapMetadataBlock,
++											 const bool useHalfFloat,
++											 const void *gainMapAltProfileData,
++											 const uint32 gainMapAltProfileSize)
+ 	{
+ 	
+ 	// Force writing all TIFF files in BigTIFF format.
+@@ -6869,7 +6884,12 @@ void dng_image_writer::WriteTIFFWithProfile (dng_host &host,
+ 	
+ 	AutoPtr<dng_ifd> gainMapImageIFD;
+ 
+-	const bool hasGainMap = (gainMapImage != nullptr);
++	AutoPtr<tag_owned_data_ptr> tagGainMapMetadata;
++
++	AutoPtr<tag_icc_profile> tagGainMapAlternateProfile;
++
++	const bool hasGainMap = ((gainMapImage != nullptr) &&
++							 (gainMapMetadataBlock != nullptr));
+ 
+ 	if (hasGainMap)
+ 		{
+@@ -6889,6 +6909,26 @@ void dng_image_writer::WriteTIFFWithProfile (dng_host &host,
+ 		gainMapTagSet.Reset (new dng_basic_tag_set (gainMapIFD,
+ 													*gainMapImageIFD));
+ 		
++		tagGainMapMetadata.Reset
++			(new tag_owned_data_ptr (tcGainMapMetadata_ISO_21496_1,
++									 ttUndefined,
++									 gainMapMetadataBlock->LogicalSize (),
++									 gainMapMetadataBlock));
++		
++		gainMapIFD.Add (tagGainMapMetadata.Get ());
++
++		if (gainMapAltProfileData &&
++			(gainMapAltProfileSize > 0))
++			{
++			
++			tagGainMapAlternateProfile.Reset
++				(new tag_icc_profile (gainMapAltProfileData,
++									  gainMapAltProfileSize));
++
++			gainMapIFD.Add (tagGainMapAlternateProfile.Get ());
++			
++			}
++		
+ 		}
+ 
+ 	// Resolution.
+@@ -7055,7 +7095,7 @@ void dng_image_writer::WriteTIFFWithProfile (dng_host &host,
+ 
+ 	// Write the gain map image.
+ 
+-	if (gainMapImage)
++	if (hasGainMap)
+ 		{
+ 		
+ 		WriteImage (host,
+@@ -7170,7 +7210,10 @@ void dng_image_writer::WriteDNG (dng_host &host,
+ 								 bool uncompressed,
+ 								 bool allowBigTIFF,
+ 								 const dng_image *gainMapImage,
+-								 const dng_lossy_compressed_image *gainMapLossyCompressed)
++								 const dng_lossy_compressed_image *gainMapLossyCompressed,
++								 const const_dng_memory_block_sptr gainMapMetadataBlock,
++								 const void *gainMapAltProfileData,
++								 const uint32 gainMapAltProfileSize)
+ 	{
+ 	
+ 	WriteDNGWithMetadata (host,
+@@ -7182,7 +7225,10 @@ void dng_image_writer::WriteDNG (dng_host &host,
+ 						  uncompressed,
+ 						  allowBigTIFF,
+ 						  gainMapImage,
+-						  gainMapLossyCompressed);
++						  gainMapLossyCompressed,
++						  gainMapMetadataBlock,
++						  gainMapAltProfileData,
++						  gainMapAltProfileSize);
+ 	
+ 	}
+ 	
+@@ -7380,7 +7426,10 @@ void dng_image_writer::WriteDNGWithMetadata (dng_host &host,
+ 											 const bool uncompressed,
+ 											 bool allowBigTIFF,
+ 											 const dng_image *gainMapImage,
+-											 const dng_lossy_compressed_image *gainMapLossyCompressed)
++											 const dng_lossy_compressed_image *gainMapLossyCompressed,
++											 const const_dng_memory_block_sptr gainMapMetadataBlock,
++											 const void *gainMapAltProfileData,
++											 const uint32 gainMapAltProfileSize)
+ 	{
+ 	
+ 	// Force writing all DNG files in 64-bit format.
+@@ -7583,6 +7632,8 @@ void dng_image_writer::WriteDNGWithMetadata (dng_host &host,
+ 
+ 	bool hasProfileWith_1_6_Features = false;
+ 	bool hasProfileWith_1_7_Features = false;
++
++	bool mainProfileDidWritePGTMtoMainIFD = false;
+ 		
+ 	// Create the main IFD.
+ 										 
+@@ -7606,6 +7657,9 @@ void dng_image_writer::WriteDNGWithMetadata (dng_host &host,
+ 		profileSet.Reset (new profile_tag_set (host,
+ 											   mainIFD,
+ 											   mainProfile));
++
++		mainProfileDidWritePGTMtoMainIFD =
++			profileSet->ProfileDidWritePGTMToMainIFD ();
+ 		
+ 		colorSet.Reset (new color_tag_set (mainIFD,
+ 										   negative));
+@@ -7677,6 +7731,10 @@ void dng_image_writer::WriteDNGWithMetadata (dng_host &host,
+ 	
+ 	AutoPtr<dng_ifd> gainMapImageIFD;
+ 
++	AutoPtr<tag_owned_data_ptr> tagGainMapMetadata;
++
++	AutoPtr<tag_icc_profile> tagGainMapAlternateProfile;
++
+ 	const bool hasGainMap = (gainMapImage != nullptr);
+ 
+ 	if (hasGainMap)
+@@ -7692,6 +7750,31 @@ void dng_image_writer::WriteDNGWithMetadata (dng_host &host,
+ 
+ 		gainMapTagSet.Reset (new dng_basic_tag_set (gainMapIFD,
+ 													*gainMapImageIFD));
++
++		if (gainMapMetadataBlock)
++			{
++		
++			tagGainMapMetadata.Reset
++				(new tag_owned_data_ptr (tcGainMapMetadata_ISO_21496_1,
++										 ttUndefined,
++										 gainMapMetadataBlock->LogicalSize (),
++										 gainMapMetadataBlock));
++
++			gainMapIFD.Add (tagGainMapMetadata.Get ());
++
++			if (gainMapAltProfileData &&
++				(gainMapAltProfileSize > 0))
++				{
++
++				tagGainMapAlternateProfile.Reset
++					(new tag_icc_profile (gainMapAltProfileData,
++										  gainMapAltProfileSize));
++
++				gainMapIFD.Add (tagGainMapAlternateProfile.Get ());
++
++				}
++
++			}
+ 		
+ 		}
+ 		
+@@ -8516,7 +8599,7 @@ void dng_image_writer::WriteDNGWithMetadata (dng_host &host,
+ 		}
+ 	
+ 	tag_uint8_ptr tagRawImageDigest (useNewDigest ? tcNewRawImageDigest : tcRawImageDigest,
+-									 mainImageRawImageDigest.data,
++									 mainImageRawImageDigest.Data (),
+ 									 16);
+ 									 
+ 	if (mainImageRawImageDigest.IsValid ())
+@@ -8533,7 +8616,7 @@ void dng_image_writer::WriteDNGWithMetadata (dng_host &host,
+ 	const auto rawDataUniqueID = negative.RawDataUniqueID ();
+ 	
+ 	tag_uint8_ptr tagRawDataUniqueID (tcRawDataUniqueID,
+-									  rawDataUniqueID.data,
++									  rawDataUniqueID.Data (),
+ 									  16);
+ 									  
+ 	if (rawDataUniqueID.IsValid ())
+@@ -8562,7 +8645,7 @@ void dng_image_writer::WriteDNGWithMetadata (dng_host &host,
+ 										 negative.OriginalRawFileData		());
+ 										 
+ 	tag_uint8_ptr tagOriginalRawFileDigest (tcOriginalRawFileDigest,
+-											negative.OriginalRawFileDigest ().data,
++											negative.OriginalRawFileDigest ().Data (),
+ 											16);
+ 										 
+ 	if (negative.OriginalRawFileData ())
+@@ -8717,12 +8800,10 @@ void dng_image_writer::WriteDNGWithMetadata (dng_host &host,
+ 	
+ 	if (negative.HasProfileGainTableMap () &&
+ 
+-		// If the main profile already has the PGTM attached, let the profile
+-		// logic take care of writing the PGTM. Otherwise we would end up
+-		// writing two identical PGTM tags into IFD 0.
+-		
+-		(negative.ShareProfileGainTableMap () !=
+-		 mainProfile.ShareProfileGainTableMap ()))
++		// If the main profile already wrote the PGTM attached, then
++		// ignore whatever PGTM is attached to the negative.
++
++		!mainProfileDidWritePGTMtoMainIFD)
+ 		{
+ 
+ 		dng_memory_stream tempStream (host.Allocator (),
+diff --git a/source/dng_image_writer.h b/source/dng_image_writer.h
+index 842f262..36d6bb3 100644
+--- a/source/dng_image_writer.h
++++ b/source/dng_image_writer.h
+@@ -1326,7 +1326,10 @@ class dng_image_writer
+ 						bool hasTransparency = false,
+ 						bool allowBigTIFF = true,
+ 						const dng_image *gainMapImage = nullptr,
+-						bool useHalfFloat = false);
++						const const_dng_memory_block_sptr gainMapMetadataBlock = nullptr,
++						bool useHalfFloat = false,
++						const void *gainMapAltProfileData = nullptr,
++						const uint32 gainMapAltProfileSize = 0);
+ 								
+ 		/// Write a dng_image to a dng_stream in TIFF format.
+ 		/// \param host Host interface used for progress updates, abort testing, buffer allocation, etc.
+@@ -1360,7 +1363,10 @@ class dng_image_writer
+ 										   bool hasTransparency = false,
+ 										   bool allowBigTIFF = true,
+ 										   const dng_image *gainMapImage = nullptr,
+-										   bool useHalfFloat = false);
++										   const const_dng_memory_block_sptr gainMapMetadataBlock = nullptr,
++										   bool useHalfFloat = false,
++										   const void *gainMapAltProfileData = nullptr,
++										   const uint32 gainMapAltProfileSize = 0);
+ 								
+ 		/// Write a dng_image to a dng_stream in DNG format.
+ 		/// \param host Host interface used for progress updates, abort testing, buffer allocation, etc.
+@@ -1380,7 +1386,10 @@ class dng_image_writer
+ 					   bool uncompressed = false,
+ 					   bool allowBigTIFF = true,
+ 					   const dng_image *gainMapImage = nullptr,
+-					   const dng_lossy_compressed_image *gainMapLossyCompressed = nullptr);
++					   const dng_lossy_compressed_image *gainMapLossyCompressed = nullptr,
++					   const const_dng_memory_block_sptr gainMapMetadataBlock = nullptr,
++					   const void *gainMapAltProfileData = nullptr,
++					   const uint32 gainMapAltProfileSize = 0);
+ 							   
+ 		/// Write a dng_image to a dng_stream in DNG format.
+ 		/// \param host Host interface used for progress updates, abort testing, buffer allocation, etc.
+@@ -1402,7 +1411,10 @@ class dng_image_writer
+ 										   bool uncompressed = false,
+ 										   bool allowBigTIFF = true,
+ 										   const dng_image *gainMapImage = nullptr,
+-										   const dng_lossy_compressed_image *gainMapLossyCompressed = nullptr);
++										   const dng_lossy_compressed_image *gainMapLossyCompressed = nullptr,
++										   const const_dng_memory_block_sptr gainMapMetadataBlock = nullptr,
++										   const void *gainMapAltProfileData = nullptr,
++										   const uint32 gainMapAltProfileSize = 0);
+ 
+ 		/// Resolve metadata conflicts and apply metadata policies in keeping
+ 		/// with Metadata Working Group (MWG) guidelines.
+@@ -1510,7 +1522,7 @@ class dng_write_tiles_task : public dng_area_task,
+ 
+ 		const bool fNeedDigest;
+ 
+-		mutable dng_md5_printer fOverallPrinter;
++		mutable dng_md5_direct_printer fOverallPrinter;
+ 		
+ 	public:
+ 	
+diff --git a/source/dng_info.cpp b/source/dng_info.cpp
+index a44ac26..07dd90c 100644
+--- a/source/dng_info.cpp
++++ b/source/dng_info.cpp
+@@ -25,7 +25,7 @@
+ dng_info::dng_info ()
+ 
+ 	:	fTIFFBlockOffset		 (0)
+-	,	fTIFFBlockOriginalOffset (kDNGStreamInvalidOffset)
++	,	fTIFFBlockOriginalOffset (0)
+ 	,	fBigEndian				 (false)
+ 	,	fMagic					 (0)
+ 	,	fExif					 ()
+@@ -1798,6 +1798,35 @@ void dng_info::ParseDNGPrivateData (dng_host &host,
+ 		return;
+ 		
+ 		}
++	
++	else if (privateName.StartsWith ("RICOH"))
++		  {
++		  
++		  #if qDNGValidate
++		  
++		  if (gVerbose)
++			  {
++			  printf ("Parsing RICOH-PENTAX DNGPrivateData\n\n");
++			  }
++			  
++		  #endif
++
++		  stream.SetReadPosition (fShared->fDNGPrivateDataOffset + 8);
++			  
++		  TempBigEndian temp_endian (stream, false);
++		  
++		  ParseMakerNoteIFD (host,
++							 stream,
++							 fShared->fDNGPrivateDataCount - 8,
++							 fShared->fDNGPrivateDataOffset + 8,
++							 fShared->fDNGPrivateDataOffset,
++							 fShared->fDNGPrivateDataOffset,
++							 fShared->fDNGPrivateDataOffset + fShared->fDNGPrivateDataCount,
++							 tcPentaxMakerNote);
++							 
++		  return;
++		  
++		  }
+ 				
+ 	// Stop parsing if this is not an Adobe format block.
+ 	
+diff --git a/source/dng_info.h b/source/dng_info.h
+index 068b447..a5890f3 100644
+--- a/source/dng_info.h
++++ b/source/dng_info.h
+@@ -59,6 +59,8 @@ class dng_info: private dng_uncopyable
+ 			
+ 		int32 fEnhancedIndex;
+ 
++		int32 fGainMapIndex = -1;			 // ISO 21496-1 Gain Map.
++
+ 		std::vector<uint32> fSemanticMaskIndices;
+ 		
+ 		std::vector <dng_ifd *> fIFD;
+diff --git a/source/dng_jpeg_image.cpp b/source/dng_jpeg_image.cpp
+index a9373ea..c8e97cc 100644
+--- a/source/dng_jpeg_image.cpp
++++ b/source/dng_jpeg_image.cpp
+@@ -21,7 +21,7 @@
+ #include "dng_uncopyable.h"
+ 
+ #include <atomic>
+-#include <inttypes.h>
++#include <cinttypes>
+ 
+ /*****************************************************************************/
+ 
+@@ -350,10 +350,10 @@ dng_fingerprint dng_lossy_compressed_image::FindDigest (dng_host &host) const
+ 		 for (int32 i = ra.fBegin; i < ra.fEnd; i++)
+ 			 {
+ 				 
+-			 dng_md5_printer printer;
++			 dng_md5_direct_printer printer;
+ 				
+-			 printer.Process (fData [i]->Buffer	     (),
+-							  fData [i]->LogicalSize ());
++			 printer.ProcessPtr (fData [i]->Buffer		(),
++								 fData [i]->LogicalSize ());
+ 								 
+ 			 digests [i] = printer.Result ();
+ 				 
+@@ -369,11 +369,10 @@ dng_fingerprint dng_lossy_compressed_image::FindDigest (dng_host &host) const
+ 	
+ 		{
+ 		
+-		dng_md5_printer printer;
++		dng_md5_direct_printer printer;
+ 		
+ 		for (const auto &digest : digests)
+-			printer.Process (digest.data,
+-							 uint32 (sizeof (digest.data)));
++			printer.Process (digest);
+ 			
+ 		return printer.Result ();
+ 		
+@@ -486,10 +485,10 @@ void dng_jpeg_image::DoFindDigest (dng_host & /* host */,
+ 	if (fJPEGTables.Get ())
+ 		{
+ 		
+-		dng_md5_printer printer;
++		dng_md5_direct_printer printer;
+ 		
+-		printer.Process (fJPEGTables->Buffer	  (),
+-						 fJPEGTables->LogicalSize ());
++		printer.ProcessPtr (fJPEGTables->Buffer		 (),
++							fJPEGTables->LogicalSize ());
+ 						 
+ 		digests.push_back (printer.Result ());
+ 		
+diff --git a/source/dng_jxl.cpp b/source/dng_jxl.cpp
+index 17e28c1..eabd114 100644
+--- a/source/dng_jxl.cpp
++++ b/source/dng_jxl.cpp
+@@ -31,6 +31,7 @@
+ #include "dng_negative.h"
+ #include "dng_parse_utils.h"
+ #include "dng_pixel_buffer.h"
++#include "dng_safe_arithmetic.h"
+ #include "dng_tag_codes.h"
+ #include "dng_utils.h"
+ #include "dng_xmp.h"
+@@ -38,10 +39,7 @@
+ 
+ #include <atomic>
+ #include <memory>
+-
+-/*****************************************************************************/
+-
+-#define qLogJXL (qDNGValidate && 0)
++#include <unordered_map>
+ 
+ /*****************************************************************************/
+ 
+@@ -316,7 +314,7 @@ static void CheckResult (JxlEncoderStatus status,
+ 
+ /*****************************************************************************/
+ 
+-static void * dng_jxl_alloc (void *opaque, size_t size)
++static void * dng_jxl_alloc (void *opaque, size_t size) // TODO(erichan): instrument
+ 	{
+ 
+ 	#if 0
+@@ -490,137 +488,769 @@ class dng_jxl_io_buffer
+ 			fIndex    = 0;
+ 			}
+ 
+-		void ReadChunk (dng_stream &stream,
+-						size_t remaining)
+-			{
++		void ReadChunk (dng_stream &stream,
++						size_t remaining)
++			{
++
++			size_t bytes_remaining_in_stream =
++				(size_t) (stream.Length () - stream.Position ());
++
++			if (bytes_remaining_in_stream == 0)
++				{
++				#if qLogJXL
++				printf ("dng_jxl_io_buffer -- EOF reached in ReadChunk");
++				#endif
++				ThrowEndOfFile ("dng_jxl_io_buffer");
++				}
++
++			// This is the number of bytes we're going to try to read from the
++			// stream. It cannot be more than the number of bytes available in
++			// the stream.
++			
++			size_t next_read_size = std::min (fChunkSize,
++											  bytes_remaining_in_stream);
++
++			// This is the number of bytes that jxl previously consumed from
++			// our buffer.
++			
++			size_t prev_read_size = fDataSize - remaining;
++
++			// Update our pointer past the previously-consumed bytes.
++
++			fIndex += prev_read_size;
++
++			// If reading the next chunk would spill beyond the end of our
++			// buffer, then reset to the beginning of our buffer. We need to
++			// move the remaining data. If our internal buffer is much larger
++			// than the chunk size, then this will be relatively rare.
++
++			if (fIndex + next_read_size > fMaxBufferSize)
++				{
++
++				memmove (fBlock->Buffer (),
++						 fBlock->Buffer_uint8 () + fIndex,
++						 remaining);
++						 
++				fIndex = 0;
++				
++				}
++
++			// Read from the stream.
++
++			auto ptr = Ptr () + remaining;
++			
++			stream.Get (ptr, (uint32) next_read_size);
++
++			// Update the amount of data in our buffer.
++
++			fDataSize = remaining + next_read_size;
++
++			}
++		
++	};
++
++/*****************************************************************************/
++
++static void EnsureUseBoxes (JxlEncoder *enc,
++							bool &once_flag)
++	{
++	
++	if (!once_flag)
++		{
++		
++		once_flag = true;
++
++		CheckResult (JxlEncoderUseBoxes (enc),
++					 "JxlEncoderUseBoxes",
++					 nullptr);
++		
++		}
++	
++	}
++
++/*****************************************************************************/
++
++#ifndef qLogStreamOutput
++#define qLogStreamOutput (qDNGValidate && 0)
++#endif
++
++#ifndef qLogStreamIntput
++#define qLogStreamIntput (qDNGValidate && 0)
++#endif
++
++/*****************************************************************************/
++
++// Simple output processor that writes all of the data to a single internal
++// byte stream (fOutput).
++
++class jxl_data_writer
++	{
++
++	public:
++
++		dng_host &fHost;
++
++		size_t fPosition = 0ULL;
++		
++		size_t fFinalizedPosition = 0ULL;
++
++		std::vector<uint8> fOutput;
++		
++	public:
++
++		jxl_data_writer (dng_host &host)
++			:	fHost (host)
++			{
++			}
++
++		void * get_buffer (size_t *size)
++			{
++
++			if (!size)
++				return nullptr;
++
++			if (*size == 0)
++				return nullptr;
++
++			// Deal with cancellation.
++
++			try
++				{
++				fHost.SniffForAbort ();
++				}
++
++			catch (...)
++				{
++				*size = 0;
++				return nullptr;
++				}
++
++			#if qLogStreamOutput
++
++			printf ("output: get_buffer (size %d)\n",
++					int (*size));
++
++			#endif
++
++			if (fPosition + *size > fOutput.size ())
++				fOutput.resize (fPosition + *size, 0xDA);
++			
++			*size = fOutput.size () - fPosition;
++
++			return fOutput.data () + fPosition;
++
++			}
++
++		void release_buffer (size_t written_bytes)
++			{
++
++			#if qLogStreamOutput
++			
++			printf ("output: release_buffer (wb=%d)\n",
++					int (written_bytes));
++
++			#endif
++
++			fPosition += written_bytes;
++			
++			}
++
++		void seek (size_t position)
++			{
++
++			#if qLogStreamOutput
++			
++			printf ("output: seek (pos=%d)\n",
++					int (position));
++
++			#endif
++			
++			fPosition = position;
++			
++			}
++
++		void set_finalized_position (size_t finalized_position)
++			{
++			
++			#if qLogStreamOutput
++			
++			printf ("output: set_finalized_position (pos=%d)\n",
++					int (finalized_position));
++			
++			#endif
++			
++			fFinalizedPosition = finalized_position;
++			
++			}
++		
++	};
++
++/*****************************************************************************/
++
++// Output processor that doesn't support arbitrary seeking but can write
++// smaller chunks to the given output stream in-sequence.
++
++class jxl_data_writer2
++	{
++
++	private:
++
++		static constexpr size_t kMaxSize = 1073741824;
++
++		dng_host &fHost;
++
++		dng_stream &fStream;
++
++		AutoPtr<dng_memory_block> fBlock;
++
++		size_t fPosition = 0ULL;
++		
++		size_t fFinalizedPosition = 0ULL;
++
++		size_t fStartPosition = 0ULL;
++
++	public:
++
++		jxl_data_writer2 (dng_host &host,
++						  dng_stream &stream)
++			:	fHost (host)
++			,	fStream (stream)
++			{
++			}
++
++		void * get_buffer (size_t *size)
++			{
++
++			if (!size)
++				return nullptr;
++
++			if (*size == 0)
++				return nullptr;
++
++			// Deal with cancellation.
++
++			try
++				{
++				fHost.SniffForAbort ();
++				}
++
++			catch (...)
++				{
++				*size = 0;
++				return nullptr;
++				}
++
++			#if qLogStreamOutput
++
++			printf ("output: get_buffer (size %d)\n",
++					int (*size));
++
++			#endif
++
++			if ((*size) > kMaxSize)
++				{
++				*size = 0;
++				return nullptr;
++				}
++
++			const uint32 requestedBytes = uint32 (*size);
++
++			if (!fBlock.Get () ||
++				(fBlock->LogicalSize () < requestedBytes))
++				{
++
++				// Round up to 1 MB.
++				
++				const uint32 roundedBytes = ((requestedBytes + 1048575) & uint32 (~1048575));
++
++				fBlock.Reset (fHost.Allocate (roundedBytes));
++				
++				}
++
++			fStartPosition = fPosition;
++
++			*size = (size_t) fBlock->LogicalSize ();
++
++			return fBlock->Buffer ();
++
++			}
++
++		void release_buffer (size_t written_bytes)
++			{
++
++			#if qLogStreamOutput
++			
++			printf ("output: release_buffer (wb=%d)\n",
++					int (written_bytes));
++
++			#endif
++			
++			fPosition += written_bytes;
++			
++			}
++		
++		void set_finalized_position (size_t finalized_position)
++			{
++
++			#if qLogStreamOutput
++			
++			printf ("output: set_finalized_position (sp=%d, pos=%d)\n",
++					int (fStartPosition),
++					int (finalized_position));
++
++			#endif
++			
++			fFinalizedPosition = finalized_position;
++			
++			if (finalized_position > fStartPosition &&
++				(finalized_position < fStartPosition + kMaxSize))
++				{
++
++				fStream.Put (fBlock->Buffer (),
++							 uint32 (finalized_position - fStartPosition));
++
++				}
++			
++			fStartPosition = finalized_position;
++			
++			}
++
++	};
++
++/*****************************************************************************/
++
++static void * jxl_output_get_buffer (void *opaque,
++									 size_t *size)
++	{
++	
++	auto writer = (jxl_data_writer2 *) opaque;
++
++	if (!writer)
++		{
++		*size = 0;
++		return nullptr;
++		}
++
++	return writer->get_buffer (size);
++	
++	}
++
++/*****************************************************************************/
++
++static void jxl_output_release_buffer (void *opaque,
++									   size_t written_bytes)
++	{
++	
++	auto writer = (jxl_data_writer2 *) opaque;
++
++	if (writer)
++		writer->release_buffer (written_bytes);
++		
++	}
++
++/*****************************************************************************/
++
++static void output_set_finalized_position (void *opaque,
++										   uint64_t finalized_position)
++	{
++	
++	auto writer = (jxl_data_writer2 *) opaque;
++
++	if (writer)
++		writer->set_finalized_position (size_t (finalized_position));
++	
++	}
++
++/*****************************************************************************/
++
++class jxl_image_chunk_reader
++	{
++
++	private:
++
++		dng_host &fHost;
++
++		const dng_image &fImage;
++
++		JxlPixelFormat fPixelFormat;
++
++		std::mutex fMutex;
++
++		std::unordered_map<const void *,
++						   std::shared_ptr<dng_memory_block> > fTable;
++
++	public:
++
++		jxl_image_chunk_reader (dng_host &host,
++								const dng_image &srcImage,
++								const JxlPixelFormat &pixelFormat)
++			:	fHost (host)
++			,	fImage (srcImage)
++			,	fPixelFormat (pixelFormat)
++			{
++			}
++
++		void get_color_channels_pixel_format (JxlPixelFormat *pixel_format)
++			{
++			if (pixel_format)
++				*pixel_format = fPixelFormat;
++			}
++		
++		const void * get_color_channel_data_at (size_t xpos,
++												size_t ypos,
++												size_t xsize,
++												size_t ysize,
++												size_t *row_offset)
++			{
++
++			#if qLogStreamIntput
++
++			printf ("input: get_color_channel_data_at (x=%d, y=%d, w=%d, h=%d)\n",
++					int (xpos),
++					int (ypos),
++					int (xsize),
++					int (ysize));
++
++			#endif
++			
++			dng_pixel_buffer buffer;
++
++			buffer.fArea.t = int32 (ypos);
++			buffer.fArea.l = int32 (xpos);
++			buffer.fArea.b = int32 (ypos + ysize);
++			buffer.fArea.r = int32 (xpos + xsize);
++
++			buffer.fPlanes = fImage.Planes ();
++
++			// Assume row-col-plane interleaved.
++			
++			buffer.fPlaneStep = 1;
++			buffer.fColStep	  = buffer.fPlanes;
++			buffer.fRowStep	  = SafeUint32Mult (buffer.fPlanes,
++												buffer.fArea.W ());
++
++			buffer.fPixelType = fImage.PixelType ();
++			buffer.fPixelSize = TagTypeSize (buffer.fPixelType);
++
++			const uint32 bytesNeeded = SafeUint32Mult (buffer.fRowStep,
++													   buffer.fArea.H (),
++													   buffer.fPixelSize);
++
++			std::shared_ptr<dng_memory_block> block (fHost.Allocate (bytesNeeded));
++			
++			buffer.fData = block->Buffer ();
++
++			const void *ptr = buffer.fData;
++
++			// Fetch the image.
++
++			fImage.Get (buffer);
++
++			// Store the row stride.
++
++			if (row_offset)
++				{
++				
++				*row_offset = size_t (buffer.fRowStep * buffer.fPixelSize);
++				
++				}
++
++			// Remember the allocation in our table.
++			
++				{
++				std::lock_guard<std::mutex> lock (fMutex);
++				fTable.insert
++					(std::pair<const void *, std::shared_ptr<dng_memory_block> >
++						 (ptr,
++						  block));
++				}
++
++			return ptr;
++
++			}
++
++		void release_buffer (const void *buf)
++			{
++
++			#if qLogStreamIntput
++
++			printf ("input: release (%llu)\n",
++					(unsigned long long) (buf));
++
++			#endif	// qLogStreamIntput
++			
++			// Remove it from our table.
++
++				{
++				std::lock_guard<std::mutex> lock (fMutex);
++				fTable.erase (buf);
++				}
++
++			}
++
++	public:
++
++		static void GetPixelFormat (void *opaque,
++									JxlPixelFormat *pixel_format)
++			{
++
++			auto reader = (jxl_image_chunk_reader *) opaque;
++
++			if (reader)
++				reader->get_color_channels_pixel_format (pixel_format);
++
++			}
++
++		static const void * GetData (void *opaque,
++									 size_t xpos,
++									 size_t ypos,
++									 size_t xsize,
++									 size_t ysize,
++									 size_t *row_offset)
++			{
++
++			auto reader = (jxl_image_chunk_reader *) opaque;
++
++			if (reader)
++				return reader->get_color_channel_data_at (xpos,
++														  ypos,
++														  xsize,
++														  ysize,
++														  row_offset);
++
++			return nullptr;
++
++			}
++
++		static void Release (void *opaque,
++							 const void *buf)
++			{
++
++			auto reader = (jxl_image_chunk_reader *) opaque;
++
++			if (reader)
++				reader->release_buffer (buf);
++
++			}
++		
++	};
++
++/*****************************************************************************/
++
++class jxl_buffer_chunk_reader
++	{
++
++	private:
++
++		dng_host &fHost;
++
++		const dng_pixel_buffer &fBuffer;
++
++		JxlPixelFormat fPixelFormat;
++
++		std::mutex fMutex;
++
++		std::unordered_map<const void *,
++						   std::shared_ptr<dng_memory_block> > fTable;
++
++	public:
++
++		jxl_buffer_chunk_reader (dng_host &host,
++								 const dng_pixel_buffer &srcBuffer,
++								 const JxlPixelFormat &pixelFormat)
++			:	fHost (host)
++			,	fBuffer (srcBuffer)
++			,	fPixelFormat (pixelFormat)
++			{
++
++			#if qLogStreamIntput
++
++			printf ("--- srcBuffer: t=%d, l=%d, b=%d, r=%d (w=%d, h=%d)\n",
++					srcBuffer.fArea.t,
++					srcBuffer.fArea.l,
++					srcBuffer.fArea.b,
++					srcBuffer.fArea.r,
++					int (srcBuffer.fArea.W ()),
++					int (srcBuffer.fArea.H ()));
++
++			#endif
++			
++			}
++
++		void get_color_channels_pixel_format (JxlPixelFormat *pixel_format)
++			{
++			if (pixel_format)
++				*pixel_format = fPixelFormat;
++			}
++		
++		const void * get_color_channel_data_at (size_t xpos,
++												size_t ypos,
++												size_t xsize,
++												size_t ysize,
++												size_t *row_offset)
++			{
++
++			#if qLogStreamIntput
++
++			printf ("input: get_color_channel_data_at (x=%d, y=%d, w=%d, h=%d)\n",
++					int (xpos),
++					int (ypos),
++					int (xsize),
++					int (ysize));
++
++			#endif
++			
++			dng_pixel_buffer buffer = fBuffer;
++
++			buffer.fArea.t = int32 (ypos) + fBuffer.fArea.t;
++			buffer.fArea.l = int32 (xpos) + fBuffer.fArea.l;
++			buffer.fArea.b = buffer.fArea.t + int32 (ysize);
++			buffer.fArea.r = buffer.fArea.l + int32 (xsize);
++
++			// Assume row-col-plane interleaved.
++			
++			buffer.fPlaneStep = 1;
++			buffer.fColStep	  = buffer.fPlanes;
++			buffer.fRowStep	  = SafeUint32Mult (buffer.fPlanes,
++												buffer.fArea.W ());
++
++			const uint32 bytesNeeded = SafeUint32Mult (buffer.fRowStep,
++													   buffer.fArea.H (),
++													   buffer.fPixelSize);
++
++			std::shared_ptr<dng_memory_block> block (fHost.Allocate (bytesNeeded));
++			
++			buffer.fData = block->Buffer ();
++
++			const void *ptr = buffer.fData;
++
++			// Copy the data.
++
++			#if 0
++
++			dng_copy_buffer_task task (fBuffer,
++									   buffer);
++
++			fHost.PerformAreaTask (task,
++								   buffer.fArea);
++
++			#else
++
++			buffer.CopyArea (fBuffer,
++							 buffer.fArea,
++							 0,
++							 0,
++							 buffer.fPlanes);
+ 
+-			size_t bytes_remaining_in_stream =
+-				(size_t) (stream.Length () - stream.Position ());
++			#endif
+ 
+-			if (bytes_remaining_in_stream == 0)
++			// Store the row stride.
++
++			if (row_offset)
+ 				{
+-				#if qLogJXL
+-				printf ("dng_jxl_io_buffer -- EOF reached in ReadChunk");
+-				#endif
+-				ThrowEndOfFile ("dng_jxl_io_buffer");
++				
++				*row_offset = size_t (buffer.fRowStep * buffer.fPixelSize);
++
+ 				}
+ 
+-			// This is the number of bytes we're going to try to read from the
+-			// stream. It cannot be more than the number of bytes available in
+-			// the stream.
++			// Remember the allocation in our table.
+ 			
+-			size_t next_read_size = std::min (fChunkSize,
+-											  bytes_remaining_in_stream);
++				{
++				std::lock_guard<std::mutex> lock (fMutex);
++				fTable.insert
++					(std::pair<const void *, std::shared_ptr<dng_memory_block> >
++						 (ptr,
++						  block));
++				}
+ 
+-			// This is the number of bytes that jxl previously consumed from
+-			// our buffer.
+-			
+-			size_t prev_read_size = fDataSize - remaining;
++			return ptr;
+ 
+-			// Update our pointer past the previously-consumed bytes.
++			}
+ 
+-			fIndex += prev_read_size;
++		void release_buffer (const void *buf)
++			{
+ 
+-			// If reading the next chunk would spill beyond the end of our
+-			// buffer, then reset to the beginning of our buffer. We need to
+-			// move the remaining data. If our internal buffer is much larger
+-			// than the chunk size, then this will be relatively rare.
++			#if qLogStreamIntput
+ 
+-			if (fIndex + next_read_size > fMaxBufferSize)
+-				{
++			printf ("input: release (%llu)\n",
++					(unsigned long long) (buf));
+ 
+-				memmove (fBlock->Buffer (),
+-						 fBlock->Buffer_uint8 () + fIndex,
+-						 remaining);
+-						 
+-				fIndex = 0;
+-				
++			#endif	// qLogStreamIntput
++			
++			// Remove it from our table.
++
++				{
++				std::lock_guard<std::mutex> lock (fMutex);
++				fTable.erase (buf);
+ 				}
+ 
+-			// Read from the stream.
++			}
+ 
+-			auto ptr = Ptr () + remaining;
+-			
+-			stream.Get (ptr, (uint32) next_read_size);
++	public:
+ 
+-			// Update the amount of data in our buffer.
++		static void GetPixelFormat (void *opaque,
++									JxlPixelFormat *pixel_format)
++			{
+ 
+-			fDataSize = remaining + next_read_size;
++			auto reader = (jxl_buffer_chunk_reader *) opaque;
++
++			if (reader)
++				reader->get_color_channels_pixel_format (pixel_format);
+ 
+ 			}
+-		
+-	};
+ 
+-/*****************************************************************************/
++		static const void * GetData (void *opaque,
++									 size_t xpos,
++									 size_t ypos,
++									 size_t xsize,
++									 size_t ysize,
++									 size_t *row_offset)
++			{
+ 
+-static void EnsureUseBoxes (JxlEncoder *enc,
+-							bool &once_flag)
+-	{
+-	
+-	if (!once_flag)
+-		{
+-		
+-		once_flag = true;
++			auto reader = (jxl_buffer_chunk_reader *) opaque;
+ 
+-		CheckResult (JxlEncoderUseBoxes (enc),
+-					 "JxlEncoderUseBoxes",
+-					 nullptr);
+-		
+-		}
+-	
+-	}
++			if (reader)
++				return reader->get_color_channel_data_at (xpos,
++														  ypos,
++														  xsize,
++														  ysize,
++														  row_offset);
+ 
+-/*****************************************************************************/
++			return nullptr;
+ 
+-// Move to operator== ?
++			}
+ 
+-static bool SamePixelBufferGeometry (const dng_pixel_buffer &a,
+-									 const dng_pixel_buffer &b)
+-	{
+-	
+-	if (a.fArea		 != b.fArea)
+-		return false;
++		static void Release (void *opaque,
++							 const void *buf)
++			{
+ 
+-	if (a.fPlane	 != b.fPlane ||
+-		a.fPlanes	 != b.fPlanes)
+-		return false;
+-		
+-	if (a.fRowStep	 != b.fRowStep	 ||
+-		a.fColStep	 != b.fColStep	 ||
+-		a.fPlaneStep != b.fPlaneStep)
+-		return false;
+-		
+-	if (a.fPixelType != b.fPixelType   ||
+-		a.fPixelSize != b.fPixelSize)
+-		return false;
++			auto reader = (jxl_buffer_chunk_reader *) opaque;
+ 
+-	// Ignore the fData and fDirty fields.
++			if (reader)
++				reader->release_buffer (buf);
+ 
+-	return true;
+-	
+-	}
++			}
++		
++	};
+ 
+ /*****************************************************************************/
+ 
+-static void EncodeJXL (dng_host &host,
+-					   dng_stream &stream,
+-					   const dng_pixel_buffer &inBuffer,
+-					   const dng_jxl_encode_settings &settings,
+-					   const bool useContainer,
+-					   const dng_jxl_color_space_info &colorSpaceInfo,
+-					   const dng_metadata *metadata,
+-					   const bool includeExif,
+-					   const bool includeXMP,
+-					   const bool includeIPTC,
+-					   const dng_bmff_box_list *additionalBoxes)
++static JxlEncoderPtr EncodeJXL_Common (dng_host &host,
++									   dng_pixel_buffer &buffer,
++									   const dng_jxl_encode_settings &settings,
++									   const bool useStreamingEncoder,
++									   const bool useContainer,
++									   const dng_jxl_color_space_info &colorSpaceInfo,
++									   const dng_metadata *metadata,
++									   const bool includeExif,
++									   const bool includeXMP,
++									   const bool includeIPTC,
++									   const dng_bmff_box_list *additionalBoxes,
++									   dng_jxl_parallel_runner_data &parallelData,
++									   JxlPixelFormat &outPixelFormat,
++									   JxlEncoderFrameSettings **outFrameSettings)
+ 	{
+-
+-	#if qDNGValidate && 0
+-	dng_timer timerOuter ("EncodeJXL");
+-	#endif
+-
+-	dng_pixel_buffer buffer = inBuffer;
+-
++	
+ 	const bool isLossless = (settings.Distance () <= 0.0f);
+ 
+ 	uint32 &srcPixelType = buffer.fPixelType;
+@@ -657,7 +1287,7 @@ static void EncodeJXL (dng_host &host,
+ 
+ 	//printf ("srcPixelType: %u\n", srcPixelType);
+ 	//printf ("effort: %u\n", unsigned (settings.Effort ()));
+-
++	
+ 	const uint32 planes = buffer.Planes ();
+ 
+ 	DNG_REQUIRE (planes == 1 ||				 // monochrome
+@@ -680,9 +1310,9 @@ static void EncodeJXL (dng_host &host,
+ 
+ 	auto enc = encoder.get ();
+ 
+-	// Hook into our thread pool.
++	DNG_REQUIRE (enc, "JXL encoder - JxlEncoderMake failed");
+ 
+-	dng_jxl_parallel_runner_data parallelData;
++	// Hook into our thread pool.
+ 
+ 	parallelData.fHost = &host;
+ 
+@@ -760,7 +1390,7 @@ static void EncodeJXL (dng_host &host,
+ 
+ 	// Add metadata if needed.
+ 
+-	if (metadata && useContainer)
++	if ((metadata || additionalBoxes) && useContainer)
+ 		{
+ 
+ 		bool useBoxesOnceFlag = false;
+@@ -769,7 +1399,7 @@ static void EncodeJXL (dng_host &host,
+ 		
+ 		// EXIF.
+ 
+-		if (includeExif)
++		if (includeExif && metadata)
+ 			{
+ 
+ 			const dng_resolution *resolution = nullptr;
+@@ -808,7 +1438,7 @@ static void EncodeJXL (dng_host &host,
+ 			
+ 		// XMP.
+ 
+-		if (includeXMP && metadata->GetXMP ())
++		if (includeXMP && metadata && metadata->GetXMP ())
+ 			{
+ 
+ 			// TODO(erichan): Serialize routine has a forJPEG parameter. Does
+@@ -848,7 +1478,7 @@ static void EncodeJXL (dng_host &host,
+ 
+ 		// IPTC.
+ 
+-		if (includeIPTC)
++		if (includeIPTC && metadata)
+ 			{
+ 
+ 			auto iptcData = metadata->IPTCData   ();
+@@ -932,7 +1562,7 @@ static void EncodeJXL (dng_host &host,
+ 			
+ 			}
+ 
+-		} // metadata and container
++		} // (metadata || additionalBoxes) and container
+ 
+ 	// Add color profile info.
+ 
+@@ -1136,6 +1766,11 @@ static void EncodeJXL (dng_host &host,
+ 
+ 	auto frameSettings = JxlEncoderFrameSettingsCreate (enc, NULL);
+ 
++	DNG_REQUIRE (frameSettings,
++				 "JXL encoder - JxlEncoderFrameSettingsCreate failed");
++
++	*outFrameSettings = frameSettings;
++	
+ 	// Set quality.
+ 
+ 	if (isLossless)
+@@ -1182,12 +1817,36 @@ static void EncodeJXL (dng_host &host,
+ 		 "JxlEncoderFrameSettingsSetOption",
+ 		 &parallelData);
+ 
++	// Set buffering.
++
++	if (useStreamingEncoder)
++		{
++
++		CheckResult
++			(JxlEncoderFrameSettingsSetOption (frameSettings,	
++											   JXL_ENC_FRAME_SETTING_BUFFERING,
++											   (int) 3),
++			 "JxlEncoderFrameSettingsSetOption - buffering",
++			 &parallelData);
++
++		}
++
+ 	// Set various parameters that affect the lossy case.
+ 
+ 	// Note that as of libjxl 0.7.0 (2022-9-21), enabling the Gaborish and
+ 	// Edge Preserving Filter params in the lossless case will cause the
+ 	// result not to be lossless!
+ 
++	#if 0
++
++	printf ("lossless: %s\n", isLossless ? "yes" : "no");
++
++	printf ("effort: %u\n", unsigned (settings.Effort ()));
++
++	printf ("distance: %f\n", float (settings.Distance ()));
++
++	#endif
++
+ 	if (!isLossless)
+ 		{
+ 
+@@ -1249,7 +1908,7 @@ static void EncodeJXL (dng_host &host,
+ 	// TODO(erichan): For now it seems the encoder implementation requires the
+ 	// entire image to be allocated at once.
+ 
+-	JxlPixelFormat pixelFormat;
++	auto &pixelFormat = outPixelFormat;
+ 
+ 	memset (&pixelFormat, 0, sizeof (pixelFormat));
+ 
+@@ -1285,46 +1944,6 @@ static void EncodeJXL (dng_host &host,
+ 		
+ 		}
+ 
+-	// Set up pixel buffer to hold data to hand off to encoder. As of version
+-	// 0.7.0 libjxl requires starting from a single whole-image buffer
+-	// (instead of reading chunks at a time). This is a chunky (row-col-plane
+-	// interleaved) buffer.
+-
+-	dng_pixel_buffer pixelBuffer = buffer;
+-
+-	pixelBuffer.fPlaneStep = 1;
+-	pixelBuffer.fColStep   = (int32) planes;
+-	pixelBuffer.fRowStep   = (int32) planes * (int32) pixelBuffer.fArea.W ();
+-
+-	const uint64 bytesNeeded = (uint64 (pixelBuffer.fRowStep) *
+-								uint64 (pixelBuffer.fArea.H ()) *
+-								uint64 (pixelBuffer.fPixelSize)); 
+-
+-	AutoPtr<jxl_memory_block> block;
+-
+-	// If not already tightly-packed chunky, then allocate a temp buffer and
+-	// convert to chunky layout.
+-		
+-	if (!SamePixelBufferGeometry (pixelBuffer, buffer))
+-		{
+-
+-		#if qLogJXL
+-		printf ("JXL copy step\n");
+-		#endif
+-
+-		block.Reset (new jxl_memory_block (host.Allocator (),
+-										   bytesNeeded));
+-
+-		pixelBuffer.fData = block->Buffer ();
+-
+-		dng_copy_buffer_task task (buffer,
+-								   pixelBuffer);
+-
+-		host.PerformAreaTask (task,
+-							  pixelBuffer.fArea);
+-
+-		}
+-
+ 	// TODO(erichan): It seems that preview frames are not yet supported in
+ 	// libjxl 0.7.0, so turn this off for now.
+ 
+@@ -1356,6 +1975,9 @@ static void EncodeJXL (dng_host &host,
+ 	auto previewFrameSettings = JxlEncoderFrameSettingsCreate (enc,
+ 															   frameSettings);
+ 
++	DNG_REQUIRE (previewFrameSettings,
++				 "JXL encoder - JxlEncoderFrameSettingsCreate failed");
++
+ 	CheckResult
+ 		(JxlEncoderAddImageFrame (previewFrameSettings,
+ 								  &pixelFormat,
+@@ -1379,112 +2001,104 @@ static void EncodeJXL (dng_host &host,
+ 
+ 	#endif
+ 
+-	// Add the main image.
+-
+-	CheckResult
+-		(JxlEncoderAddImageFrame (frameSettings,
+-								  &pixelFormat,
+-								  pixelBuffer.fData,
+-								  bytesNeeded),
+-		 "JxlEncoderAddImageFrame-main",
+-		 &parallelData);
+-
+-	// Nothing more to encode.
++	return encoder;
++	
++	}
+ 
+-	JxlEncoderCloseInput (enc);
++/*****************************************************************************/
+ 
+-	// Make temp buffer.
++static void EncodeJXL (dng_host &host,
++					   dng_stream &stream,
++					   const dng_image &srcImage,
++					   const dng_jxl_encode_settings &settings,
++					   const bool useContainer,
++					   const dng_jxl_color_space_info &colorSpaceInfo,
++					   const dng_metadata *metadata,
++					   const bool includeExif,
++					   const bool includeXMP,
++					   const bool includeIPTC,
++					   const dng_bmff_box_list *additionalBoxes)
++	{
+ 
+-	const uint32 tempSize = 64 * 1024;
++	#if qDNGValidate && 0
++	dng_timer timerOuter ("EncodeJXL-Image");
++	#endif
+ 
+-	AutoPtr<dng_memory_block> tempBlock (host.Allocate (tempSize));
+-	 
+-	uint8 *outBuffer = tempBlock->Buffer_uint8 ();
++	dng_pixel_buffer buffer;
+ 
+-	size_t outAvailableBytes = (size_t) tempSize;
++	buffer.fArea	  = srcImage.Bounds ();
++	buffer.fPlanes	  = srcImage.Planes ();
++	
++	buffer.fPixelType = srcImage.PixelType ();
++	buffer.fPixelSize = TagTypeSize (buffer.fPixelType);
+ 
+-	uint8 *outBufferPtr = outBuffer;
++	dng_jxl_parallel_runner_data parallelData;
+ 
+-	// Main encode loop.
+-	
+-	for (;;)
+-		{
+-		
+-		JxlEncoderStatus status = JxlEncoderProcessOutput (enc,
+-														   &outBufferPtr,
+-														   &outAvailableBytes);
++	JxlPixelFormat pixelFormat;
+ 
+-		// Handle errors.
++	JxlEncoderFrameSettings *frameSettings = nullptr;
+ 
+-		if (status == JXL_ENC_ERROR)
+-			{
+-			if (parallelData.fErrorCode == dng_error_user_canceled)
+-				{
+-				ThrowUserCanceled ();
+-				}
+-			#if qLogJXL
+-			printf ("Unknown jxl encoder error");
+-			#endif
+-			ThrowBadFormat ("JXL_ENC_ERROR");
+-			}
++	// For now, always request streaming (input and output) for images with a
++	// long side over 2K.
+ 
+-		// Check if we're done.
++	const bool useStreamingEncoder = (srcImage.Bounds ().LongSide () > 2048);
+ 
+-		else if (status == JXL_ENC_SUCCESS)
+-			{
++	auto encoder = EncodeJXL_Common (host,
++									 buffer,
++									 settings,
++									 useStreamingEncoder,
++									 useContainer,
++									 colorSpaceInfo,
++									 metadata,
++									 includeExif,
++									 includeXMP,
++									 includeIPTC,
++									 additionalBoxes,
++									 parallelData,
++									 pixelFormat,
++									 &frameSettings);
+ 
+-			uint32 bytesToFlush = (uint32) (outBufferPtr - outBuffer);
++	auto enc = encoder.get ();
+ 
+-			#if qLogJXL
+-			printf ("jxl encoder success!! bytes to flush: %u\n",
+-					bytesToFlush);
+-			#endif
+-					  
+-			stream.Put (outBuffer, bytesToFlush);
+-			
+-			break;
+-			
+-			}
++	jxl_data_writer2 writer (host, stream);
+ 
+-		// Check if we need to update the output buffer.
++	JxlEncoderOutputProcessor outputProcessor { };
+ 
+-		else if (status == JXL_ENC_NEED_MORE_OUTPUT)
+-			{
+-			
+-			uint32 bytesToFlush = (uint32) (outBufferPtr - outBuffer);
++	outputProcessor.opaque                 = &writer;
++	outputProcessor.get_buffer             = jxl_output_get_buffer;
++	outputProcessor.release_buffer         = jxl_output_release_buffer;
++	outputProcessor.seek                   = nullptr;			 // no seeking
++	outputProcessor.set_finalized_position = output_set_finalized_position;
+ 
+-			#if qLogJXL
+-			printf ("--- jxl encoder need more output. bytes to flush: %u\n",
+-					bytesToFlush);
+-			#endif
+-					  
+-			// Copy encoded data to the stream.
++	CheckResult (JxlEncoderSetOutputProcessor (enc,
++											   outputProcessor),
++				 "JxlEncoderSetOutputProcessor-main",
++				 &parallelData);
+ 
+-			stream.Put (outBuffer, bytesToFlush);
++	// Add the main image.
+ 
+-			// Reset temp buffer.
+-			
+-			outBufferPtr = outBuffer;
++	jxl_image_chunk_reader reader (host,
++								   srcImage,
++								   pixelFormat);
+ 
+-			outAvailableBytes = tempSize;
+-			
+-			}
++	JxlChunkedFrameInputSource inputSource { };
+ 
+-		else
+-			{
++	inputSource.opaque							= &reader;
++	inputSource.get_color_channels_pixel_format = jxl_image_chunk_reader::GetPixelFormat;
++	inputSource.get_color_channel_data_at		= jxl_image_chunk_reader::GetData;
++	inputSource.release_buffer					= jxl_image_chunk_reader::Release;
++	
++	CheckResult (JxlEncoderAddChunkedFrame (frameSettings,
++											JXL_TRUE, // is_last_frame
++											inputSource),
++				 "JxlEncoderAddChunkedFrame-main",
++				 &parallelData);
+ 
+-			#if qLogJXL
+-			
+-			printf ("Unexpected jxl encoder status 0x%x\n",
+-					(unsigned) status);
++	stream.Flush ();
+ 
+-			#endif
++	// Nothing more to encode.
+ 
+-			ThrowNotYetImplemented ("unhandled jxl encoder status");
+-			
+-			}
+-		
+-		}
++	JxlEncoderCloseInput (enc);
+ 
+ 	}
+ 
+@@ -1492,7 +2106,7 @@ static void EncodeJXL (dng_host &host,
+ 
+ static void EncodeJXL (dng_host &host,
+ 					   dng_stream &stream,
+-					   const dng_image &image,
++					   const dng_pixel_buffer &inBuffer,
+ 					   const dng_jxl_encode_settings &settings,
+ 					   const bool useContainer,
+ 					   const dng_jxl_color_space_info &colorSpaceInfo,
+@@ -1503,72 +2117,76 @@ static void EncodeJXL (dng_host &host,
+ 					   const dng_bmff_box_list *additionalBoxes)
+ 	{
+ 
+-	// Set up pixel buffer to hold data to hand off to encoder. As of version
+-	// 0.7.0 libjxl requires starting from a single whole-image buffer
+-	// (instead of reading chunks at a time). This is a chunky (row-col-plane
+-	// interleaved) buffer.
++	#if qDNGValidate && 0
++	dng_timer timerOuter ("EncodeJXL");
++	#endif
+ 
+-	const uint32 planes = image.Planes ();
++	dng_pixel_buffer buffer = inBuffer;
+ 
+-	DNG_REQUIRE (planes == 1 ||				 // monochrome
+-				 planes == 2 ||				 // monochrome + alpha
+-				 planes == 3 ||				 // RGB
+-				 planes == 4,				 // RGB + alpha
+-				 "Unsupported plane count in EncodeJXL");
++	dng_jxl_parallel_runner_data parallelData;
+ 
+-	dng_pixel_buffer pixelBuffer;
++	JxlPixelFormat pixelFormat;
+ 
+-	pixelBuffer.fArea	   = image.Bounds ();
++	JxlEncoderFrameSettings *frameSettings = nullptr;
++
++	const bool useStreamingEncoder = (inBuffer.Area ().LongSide () > 2048);
++
++	auto encoder = EncodeJXL_Common (host,
++									 buffer,
++									 settings,
++									 useStreamingEncoder,
++									 useContainer,
++									 colorSpaceInfo,
++									 metadata,
++									 includeExif,
++									 includeXMP,
++									 includeIPTC,
++									 additionalBoxes,
++									 parallelData,
++									 pixelFormat,
++									 &frameSettings);
+ 
+-	pixelBuffer.fPlanes	   = planes;
++	auto enc = encoder.get ();
+ 
+-	pixelBuffer.fPlaneStep = 1;
+-	pixelBuffer.fColStep   = (int32) planes;
+-	pixelBuffer.fRowStep   = (int32) planes * (int32) pixelBuffer.fArea.W ();
++	jxl_data_writer2 writer (host, stream);
+ 
+-	pixelBuffer.fPixelType = image.PixelType ();
+-	pixelBuffer.fPixelSize = TagTypeSize (pixelBuffer.fPixelType);
++	JxlEncoderOutputProcessor outputProcessor { };
+ 
+-	const uint64 bytesNeeded = (uint64 (pixelBuffer.fRowStep) *
+-								uint64 (pixelBuffer.fArea.H ()) *
+-								uint64 (pixelBuffer.fPixelSize));
++	outputProcessor.opaque                 = &writer;
++	outputProcessor.get_buffer             = jxl_output_get_buffer;
++	outputProcessor.release_buffer         = jxl_output_release_buffer;
++	outputProcessor.seek                   = nullptr;			 // no seeking
++	outputProcessor.set_finalized_position = output_set_finalized_position;
+ 
+-	jxl_memory_block block (host.Allocator (),
+-							bytesNeeded);
++	CheckResult (JxlEncoderSetOutputProcessor (enc,
++											   outputProcessor),
++				 "JxlEncoderSetOutputProcessor-main",
++				 &parallelData);
+ 
+-	pixelBuffer.fData = block.Buffer ();
++	// Add the main image.
+ 
+-	// Doing a direct "dng_image::Get" is easy but slow because it's
+-	// single-threaded. Using a pipe reduces time on a 10 megapixel image from
+-	// 40 ms to 8 ms on a 2017 10-core iMac Pro.
++	jxl_buffer_chunk_reader reader (host,
++									buffer,
++									pixelFormat);
+ 
+-	// dng_timer timer2 ("EncodeJXL-image-get");
+-		
+-	#if 1
+-		
+-	dng_get_buffer_task task (image,
+-							  pixelBuffer);
++	JxlChunkedFrameInputSource inputSource { };
+ 
+-	host.PerformAreaTask (task,
+-						  image.Bounds ());
++	inputSource.opaque							= &reader;
++	inputSource.get_color_channels_pixel_format = jxl_buffer_chunk_reader::GetPixelFormat;
++	inputSource.get_color_channel_data_at		= jxl_buffer_chunk_reader::GetData;
++	inputSource.release_buffer					= jxl_buffer_chunk_reader::Release;
++	
++	CheckResult (JxlEncoderAddChunkedFrame (frameSettings,
++											JXL_TRUE, // is_last_frame
++											inputSource),
++				 "JxlEncoderAddChunkedFrame-main",
++				 &parallelData);
+ 
+-	#else
+-		
+-	image.Get (pixelBuffer);
+-		
+-	#endif
++	stream.Flush ();
+ 
+-	EncodeJXL (host,
+-			   stream,
+-			   pixelBuffer,
+-			   settings,
+-			   useContainer,
+-			   colorSpaceInfo,
+-			   metadata,
+-			   includeExif,
+-			   includeXMP,
+-			   includeIPTC,
+-			   additionalBoxes);
++	// Nothing more to encode.
++
++	JxlEncoderCloseInput (enc);
+ 
+ 	}
+ 
+@@ -1659,7 +2277,7 @@ class dng_jxl_box_reader
+ 
+ 			#if 1
+ 
+-			else if (size > 4 * 1024 * 1024)
++			else if (size > 128 * 1024 * 1024)
+ 				 {
+ 
+ 				 #if qLogJXL
+@@ -1932,6 +2550,8 @@ void dng_jxl_decoder::Decode (dng_host &host,
+ 
+ 	auto dec = decoder.get ();
+ 
++	DNG_REQUIRE (dec, "JXL decoder - JxlDecoderMake failed");
++
+ 	// Preserve orientation as-in-bitstream (do not reorient).
+ 
+ 	CheckResult (JxlDecoderSetKeepOrientation (dec, 1),
+@@ -2278,9 +2898,7 @@ void dng_jxl_decoder::Decode (dng_host &host,
+ 			// TODO(erichan): Does the choice of this format unduly affect the
+ 			// result of JxlDecoderGetColorAsEncodedProfile?
+ 			
+-// BEGIN GOOGLE MODIFICATION
+-			// JxlPixelFormat not part of the relevant JXL API's anymore
+-// END GOOGLE MODIFICATION
++			//JxlPixelFormat format = { 3, JXL_TYPE_FLOAT, JXL_NATIVE_ENDIAN, 0 };
+ 
+ 			#if qDNGValidate
+ 			if (gVerbose)
+@@ -2290,11 +2908,10 @@ void dng_jxl_decoder::Decode (dng_host &host,
+ 			JxlColorEncoding color_encoding;
+ 			
+ 			if (JXL_DEC_SUCCESS ==
+-// BEGIN GOOGLE MODIFICATION
+ 				JxlDecoderGetColorAsEncodedProfile (dec,
++													//&format,
+ 													JXL_COLOR_PROFILE_TARGET_ORIGINAL,
+ 													&color_encoding))
+-// END GOOGLE MODIFICATION
+ 				{
+ 
+ 				// JXL-specific color encoding.
+@@ -2439,14 +3056,13 @@ void dng_jxl_decoder::Decode (dng_host &host,
+ 				
+ 				size_t profile_size;
+ 
+-// BEGIN GOOGLE MODIFICATION
+ 				CheckResult (JxlDecoderGetICCProfileSize
+ 							 (dec,
+-							  JXL_COLOR_PROFILE_TARGET_ORIGINAL,
++							  //&format,
++							  JXL_COLOR_PROFILE_TARGET_DATA,
+ 							  &profile_size),
+ 							 "JxlDecoderGetICCProfileSize",
+ 							 nullptr);
+-// END GOOGLE MODIFICATION
+ 				
+ 				if (profile_size < 132)
+ 					{
+@@ -2467,15 +3083,14 @@ void dng_jxl_decoder::Decode (dng_host &host,
+ 
+ 				auto *profile = profileBlock->Buffer_uint8 ();
+ 				
+-// BEGIN GOOGLE MODIFICATION
+ 				CheckResult (JxlDecoderGetColorAsICCProfile
+ 							 (dec,
+-							  JXL_COLOR_PROFILE_TARGET_ORIGINAL,
++							  //&format,
++							  JXL_COLOR_PROFILE_TARGET_DATA,
+ 							  profile,
+ 							  profile_size),
+ 							 "JxlDecoderGetColorAsICCProfile",
+ 							 nullptr);
+-// END GOOGLE MODIFICATION
+ 
+ 				fColorSpaceInfo.fICCProfile.Reset (profileBlock.Release ());
+ 
+@@ -3511,4 +4126,4 @@ bool SupportsJXL (const dng_image &image)
+ 	return false;
+ 	}
+ 
+-/*****************************************************************************/
++/*****************************************************************************/
+\ No newline at end of file
+diff --git a/source/dng_jxl.h b/source/dng_jxl.h
+index f5b3fef..7407d3d 100644
+--- a/source/dng_jxl.h
++++ b/source/dng_jxl.h
+@@ -37,6 +37,10 @@
+ 
+ /*****************************************************************************/
+ 
++#define qLogJXL (qDNGValidate && 0)
++
++/*****************************************************************************/
++
+ // jxl requires exif data be prepended with a 4-byte TIFF offset which can be
+ // all zero as long as the exif data comes immediately after.
+ 
+diff --git a/source/dng_linearization_info.cpp b/source/dng_linearization_info.cpp
+index 5137aa9..a58873a 100644
+--- a/source/dng_linearization_info.cpp
++++ b/source/dng_linearization_info.cpp
+@@ -459,6 +459,12 @@ void dng_linearize_plane::Process (const dng_rect &srcTile)
+ 	// Process tile.
+ 	
+ 	dng_rect dstTile = srcTile - fActiveArea.TL ();
++
++	DNG_REQUIRE ((fSrcImage.Bounds () & srcTile) == srcTile,
++				 "Invalid srcTile in dng_linearize_plane::Process");
++		
++	DNG_REQUIRE ((fDstImage.Bounds () & dstTile) == dstTile,
++				 "Invalid dstTile in dng_linearize_plane::Process");
+ 		
+ 	dng_const_tile_buffer srcBuffer (fSrcImage, srcTile);
+ 	dng_dirty_tile_buffer dstBuffer (fDstImage, dstTile);
+@@ -1452,7 +1458,49 @@ real64 dng_linearization_info::MaxBlackLevel (uint32 plane) const
+ 	return maxBlack;
+ 		
+ 	}
+-				
++
++/*****************************************************************************/
++
++uint16 dng_linearization_info::Stage3BlackLevel (dng_negative &negative,
++												 uint32 numPlanes) const
++	{
++
++	real64 zeroFract = 0.0;
++
++	for (uint32 plane = 0; plane < numPlanes; plane++)
++		{
++
++		real64 maxBlackLevel = MaxBlackLevel (plane);
++		real64	  whiteLevel = fWhiteLevel [plane];
++
++		if (maxBlackLevel > 0.0 && maxBlackLevel < whiteLevel)
++			{
++
++			zeroFract = Max_real64 (zeroFract, maxBlackLevel / whiteLevel);
++
++			}
++
++		}
++
++	zeroFract = Min_real64 (zeroFract, kMaxStage3BlackLevelNormalized);
++
++	uint16 dstBlackLevel = (uint16) Round_uint32 (65535.0 * zeroFract);
++
++	if (negative.GetMosaicInfo ())
++		{
++
++		// If we have a mosaic image that supports non-zero black levels,
++		// enforce a minimum black level to give the demosaic algorithms
++		// some "footroom".
++
++		dstBlackLevel = (uint16) Max_uint32 (dstBlackLevel, 0x0404);
++
++		}
++	
++	return dstBlackLevel;
++
++	}
++
+ /*****************************************************************************/
+ 
+ void dng_linearization_info::Linearize (dng_host &host,
+@@ -1468,37 +1516,8 @@ void dng_linearization_info::Linearize (dng_host &host,
+ 		dstImage.PixelType () == ttShort)
+ 		{
+ 		
+-		real64 zeroFract = 0.0;
+-		
+-		for (uint32 plane = 0; plane < srcImage.Planes (); plane++)
+-			{
+-			
+-			real64 maxBlackLevel = MaxBlackLevel (plane);
+-			real64	  whiteLevel = fWhiteLevel	 [plane];
+-			
+-			if (maxBlackLevel > 0.0 && maxBlackLevel < whiteLevel)
+-				{
+-				
+-				zeroFract = Max_real64 (zeroFract, maxBlackLevel / whiteLevel);
+-				
+-				}
+-			
+-			}
+-
+-		zeroFract = Min_real64 (zeroFract, kMaxStage3BlackLevelNormalized);
+-		
+-		uint16 dstBlackLevel = (uint16) Round_uint32 (65535.0 * zeroFract);
+-		
+-		if (negative.GetMosaicInfo ())
+-			{
+-			
+-			// If we have a mosaic image that supports non-zero black levels,
+-			// enforce a minimum black level to give the demosaic algorithms
+-			// some "footroom".
+-			
+-			dstBlackLevel = (uint16) Max_uint32 (dstBlackLevel, 0x0404);
+-			
+-			}
++		uint16 dstBlackLevel = Stage3BlackLevel (negative,
++												 srcImage.Planes ());
+ 			
+ 		negative.SetStage3BlackLevel (dstBlackLevel);
+ 		
+@@ -1512,9 +1531,11 @@ void dng_linearization_info::Linearize (dng_host &host,
+ 								   forceClipBlackLevel,
+ 								   srcImage,
+ 								   dstImage);
+-								   
++
++	dng_rect overlap = fActiveArea & srcImage.Bounds ();
++
+ 	host.PerformAreaTask (processor,
+-						  fActiveArea);
++						  overlap);
+ 						
+ 	}
+ 				
+diff --git a/source/dng_linearization_info.h b/source/dng_linearization_info.h
+index 70c9976..b3ce1b1 100644
+--- a/source/dng_linearization_info.h
++++ b/source/dng_linearization_info.h
+@@ -123,6 +123,11 @@ class dng_linearization_info
+ 								const dng_image &srcImage,
+ 								dng_image &dstImage);
+ 
++		/// Computes the stage3 black level.
++
++		uint16 Stage3BlackLevel (dng_negative &negative,
++								 uint32 numPlanes) const;
++
+ 		/// Compute black level for one coordinate and sample plane in the image.
+ 		/// \param row Row to compute black level for.
+ 		/// \param col Column to compute black level for.
+diff --git a/source/dng_lossless_jpeg_shared.cpp b/source/dng_lossless_jpeg_shared.cpp
+index fe42f7a..586e445 100644
+--- a/source/dng_lossless_jpeg_shared.cpp
++++ b/source/dng_lossless_jpeg_shared.cpp
+@@ -1555,7 +1555,7 @@ DNG_ALWAYS_INLINE void dng_lossless_decoder<simd>::FillBitBuffer (int32 nbits)
+ 				
+ 				if (except.ErrorCode () != dng_error_end_of_file)
+ 					{
+-					throw except;
++					throw; // rethrow except
+ 					}
+ 					
+ 				// Some Hasselblad files now use the JPEG end of image marker.
+@@ -1570,7 +1570,7 @@ DNG_ALWAYS_INLINE void dng_lossless_decoder<simd>::FillBitBuffer (int32 nbits)
+ 				if (!((c0 == 0xFF && c1 == 0xD9) ||
+ 					  (c1 == 0xFF && c2 == 0xD9)))
+ 					{
+-					throw except;
++					throw; // rethrow except
+ 					}
+ 				
+ 				// Swallow the case where we hit EOF with the JPEG EOI marker.
+diff --git a/source/dng_matrix.cpp b/source/dng_matrix.cpp
+index a26c651..9ea880f 100644
+--- a/source/dng_matrix.cpp
++++ b/source/dng_matrix.cpp
+@@ -10,6 +10,7 @@
+ 
+ #include "dng_assertions.h"
+ #include "dng_exceptions.h"
++#include "dng_fingerprint.h"
+ #include "dng_utils.h"
+ 
+ /*****************************************************************************/
+@@ -353,6 +354,28 @@ bool dng_matrix::AlmostIdentity (real64 slop) const
+ 
+ /*****************************************************************************/
+ 
++void dng_matrix::Process (dng_md5_printer_stream &printer) const
++	{
++
++	printer.Put_uint32 (fRows);
++	printer.Put_uint32 (fCols);
++
++	for (uint32 j = 0; j < Rows (); j++)
++		{
++
++		for (uint32 k = 0; k < Cols (); k++)
++			{
++
++			printer.Put_real64 (fData [j] [k]);
++
++			}
++
++		}
++
++	}
++
++/*****************************************************************************/
++
+ dng_matrix_3by3::dng_matrix_3by3 ()
+ 
+ 	:	dng_matrix (3, 3)
+@@ -802,6 +825,22 @@ dng_matrix dng_vector::AsColumn () const
+ 	
+ 	}
+ 
++/*****************************************************************************/
++
++void dng_vector::Process (dng_md5_printer_stream &printer) const
++	{
++
++	printer.Put_uint32 (fCount);
++
++	for (uint32 j = 0; j < Count (); j++)
++		{
++
++		printer.Put_real64 (fData [j]);
++
++		}
++
++	}
++
+ /******************************************************************************/
+ 
+ dng_vector_3::dng_vector_3 ()
+diff --git a/source/dng_matrix.h b/source/dng_matrix.h
+index a69728c..8ed59f1 100644
+--- a/source/dng_matrix.h
++++ b/source/dng_matrix.h
+@@ -19,6 +19,7 @@
+ /*****************************************************************************/
+ 
+ #include "dng_sdk_limits.h"
++#include "dng_classes.h"
+ #include "dng_types.h"
+ 
+ /*****************************************************************************/
+@@ -109,6 +110,8 @@ class dng_matrix
+ 
+ 		bool AlmostIdentity (real64 slop = 1.0e-8) const;
+ 
++		void Process (dng_md5_printer_stream &printer) const;
++
+ 	};
+ 	
+ /*****************************************************************************/
+@@ -247,7 +250,9 @@ class dng_vector
+ 		dng_matrix AsDiagonal () const;
+ 		
+ 		dng_matrix AsColumn () const;
+-		
++
++		void Process (dng_md5_printer_stream &printer) const;
++
+ 	};
+ 
+ /*****************************************************************************/
+diff --git a/source/dng_memory_stream.cpp b/source/dng_memory_stream.cpp
+index ee4005a..f6b5e97 100644
+--- a/source/dng_memory_stream.cpp
++++ b/source/dng_memory_stream.cpp
+@@ -56,9 +56,17 @@ dng_memory_stream::~dng_memory_stream ()
+ 		free (fPageList);
+ 		
+ 		}
+-	
++
++	#if qDNGStreamCheckForUnflushedStreams
++
++	// Clear fBufferDirty. This class allows stream to be destructed UNFLUSHED.
++
++	DestructionOfUnflushedInstancesIsAllowed ();
++
++	#endif
++
+ 	}
+-		
++
+ /*****************************************************************************/
+ 		
+ uint64 dng_memory_stream::DoGetLength ()
+diff --git a/source/dng_misc_opcodes.cpp b/source/dng_misc_opcodes.cpp
+index 56e1fd0..38ee103 100644
+--- a/source/dng_misc_opcodes.cpp
++++ b/source/dng_misc_opcodes.cpp
+@@ -994,15 +994,17 @@ void dng_opcode_DeltaPerRow::ProcessArea (dng_negative &negative,
+ 										  const dng_rect & /* imageBounds */)
+ 	{
+ 	
+-	dng_rect overlap = fAreaSpec.Overlap (dstArea);
++	const dng_rect overlap = fAreaSpec.Overlap (dstArea);
+ 	
+ 	if (overlap.NotEmpty ())
+ 		{
+ 		
+-		uint32 cols = overlap.W ();
+-		
+-		uint32 colPitch = fAreaSpec.ColPitch ();
++		const uint32 rowPitch = fAreaSpec.RowPitch ();
++		const uint32 colPitch = fAreaSpec.ColPitch ();
+   
++		const uint32 rows = (overlap.H () + rowPitch - 1) / rowPitch;
++		const uint32 cols = (overlap.W () + colPitch - 1) / colPitch;
++
+ 		real32 scale = fScale;
+ 		
+ 		if (Stage () >= 2 && negative.Stage3BlackLevel () != 0)
+@@ -1018,16 +1020,20 @@ void dng_opcode_DeltaPerRow::ProcessArea (dng_negative &negative,
+ 			
+ 			const real32 *table = fTable->Buffer_real32 () +
+ 								  ((overlap.t - fAreaSpec.Area ().t) /
+-								   fAreaSpec.RowPitch ());
++								   rowPitch);
++
++			int32 row = overlap.t;
+ 			
+-			for (int32 row = overlap.t; row < overlap.b; row += fAreaSpec.RowPitch ())
++			for (uint32 rowIdx = 0; rowIdx < rows; rowIdx++)
+ 				{
+ 				
+ 				real32 rowDelta = *(table++) * scale;
+ 				
+ 				real32 *dPtr = buffer.DirtyPixel_real32 (row, overlap.l, plane);
+ 				
+-				for (uint32 col = 0; col < cols; col += colPitch)
++				uint32 col = 0;
++				
++				for (uint32 colIdx = 0; colIdx < cols; colIdx++)
+ 					{
+ 					
+ 					real32 x = dPtr [col];
+@@ -1035,14 +1041,18 @@ void dng_opcode_DeltaPerRow::ProcessArea (dng_negative &negative,
+ 					real32 y = x + rowDelta;
+ 							   
+ 					dPtr [col] = Pin_real32 (-1.0f, y, 1.0f);
++
++					col += colPitch;
+ 					
+-					}
++					} // cols
++
++				row += rowPitch;
+ 				
+-				}
++				} // rows
+ 			
+-			}
++			} // planes
+ 		
+-		}
++		} // overlap not empty
+ 	
+ 	}
+ 
+@@ -1208,15 +1218,18 @@ void dng_opcode_DeltaPerColumn::ProcessArea (dng_negative &negative,
+ 											 const dng_rect & /* imageBounds */)
+ 	{
+ 	
+-	dng_rect overlap = fAreaSpec.Overlap (dstArea);
++	const dng_rect overlap = fAreaSpec.Overlap (dstArea);
+ 	
+ 	if (overlap.NotEmpty ())
+ 		{
+ 		
+-		uint32 rows = (overlap.H () + fAreaSpec.RowPitch () - 1) /
+-					  fAreaSpec.RowPitch ();
+-		
+-		int32 rowStep = buffer.RowStep () * fAreaSpec.RowPitch ();
++		const uint32 rowPitch = fAreaSpec.RowPitch ();
++		const uint32 colPitch = fAreaSpec.ColPitch ();
++  
++		const uint32 rows = (overlap.H () + rowPitch - 1) / rowPitch;
++		const uint32 cols = (overlap.W () + colPitch - 1) / colPitch;
++
++		const int32 rowStep = buffer.RowStep () * rowPitch;
+ 		
+ 		real32 scale = fScale;
+ 		
+@@ -1233,16 +1246,18 @@ void dng_opcode_DeltaPerColumn::ProcessArea (dng_negative &negative,
+ 			
+ 			const real32 *table = fTable->Buffer_real32 () +
+ 								  ((overlap.l - fAreaSpec.Area ().l) /
+-								   fAreaSpec.ColPitch ());
++								   colPitch);
+ 			
+-			for (int32 col = overlap.l; col < overlap.r; col += fAreaSpec.ColPitch ())
++			int32 col = overlap.l;
++				
++			for (uint32 colIdx = 0; colIdx < cols; colIdx++)
+ 				{
+ 				
+ 				real32 colDelta = *(table++) * scale;
+ 				
+ 				real32 *dPtr = buffer.DirtyPixel_real32 (overlap.t, col, plane);
+ 				
+-				for (uint32 row = 0; row < rows; row++)
++				for (uint32 rowIdx = 0; rowIdx < rows; rowIdx++)
+ 					{
+ 					
+ 					real32 x = dPtr [0];
+@@ -1253,13 +1268,15 @@ void dng_opcode_DeltaPerColumn::ProcessArea (dng_negative &negative,
+ 					
+ 					dPtr += rowStep;
+ 					
+-					}
++					} // rows
++
++				col += colPitch;
+ 				
+-				}
++				} // columns
+ 			
+-			}
++			} // planes
+ 		
+-		}
++		} // overlap not empty
+ 	
+ 	}
+ 
+@@ -1396,15 +1413,17 @@ void dng_opcode_ScalePerRow::ProcessArea (dng_negative &negative,
+ 										  const dng_rect & /* imageBounds */)
+ 	{
+ 	
+-	dng_rect overlap = fAreaSpec.Overlap (dstArea);
++	const dng_rect overlap = fAreaSpec.Overlap (dstArea);
+ 	
+ 	if (overlap.NotEmpty ())
+ 		{
+ 		
+-		uint32 cols = overlap.W ();
+-		
+-		uint32 colPitch = fAreaSpec.ColPitch ();
++		const uint32 rowPitch = fAreaSpec.RowPitch ();
++		const uint32 colPitch = fAreaSpec.ColPitch ();
+   
++		const uint32 rows = (overlap.H () + rowPitch - 1) / rowPitch;
++		const uint32 cols = (overlap.W () + colPitch - 1) / colPitch;
++
+ 		real32 blackOffset = 0.0f;
+ 		
+ 		if (Stage () >= 2 && negative.Stage3BlackLevel () != 0)
+@@ -1420,16 +1439,20 @@ void dng_opcode_ScalePerRow::ProcessArea (dng_negative &negative,
+ 			
+ 			const real32 *table = fTable->Buffer_real32 () +
+ 								  ((overlap.t - fAreaSpec.Area ().t) /
+-								   fAreaSpec.RowPitch ());
++								   rowPitch);
++
++			int32 row = overlap.t;
+ 			
+-			for (int32 row = overlap.t; row < overlap.b; row += fAreaSpec.RowPitch ())
++			for (uint32 rowIdx = 0; rowIdx < rows; rowIdx++)
+ 				{
+ 				
+ 				real32 rowScale = *(table++);
+ 				
+ 				real32 *dPtr = buffer.DirtyPixel_real32 (row, overlap.l, plane);
+-	
+-				for (uint32 col = 0; col < cols; col += colPitch)
++
++				int32 col = 0;
++				
++				for (uint32 colIdx = 0; colIdx < cols; colIdx++)
+ 					{
+ 					
+ 					real32 x = dPtr [col];
+@@ -1437,14 +1460,18 @@ void dng_opcode_ScalePerRow::ProcessArea (dng_negative &negative,
+ 					real32 y = (x - blackOffset) * rowScale + blackOffset;
+ 						
+ 					dPtr [col] = Pin_real32 (-1.0f, y, 1.0f);
++
++					col += colPitch;
+ 					
+-					}
++					} // cols
+ 
+-				}
++				row += rowPitch;
++
++				} // rows
+ 			
+-			}
++			} // planes
+ 		
+-		}
++		} // overlap not empty
+ 	
+ 	}
+ 
+@@ -1581,15 +1608,18 @@ void dng_opcode_ScalePerColumn::ProcessArea (dng_negative &negative,
+ 											 const dng_rect & /* imageBounds */)
+ 	{
+ 	
+-	dng_rect overlap = fAreaSpec.Overlap (dstArea);
++	const dng_rect overlap = fAreaSpec.Overlap (dstArea);
+ 	
+ 	if (overlap.NotEmpty ())
+ 		{
+ 		
+-		uint32 rows = (overlap.H () + fAreaSpec.RowPitch () - 1) /
+-					  fAreaSpec.RowPitch ();
+-		
+-		int32 rowStep = buffer.RowStep () * fAreaSpec.RowPitch ();
++		const uint32 rowPitch = fAreaSpec.RowPitch ();
++		const uint32 colPitch = fAreaSpec.ColPitch ();
++  
++		const uint32 rows = (overlap.H () + rowPitch - 1) / rowPitch;
++		const uint32 cols = (overlap.W () + colPitch - 1) / colPitch;
++
++		const int32 rowStep = buffer.RowStep () * rowPitch;
+ 		
+ 		real32 blackOffset = 0.0f;
+ 		
+@@ -1606,16 +1636,18 @@ void dng_opcode_ScalePerColumn::ProcessArea (dng_negative &negative,
+ 			
+ 			const real32 *table = fTable->Buffer_real32 () +
+ 								  ((overlap.l - fAreaSpec.Area ().l) /
+-								   fAreaSpec.ColPitch ());
++								   colPitch);
++			
++			int32 col = overlap.l;
+ 			
+-			for (int32 col = overlap.l; col < overlap.r; col += fAreaSpec.ColPitch ())
++			for (uint32 colIdx = 0; colIdx < cols; colIdx++)
+ 				{
+ 				
+ 				real32 colScale = *(table++);
+ 				
+ 				real32 *dPtr = buffer.DirtyPixel_real32 (overlap.t, col, plane);
+ 				
+-				for (uint32 row = 0; row < rows; row++)
++				for (uint32 rowIdx = 0; rowIdx < rows; rowIdx++)
+ 					{
+ 					
+ 					real32 x = dPtr [0];
+@@ -1626,13 +1658,15 @@ void dng_opcode_ScalePerColumn::ProcessArea (dng_negative &negative,
+ 					
+ 					dPtr += rowStep;
+ 					
+-					}
++					} // rows
+ 				
+-				}
++				col += colPitch;
++				
++				} // cols
+ 			
+-			}
++			} // planes
+ 		
+-		}
++		} // overlap not empty
+ 	
+ 	}
+ 
+diff --git a/source/dng_negative.cpp b/source/dng_negative.cpp
+index 4564a8c..2126416 100644
+--- a/source/dng_negative.cpp
++++ b/source/dng_negative.cpp
+@@ -578,7 +578,7 @@ dng_fingerprint dng_metadata::IPTCDigest (bool includePadding) const
+ 	if (IPTCLength ())
+ 		{
+ 		
+-		dng_md5_printer printer;
++		dng_md5_direct_printer printer;
+ 		
+ 		const uint8 *data = (const uint8 *) IPTCData ();
+ 		
+@@ -604,7 +604,7 @@ dng_fingerprint dng_metadata::IPTCDigest (bool includePadding) const
+ 				
+ 			}
+ 		
+-		printer.Process (data, count);
++		printer.ProcessPtr (data, count);
+ 						 
+ 		return printer.Result ();
+ 			
+@@ -727,9 +727,9 @@ void dng_metadata::SetEmbeddedXMP (dng_host &host,
+ 	if (SetXMP (host, buffer, count))
+ 		{
+ 		
+-		dng_md5_printer printer;
++		dng_md5_direct_printer printer;
+ 		
+-		printer.Process (buffer, count);
++		printer.ProcessPtr (buffer, count);
+ 		
+ 		fEmbeddedXMPDigest = printer.Result ();
+ 		
+@@ -1606,7 +1606,8 @@ bool dng_negative::GetProfileByIDFromList (const dng_profile_metadata_list &list
+ 
+ bool dng_negative::GetProfileToEmbedFromList (const dng_profile_metadata_list &list,
+ 											  const dng_metadata & /* metadata */,
+-											  dng_camera_profile &foundProfile) const
++											  dng_camera_profile &foundProfile,
++											  bool /* skipAdobeStandard = false */) const
+ 	{
+ 	
+ 	 // How many profiles in list?
+@@ -1704,7 +1705,8 @@ bool dng_negative::GetProfileByID (const dng_camera_profile_id &id,
+ /*****************************************************************************/
+ 
+ bool dng_negative::GetProfileToEmbed (const dng_metadata &metadata,
+-									  dng_camera_profile &foundProfile) const
++									  dng_camera_profile &foundProfile,
++									  bool skipAdobeStandard /* = false */) const
+ 	{
+ 	
+ 	// Monochrome negatives don't have profiles.
+@@ -1724,7 +1726,8 @@ bool dng_negative::GetProfileToEmbed (const dng_metadata &metadata,
+ 	
+ 	return GetProfileToEmbedFromList (list,
+ 									  metadata,
+-									  foundProfile);
++									  foundProfile,
++									  skipAdobeStandard);
+ 	
+ 	}
+ 							   
+@@ -1757,7 +1760,7 @@ dng_fingerprint dng_negative::FindImageDigest (dng_host &host,
+ 											   const dng_image &image)
+ 	{
+ 	
+-	dng_md5_printer printer;
++	dng_md5_direct_printer printer;
+ 	
+ 	dng_pixel_buffer buffer (image.Bounds (), 
+ 							 0, 
+@@ -1844,8 +1847,8 @@ dng_fingerprint dng_negative::FindImageDigest (dng_host &host,
+ 		
+ 		#endif
+ 
+-		printer.Process (buffer.fData,
+-						 count);
++		printer.ProcessPtr (buffer.fData,
++							count);
+ 		
+ 		}
+ 			
+@@ -2039,9 +2042,9 @@ class dng_find_new_raw_image_digest_task : public dng_area_task
+ 
+ 			#endif
+ 			
+-			dng_md5_printer printer;
++			dng_md5_direct_printer printer;
+ 			
+-			printer.Process (buffer.fData, count);
++			printer.ProcessPtr (buffer.fData, count);
+ 							 
+ 			fTileHash [tileIndex] = printer.Result ();
+ 			
+@@ -2050,12 +2053,12 @@ class dng_find_new_raw_image_digest_task : public dng_area_task
+ 		dng_fingerprint Result ()
+ 			{
+ 			
+-			dng_md5_printer printer;
++			dng_md5_direct_printer printer;
+ 			
+ 			for (uint32 tileIndex = 0; tileIndex < fTileCount; tileIndex++)
+ 				{
+ 				
+-				printer.Process (fTileHash [tileIndex] . data, 16);
++				printer.Process (fTileHash [tileIndex]);
+ 				
+ 				}
+ 				
+@@ -2163,11 +2166,11 @@ void dng_negative::FindNewRawImageDigest (dng_host &host) const
+ 				
+ 			// Combine the two digests into a single digest.
+ 			
+-			dng_md5_printer printer;
++			dng_md5_direct_printer printer;
+ 			
+-			printer.Process (fNewRawImageDigest.data, 16);
++			printer.Process (fNewRawImageDigest);
+ 			
+-			printer.Process (maskDigest.data, 16);
++			printer.Process (maskDigest);
+ 			
+ 			fNewRawImageDigest = printer.Result ();
+ 			
+@@ -2291,7 +2294,7 @@ void dng_negative::ValidateRawImageDigest (dng_host &host)
+ 						
+ 						for (uint32 j = 4; j < 16; j++)
+ 							{
+-							matchLast12 = matchLast12 && (oldDigest.data [j] == fRawImageDigest.data [j]);
++							matchLast12 = matchLast12 && (oldDigest.Data () [j] == fRawImageDigest.Data () [j]);
+ 							}
+ 							
+ 						if (matchLast12)
+@@ -2305,10 +2308,10 @@ void dng_negative::ValidateRawImageDigest (dng_host &host)
+ 					// bytes, but for all those files that I have seen so far the
+ 					// resulting first four bytes are 0x08 0x00 0x00 0x00.
+ 					
+-					if (oldDigest.data [0] == 0x08 &&
+-						oldDigest.data [1] == 0x00 &&
+-						oldDigest.data [2] == 0x00 &&
+-						oldDigest.data [3] == 0x00)
++					if (oldDigest.Data () [0] == 0x08 &&
++						oldDigest.Data () [1] == 0x00 &&
++						oldDigest.Data () [2] == 0x00 &&
++						oldDigest.Data () [3] == 0x00)
+ 						{
+ 						return;
+ 						}
+@@ -2337,12 +2340,12 @@ dng_fingerprint dng_negative::RawDataUniqueID () const
+ 	if (fRawDataUniqueID.IsValid () && fEnhanceParams.NotEmpty ())
+ 		{
+ 		
+-		dng_md5_printer printer;
++		dng_md5_direct_printer printer;
+ 		
+-		printer.Process (fRawDataUniqueID.data, 16);
++		printer.Process (fRawDataUniqueID);
+ 		
+-		printer.Process (fEnhanceParams.Get	   (),
+-						 fEnhanceParams.Length ());
++		printer.ProcessPtr (fEnhanceParams.Get	  (),
++							fEnhanceParams.Length ());
+ 			
+ 		return printer.Result ();
+ 
+@@ -2364,7 +2367,7 @@ void dng_negative::FindRawDataUniqueID (dng_host &host) const
+ 	if (RawDataUniqueID ().IsNull ())
+ 		{
+ 		
+-		dng_md5_printer_stream printer;
++		dng_md5_printer_le_stream printer;
+ 		
+ 		// If we have a raw lossy image, it is much faster to use its digest as
+ 		// part of the unique ID since the data size is much smaller. We
+@@ -2376,8 +2379,7 @@ void dng_negative::FindRawDataUniqueID (dng_host &host) const
+ 			
+ 			FindRawLossyCompressedImageDigest (host);
+ 			
+-			printer.Put (fRawLossyCompressedImageDigest.data,
+-						 uint32 (sizeof (fRawLossyCompressedImageDigest.data)));
++			printer.Put (fRawLossyCompressedImageDigest);
+ 			
+ 			}
+ 
+@@ -2388,7 +2390,7 @@ void dng_negative::FindRawDataUniqueID (dng_host &host) const
+ 		
+ 			FindNewRawImageDigest (host);
+ 					
+-			printer.Put (fNewRawImageDigest.data, 16);
++			printer.Put (fNewRawImageDigest);
+ 			
+ 			}
+ 		
+@@ -2463,10 +2465,10 @@ void dng_negative::FindOriginalRawFileDigest () const
+ 	if (fOriginalRawFileDigest.IsNull () && fOriginalRawFileData.Get ())
+ 		{
+ 		
+-		dng_md5_printer printer;
++		dng_md5_direct_printer printer;
+ 		
+-		printer.Process (fOriginalRawFileData->Buffer	   (),
+-						 fOriginalRawFileData->LogicalSize ());
++		printer.ProcessPtr (fOriginalRawFileData->Buffer	  (),
++							fOriginalRawFileData->LogicalSize ());
+ 					
+ 		fOriginalRawFileDigest = printer.Result ();
+ 	
+@@ -3975,7 +3977,7 @@ void dng_negative::PostParse (dng_host &host,
+ 			
+ 			// If the MakerNote is safe, preserve it as a MakerNote.
+ 			
+-			if (IsMakerNoteSafe ())
++			if (IsMakerNoteSafe () && info.fTIFFBlockOriginalOffset != kDNGStreamInvalidOffset)
+ 				{
+ 
+ 				AutoPtr<dng_memory_block> block (host.Allocate (shared.fMakerNoteCount));
+@@ -4430,7 +4432,17 @@ void dng_negative::ReadStage1Image (dng_host &host,
+ 	if (fStage1Image->PixelType () == ttFloat)
+ 		{
+ 		
+-		SetRawFloatBitDepth (rawIFD.fBitsPerSample [0]);
++		// If we are reading from a lossy JXL floating point image, and
++		// we are not keeping the lossy compressed data, we need to treat
++		// the raw floating point image as 32 bit, and ignore the bit
++		// depth that we fed into the JXL decoder.
++		
++		if (lossyImage.Get () || rawIFD.fCompression != ccJXL)
++			{
++			
++			SetRawFloatBitDepth (rawIFD.fBitsPerSample [0]);
++		
++			}
+ 		
+ 		}
+ 					  
+@@ -7342,6 +7354,16 @@ void dng_negative::ResizeTransparencyToMatchStage3 (dng_host &host,
+ 			(TransparencyMask ()->PixelType () != ttByte && convertTo8Bit))
+ 			{
+ 			
++			if (host.SaveDNGVersion () != dngVersion_None && !convertTo8Bit)
++				{
++				
++				if (!fRawTransparencyMask.Get ())
++					{
++					fRawTransparencyMask.Reset (fTransparencyMask->Clone ());
++					}
++					
++				}
++			
+ 			AutoPtr<dng_image> newMask (host.Make_dng_image (fStage3Image->Bounds (),
+ 															 1,
+ 															 convertTo8Bit ?
+@@ -7362,7 +7384,9 @@ void dng_negative::ResizeTransparencyToMatchStage3 (dng_host &host,
+ 				{
+ 				fRawTransparencyMaskBitDepth = 8;
+ 				}
+-			
++
++			fRawLossyCompressedTransparencyMask.Reset ();
++
+ 			}
+ 			
+ 		}
+diff --git a/source/dng_negative.h b/source/dng_negative.h
+index 786329a..f470f00 100644
+--- a/source/dng_negative.h
++++ b/source/dng_negative.h
+@@ -2132,7 +2132,8 @@ class dng_negative
+ 		// Returns the camera profile to embed when saving to DNG.
+ 		
+ 		bool GetProfileToEmbed (const dng_metadata &metadata,
+-								dng_camera_profile &foundProfile) const;
++								dng_camera_profile &foundProfile,
++								bool skipAdobeStandard = false) const;
+ 		
+ 		// API for AsShotProfileName.
+ 			
+@@ -2702,6 +2703,13 @@ class dng_negative
+ 		// Returns the raw image data.
+ 		
+ 		const dng_image & RawImage () const;
++		
++		// Clears any saved raw image.
++		
++		void ClearRawImage ()
++			{
++			fRawImage.Reset ();
++			}
+   
+ 		// Returns the raw image black level in 16-bit space.
+ 		
+@@ -3143,7 +3151,8 @@ class dng_negative
+ 		
+ 		virtual bool GetProfileToEmbedFromList (const dng_profile_metadata_list &list,
+ 												const dng_metadata &metadata,
+-												dng_camera_profile &foundProfile) const;
++												dng_camera_profile &foundProfile,
++												bool skipAdobeStandard = false) const;
+ 
+ 		void CompressTransparencyMaskJXL (dng_host &host,
+ 										  dng_image_writer &writer,
+diff --git a/source/dng_parse_utils.cpp b/source/dng_parse_utils.cpp
+index 3f90b7d..86f5de6 100644
+--- a/source/dng_parse_utils.cpp
++++ b/source/dng_parse_utils.cpp
+@@ -435,6 +435,7 @@ const char * LookupTagCode (uint32 parentCode,
+ 		{	tcEnhanceParams,					"EnhanceParams"					},
+ 		{	tcProfileGainTableMap,				"ProfileGainTableMap"			},
+ 		{	tcProfileGainTableMap2,				"ProfileGainTableMap2"			},
++		{	tcC2PAManifest,						"C2PAManifest"					},
+ 		{	tcRGBTablesDraft,					"RGBTablesDraft"				},
+ 		{	tcRGBTables,						"RGBTables"						},
+ 		{	tcBigTableDigests,					"BigTableDigests"				},
+@@ -2455,7 +2456,7 @@ void DumpFingerprint (const dng_fingerprint &p)
+ 	
+ 	for (uint32 j = 0; j < 16; j++)
+ 		{
+-		printf ("%02x", p.data [j]);
++		printf ("%02x", p.Data () [j]);
+ 		}
+ 
+ 	printf (">");
+diff --git a/source/dng_pixel_buffer.cpp b/source/dng_pixel_buffer.cpp
+index 66c2ea0..990799b 100644
+--- a/source/dng_pixel_buffer.cpp
++++ b/source/dng_pixel_buffer.cpp
+@@ -574,6 +574,30 @@ void dng_pixel_buffer::SetConstant (const dng_rect &area,
+ 									uint32 value)
+ 	{
+ 	
++	if (planes == 0)
++		{
++		ReportWarning ("dng_pixel_buffer::SetConstant: planes = 0");
++		return;
++		}
++
++	DNG_REQUIRE ((area & Area ()) == area,
++				 "SetConstant: area OOB");
++
++		{
++
++		uint32 endPlane = plane + planes;
++
++		uint32 endFullPlane = fPlane + fPlanes;
++
++		DNG_REQUIRE (plane < endPlane,
++					 "SetConstant: planes overflow");
++
++		DNG_REQUIRE (fPlane   <= plane &&
++					 endPlane <= endFullPlane,
++					 "SetConstant: planes range");
++
++		}
++
+ 	uint32 rows = area.H ();
+ 	uint32 cols = area.W ();
+ 	
+@@ -743,6 +767,42 @@ void dng_pixel_buffer::CopyArea (const dng_pixel_buffer &src,
+ 								 uint32 planes)
+ 	{
+ 	
++	if (planes == 0)
++		{
++		ReportWarning ("dng_pixel_buffer::CopyArea: planes = 0");
++		return;
++		}
++
++	DNG_REQUIRE ((area & src.Area ()) == area,
++				 "CopyArea: area OOB src");
++
++	DNG_REQUIRE ((area &     Area ()) == area,
++				 "CopyArea: area OOB dst");
++
++		{
++
++		uint32 endSrcPlane = srcPlane + planes;
++		uint32 endDstPlane = dstPlane + planes;
++
++		uint32 endFullSrcPlane = src.fPlane + src.fPlanes;
++		uint32 endFullDstPlane =     fPlane +     fPlanes;
++
++		DNG_REQUIRE (srcPlane < endSrcPlane,
++					 "CopyArea: src planes overflow");
++
++		DNG_REQUIRE (dstPlane < endDstPlane,
++					 "CopyArea: dst planes overflow");
++
++		DNG_REQUIRE (src.fPlane  <= srcPlane    &&
++					 endSrcPlane <= endFullSrcPlane,
++					 "CopyArea: src planes range");
++
++		DNG_REQUIRE (    fPlane  <= dstPlane    &&
++					 endDstPlane <= endFullDstPlane,
++					 "CopyArea: dst planes range");
++
++		}
++
+ 	uint32 rows = area.H ();
+ 	uint32 cols = area.W ();
+ 	
+diff --git a/source/dng_preview.cpp b/source/dng_preview.cpp
+index 9ea94df..40d1874 100644
+--- a/source/dng_preview.cpp
++++ b/source/dng_preview.cpp
+@@ -76,7 +76,7 @@ dng_preview_tag_set::dng_preview_tag_set (dng_tiff_directory &directory,
+ 	,	fSettingsDigest (preview.fInfo.fSettingsDigest)
+ 	
+ 	,	fSettingsDigestTag (tcPreviewSettingsDigest,
+-							fSettingsDigest.data,
++							fSettingsDigest.Data (),
+ 							16)
+ 							
+ 	,	fColorSpaceTag (tcPreviewColorSpace,
+@@ -723,6 +723,78 @@ dng_basic_tag_set * dng_raw_preview::AddTagSet (dng_host & /* host */,
+ 	}
+ 		
+ /*****************************************************************************/
++/*****************************************************************************/
++/*****************************************************************************/
++
++class dng_hdr_gain_map_preview_tag_set: public dng_preview_tag_set
++	{
++	
++	private:
++	
++		tag_data_ptr fGainMapMetadataTag;
++		
++	public:
++	
++		dng_hdr_gain_map_preview_tag_set (dng_tiff_directory &directory,
++										  const dng_hdr_gain_map_preview &preview,
++										  const dng_ifd &ifd)
++
++			:	dng_preview_tag_set (directory, preview, ifd)
++
++			,	fGainMapMetadataTag (tcGainMapMetadata_ISO_21496_1,
++									 ttUndefined, // type
++									 0,			  // count
++									 nullptr)	  // data
++		
++			{
++
++			if (preview.fGainMapMetadata)
++				{
++
++				const auto &block = *preview.fGainMapMetadata;
++
++				auto &tag = fGainMapMetadataTag;
++				
++				tag.SetData	 (block.Buffer		());
++				tag.SetCount (block.LogicalSize ());
++
++				directory.Add (&tag);
++				
++				}
++
++			}
++		
++	};
++
++/*****************************************************************************/
++
++void dng_hdr_gain_map_preview::SetIFDInfo (dng_host &host,
++										   const dng_image &image)
++	{
++	
++	dng_raw_preview::SetIFDInfo (host, image);
++	
++	fIFD.fNewSubFileType = sfPreviewGainMap;
++	
++	fIFD.fPhotometricInterpretation = piGainMap;
++	
++	}
++		
++/*****************************************************************************/
++
++dng_basic_tag_set * dng_hdr_gain_map_preview::AddTagSet (dng_host & /* host */,
++														 dng_tiff_directory &directory) const
++	{
++	
++	return new dng_hdr_gain_map_preview_tag_set (directory,
++												 *this,
++												 fIFD);
++	
++	}
++
++/*****************************************************************************/
++/*****************************************************************************/
++/*****************************************************************************/
+ 
+ void dng_mask_preview::SetIFDInfo (dng_host &host,
+ 								   const dng_image &image)
+diff --git a/source/dng_preview.h b/source/dng_preview.h
+index 4eb0425..badd6d3 100644
+--- a/source/dng_preview.h
++++ b/source/dng_preview.h
+@@ -250,6 +250,27 @@ class dng_raw_preview: public dng_preview
+ 
+ /*****************************************************************************/
+ 
++class dng_hdr_gain_map_preview: public dng_raw_preview
++	{
++	
++	public:
++
++		// ISO 21496-1 data here.
++	
++		std::shared_ptr<const dng_memory_block> fGainMapMetadata;
++
++	public:
++	
++		void SetIFDInfo (dng_host &host,
++						 const dng_image &image) override;
++		
++		dng_basic_tag_set * AddTagSet (dng_host &host,
++									   dng_tiff_directory &directory) const override;
++		
++	};
++
++/*****************************************************************************/
++
+ class dng_mask_preview: public dng_preview
+ 	{
+ 	
+diff --git a/source/dng_read_image.cpp b/source/dng_read_image.cpp
+index e1ab7fd..b48cda4 100644
+--- a/source/dng_read_image.cpp
++++ b/source/dng_read_image.cpp
+@@ -2899,10 +2899,10 @@ void dng_read_tiles_task::ProcessTask (uint32 tileIndex,
+ 	if (fLossyTileDigest)
+ 		{
+ 
+-		dng_md5_printer printer;
++		dng_md5_direct_printer printer;
+ 
+-		printer.Process (compressedBuffer->Buffer (),
+-						 byteCount);
++		printer.ProcessPtr (compressedBuffer->Buffer (),
++							byteCount);
+ 
+ 		fLossyTileDigest [tileIndex] = printer.Result ();
+ 
+@@ -3715,10 +3715,10 @@ void dng_read_image::Read (dng_host &host,
+ 							if (lossyDigest)
+ 								{
+ 								
+-								dng_md5_printer printer;
++								dng_md5_direct_printer printer;
+ 								
+-								printer.Process (compressedBuffer->Buffer (),
+-												 subByteCount);
++								printer.ProcessPtr (compressedBuffer->Buffer (),
++													subByteCount);
+ 												 
+ 								lossyTileDigests [tileIndex] = printer.Result ();
+ 								
+@@ -3759,20 +3759,19 @@ void dng_read_image::Read (dng_host &host,
+ 		if (fJPEGTables.Get ())
+ 			{
+ 			
+-			dng_md5_printer printer;
++			dng_md5_direct_printer printer;
+ 			
+-			printer.Process (fJPEGTables->Buffer	  (),
+-							 fJPEGTables->LogicalSize ());
++			printer.ProcessPtr (fJPEGTables->Buffer		 (),
++								fJPEGTables->LogicalSize ());
+ 							 
+ 			lossyTileDigests.push_back (printer.Result ());
+ 			
+ 			}
+ 			
+-		dng_md5_printer printer2;
++		dng_md5_direct_printer printer2;
+ 
+ 		for (const auto &digest : lossyTileDigests)
+-			printer2.Process (digest.data,
+-							  uint32 (sizeof (digest.data)));
++			printer2.Process (digest);
+ 							  
+ 		*lossyDigest = printer2.Result ();
+ 		
+diff --git a/source/dng_render.cpp b/source/dng_render.cpp
+index a4f8a13..db54a9c 100644
+--- a/source/dng_render.cpp
++++ b/source/dng_render.cpp
+@@ -1796,7 +1796,12 @@ void dng_render_task::ProcessArea (uint32 threadIndex,
+ 					
+ 				else
+ 					{
+-					
++
++					// Expect 4 src planes here. This method expects and only
++					// supports fSrcPlanes being 1,3 or 4.
++
++					DNG_REQUIRE (fSrcPlanes == 4, "fSrcPlanes");
++
+ 					const real32 *sPtrD = sPtrC + srcBuffer.fPlaneStep;
+ 				
+ 					DoBaselineABCDtoRGB (sPtrA,
+diff --git a/source/dng_resample.cpp b/source/dng_resample.cpp
+index d74247c..c87ac6c 100644
+--- a/source/dng_resample.cpp
++++ b/source/dng_resample.cpp
+@@ -160,18 +160,50 @@ void dng_resample_weights::Initialize (real64 scale,
+ 	
+ 	uint32 j;
+ 	
++	// Ensure scale is positive and finite.
++
++	if (!isfinite (scale))
++		{
++
++		ThrowProgramError ("scale not finite");
++
++		}
++
++	if (scale <= 0.0)
++		{
++
++		ThrowProgramError ("scale not positive");
++
++		}
++
+ 	// We only adjust the kernel size for scale factors less than 1.0.
+ 	
+ 	scale = Min_real64 (scale, 1.0);
+-	
++
+ 	// Find radius of this kernel.
++
++	fRadius = ConvertDoubleToUint32 (std::ceil (kernel.Extent () / scale));
++
++	// Ensure fRadius > 0.
++
++	if (fRadius == 0)
++		{
++
++		ThrowProgramError ("fRadius zero");
++
++		}
+ 	
+-	fRadius = (uint32) (kernel.Extent () / scale + 0.9999);
+-	
+-	// Width is twice the radius.
+-	
+-	uint32 width = fRadius * 2;
+-	
++	// Width is twice the radius. Check for overflow.
++
++	uint32 width = 0;
++
++	if (!SafeUint32Mult (fRadius, 2, &width))
++		{
++
++		ThrowOverflow ("Arithmetic overflow computing width");
++
++		}
++
+ 	// Round to each set to weights to a multiple of 8 entries.
+ 	
+ 	if (!RoundUpUint32ToMultiple (width, 8, &fWeightStep))
+diff --git a/source/dng_safe_arithmetic.h b/source/dng_safe_arithmetic.h
+index fb5933a..9e4ad1b 100644
+--- a/source/dng_safe_arithmetic.h
++++ b/source/dng_safe_arithmetic.h
+@@ -123,9 +123,11 @@ int64 SafeInt64MultSlow(int64 arg1, int64 arg2);
+ #ifdef __ANDROID__
+ // While clang says it supports __builtin_smull_overflow, the Android NDK
+ // doesn't use the right runtime library per https://bugs.llvm.org/show_bug.cgi?id=28629
+-// BEGIN GOOGLE MODIFICATION
+-#define __USE_BUILTIN_SMULL_OVERFLOW __has_builtin(__builtin_smull_overflow)
+-// END GOOGLE MODIFICATION
++// Disable the __builtin_smull_overflow for now until we verify that it works fine for android.
++// Currently we use it on other platforms like macOS, iOS and Linux so we should be good. We will
++// revisit this when LrM android team has bandwidth to test it.
++// krishnas - 11/9/2025
++#define __USE_BUILTIN_SMULL_OVERFLOW (0 && __has_builtin(__builtin_smull_overflow))
+ #else
+ #define __USE_BUILTIN_SMULL_OVERFLOW __has_builtin(__builtin_smull_overflow)
+ #endif // __ANDROID__
+diff --git a/source/dng_shared.cpp b/source/dng_shared.cpp
+index fb3cc0b..57e08de 100644
+--- a/source/dng_shared.cpp
++++ b/source/dng_shared.cpp
+@@ -1411,7 +1411,7 @@ bool dng_camera_profile_info::ParseTag (dng_stream &stream,
+ 			if (pgtm && gVerbose)
+ 				{
+ 
+-				dng_md5_printer printer;
++				dng_md5_printer_le_stream printer;
+ 				
+ 				pgtm->AddDigest (printer);
+ 
+@@ -1525,7 +1525,7 @@ bool dng_camera_profile_info::ParseTag (dng_stream &stream,
+ 			if (gVerbose && fMaskedRGBTables)
+ 				{
+ 
+-				dng_md5_printer printer;
++				dng_md5_printer_le_stream printer;
+ 				
+ 				fMaskedRGBTables->AddDigest (printer);
+ 
+@@ -1932,9 +1932,9 @@ bool dng_shared::Parse_ifd0 (dng_stream &stream,
+ 				
+ 					{
+ 					
+-					dng_md5_printer printer;
++					dng_md5_direct_printer printer;
+ 		
+-					printer.Process (data, count);
++					printer.ProcessPtr (data, count);
+ 					
+ 					printf ("IPTCDigest: ");
+ 					
+@@ -1959,9 +1959,9 @@ bool dng_shared::Parse_ifd0 (dng_stream &stream,
+ 					if (removed != 0)
+ 						{
+ 					
+-						dng_md5_printer printer;
++						dng_md5_direct_printer printer;
+ 			
+-						printer.Process (data, count);
++						printer.ProcessPtr (data, count);
+ 						
+ 						printf ("IPTCDigest (ignoring zero padding): ");
+ 						
+@@ -2068,7 +2068,34 @@ bool dng_shared::Parse_ifd0 (dng_stream &stream,
+ 			break;
+ 			
+ 			}
++			
++		case tcC2PAManifest:
++			{
+ 		
++			CheckTagType (parentCode, tagCode, tagType, ttUndefined);
++			
++			fC2PAManifestOffset = stream.Position ();
++			fC2PAManifestCount  = tagCount;
++			
++			#if qDNGValidate
++			
++			if (gVerbose)
++				{
++				
++				printf ("C2PAManifest: offset = %llu, count = %u\n",
++						(unsigned long long) fC2PAManifestOffset,
++						(unsigned) 			 fC2PAManifestCount);
++						
++				DumpHexAscii (stream, fC2PAManifestCount);
++				
++				}
++				
++			#endif
++				
++			break;
++				
++			}
++
+ 		case tcDNGVersion:
+ 			{
+ 			
+@@ -2682,7 +2709,7 @@ bool dng_shared::Parse_ifd0 (dng_stream &stream,
+ 			if (!CheckTagCount (parentCode, tagCode, tagCount, 16))
+ 				return false;
+ 				
+-			stream.Get (fRawImageDigest.data, 16);
++			stream.Get (fRawImageDigest);
+ 				
+ 			#if qDNGValidate
+ 
+@@ -2712,7 +2739,7 @@ bool dng_shared::Parse_ifd0 (dng_stream &stream,
+ 			if (!CheckTagCount (parentCode, tagCode, tagCount, 16))
+ 				return false;
+ 				
+-			stream.Get (fNewRawImageDigest.data, 16);
++			stream.Get (fNewRawImageDigest);
+ 			
+ 			#if qDNGValidate
+ 
+@@ -2742,7 +2769,7 @@ bool dng_shared::Parse_ifd0 (dng_stream &stream,
+ 			if (!CheckTagCount (parentCode, tagCode, tagCount, 16))
+ 				return false;
+ 				
+-			stream.Get (fRawDataUniqueID.data, 16);
++			stream.Get (fRawDataUniqueID);
+ 				
+ 			#if qDNGValidate
+ 
+@@ -2830,7 +2857,7 @@ bool dng_shared::Parse_ifd0 (dng_stream &stream,
+ 			if (!CheckTagCount (parentCode, tagCode, tagCount, 16))
+ 				return false;
+ 				
+-			stream.Get (fOriginalRawFileDigest.data, 16);
++			stream.Get (fOriginalRawFileDigest);
+ 				
+ 			#if qDNGValidate
+ 
+@@ -3386,7 +3413,7 @@ bool dng_shared::Parse_ifd0 (dng_stream &stream,
+ 				
+ 				dng_fingerprint fingerprint;
+ 				
+-				stream.Get (fingerprint.data, 16);
++				stream.Get (fingerprint);
+ 				
+ 				fBigTableDigests.push_back (fingerprint);
+ 				
+@@ -3555,8 +3582,8 @@ bool dng_shared::Parse_ifd0 (dng_stream &stream,
+ 				dng_fingerprint groupDigest;
+ 				dng_fingerprint instanceDigest;
+ 				
+-				stream.Get (groupDigest	  .data, 16);
+-				stream.Get (instanceDigest.data, 16);
++				stream.Get (groupDigest);
++				stream.Get (instanceDigest);
+ 
+ 				fBigTableGroupIndex.insert (std::make_pair (groupDigest,
+ 															instanceDigest));
+diff --git a/source/dng_shared.h b/source/dng_shared.h
+index 296c37b..4d0e7f0 100644
+--- a/source/dng_shared.h
++++ b/source/dng_shared.h
+@@ -282,6 +282,9 @@ class dng_shared
+ 
+ 		dng_image_sequence_info fImageSequenceInfo;
+ 		
++		uint32 fC2PAManifestCount  = 0;
++		uint64 fC2PAManifestOffset = 0;
++		
+ 	public:
+ 	
+ 		dng_shared ();
+diff --git a/source/dng_stream.cpp b/source/dng_stream.cpp
+index e6ad8c3..cfb7d20 100644
+--- a/source/dng_stream.cpp
++++ b/source/dng_stream.cpp
+@@ -1,5 +1,5 @@
+ /*****************************************************************************/
+-// Copyright 2006-2019 Adobe Systems Incorporated
++// Copyright 2006-2025 Adobe Systems Incorporated
+ // All Rights Reserved.
+ //
+ // NOTICE:	Adobe permits you to use, modify, and distribute this file in
+@@ -12,9 +12,11 @@
+ #include "dng_auto_ptr.h"
+ #include "dng_bottlenecks.h"
+ #include "dng_exceptions.h"
++#include "dng_fingerprint.h"
+ #include "dng_globals.h"
+ #include "dng_flags.h"
+ #include "dng_memory.h"
++#include "dng_rect.h"
+ #include "dng_tag_types.h"
+ #include "dng_assertions.h"
+ 
+@@ -74,7 +76,18 @@ dng_stream::dng_stream (const void *data,
+ 
+ dng_stream::~dng_stream ()
+ 	{
+-	
++
++	#if qDNGStreamCheckForUnflushedStreams
++
++	if (fBufferDirty)
++		{
++
++		fprintf (stderr, "*** Error: dng_stream not flushed ***\n");
++
++		}
++
++	#endif
++
+ 	}
+ 		
+ /*****************************************************************************/
+@@ -369,6 +382,16 @@ void dng_stream::Get (void *data, uint32 count, uint32 maxOverRead)
+ 		}
+ 
+ 	}
++
++/*****************************************************************************/
++
++void dng_stream::Get (dng_fingerprint &digest)
++	{
++	
++	Get (digest.MutableData (),
++		 uint32 (dng_fingerprint::kDNGFingerprintSize));
++	
++	}
+ 		
+ /*****************************************************************************/
+ 
+@@ -531,6 +554,168 @@ void dng_stream::Put (const void *data,
+ 	fLength = Max_uint64 (Length (), fPosition);
+ 	
+ 	}
++
++/*****************************************************************************/
++
++void dng_stream::Put (const dng_rect &area)
++	{
++	
++	Put_int32 (area.t);
++	Put_int32 (area.l);
++	Put_int32 (area.b);
++	Put_int32 (area.r);
++	
++	}
++
++/*****************************************************************************/
++
++void dng_stream::Put (const dng_rect_real64 &area)
++	{
++	
++	Put_real64 (area.t);
++	Put_real64 (area.l);
++	Put_real64 (area.b);
++	Put_real64 (area.r);
++	
++	}
++
++/*****************************************************************************/
++
++void dng_stream::Put (const dng_point &pt)
++	{
++	
++	Put_int32 (pt.h);
++	Put_int32 (pt.v);
++	
++	}
++
++/*****************************************************************************/
++
++void dng_stream::Put (const dng_point_real64 &pt)
++	{
++	
++	Put_real64 (pt.h);
++	Put_real64 (pt.v);
++	
++	}
++
++/*****************************************************************************/
++
++void dng_stream::Put (const dng_srational &value)
++	{
++	
++	Put_int32 (value.n);
++	Put_int32 (value.d);
++	
++	}
++
++/*****************************************************************************/
++
++void dng_stream::Put (const dng_urational &value)
++	{
++	
++	Put_uint32 (value.n);
++	Put_uint32 (value.d);
++	
++	}
++
++/*****************************************************************************/
++
++void dng_stream::Put (const dng_fingerprint &digest)
++	{
++
++	Put (digest.Data (),
++		 uint32 (dng_fingerprint::kDNGFingerprintSize));
++	
++	}
++
++/*****************************************************************************/
++
++void dng_stream::Put (const dng_string &str)
++	{
++
++	Put (str.Get	(),
++		 str.Length ());
++	
++	}
++
++/*****************************************************************************/
++
++void dng_stream::Put_swap4 (const void *data,
++							const uint32 countMul4)
++	{
++
++	if (countMul4 == 0)
++		return;
++	
++	DNG_REQUIRE (RoundUp4 (countMul4) == countMul4,
++				 "countMul4 must be a multiple 4");
++
++	if (SwapBytes ())
++		{
++		
++		const uint32 elems = countMul4 / 4;
++
++		const uint32 *ptr = (const uint32 *) data;
++
++		for (uint32 i = 0; i < elems; i++)
++			{
++			
++			Put_uint32 (ptr [i]);
++			
++			}
++		
++		}
++
++	else
++		{
++
++		// Byte-swapping not needed, so just put directly.
++		
++		Put (data, countMul4);
++		
++		}
++	
++	}
++
++/*****************************************************************************/
++
++void dng_stream::Put_swap8 (const void *data,
++							const uint32 countMul8)
++	{
++
++	if (countMul8 == 0)
++		return;
++	
++	DNG_REQUIRE (RoundUp8 (countMul8) == countMul8,
++				 "countMul8 must be a multiple 8");
++
++	if (SwapBytes ())
++		{
++		
++		const uint32 elems = countMul8 / 8;
++
++		const uint64 *ptr = (const uint64 *) data;
++
++		for (uint32 i = 0; i < elems; i++)
++			{
++			
++			Put_uint64 (ptr [i]);
++			
++			}
++		
++		}
++
++	else
++		{
++
++		// Byte-swapping not needed, so just put directly.
++		
++		Put (data, countMul8);
++		
++		}
++	
++	}
+ 		
+ /*****************************************************************************/
+ 
+diff --git a/source/dng_stream.h b/source/dng_stream.h
+index 3df465a..c8f37e2 100644
+--- a/source/dng_stream.h
++++ b/source/dng_stream.h
+@@ -17,6 +17,8 @@
+ 
+ /*****************************************************************************/
+ 
++#include "dng_flags.h"
++
+ #include "dng_auto_ptr.h"
+ #include "dng_classes.h"
+ #include "dng_types.h"
+@@ -27,6 +29,12 @@
+ 
+ /*****************************************************************************/
+ 
++#ifndef qDNGStreamCheckForUnflushedStreams
++#define qDNGStreamCheckForUnflushedStreams (qDNGValidate)
++#endif
++
++/*****************************************************************************/
++
+ // Constants for invalid offset in streams.
+ 
+ const uint64 kDNGStreamInvalidOffset = (uint64) (int64) -1;
+@@ -100,7 +108,20 @@ class dng_stream: private dng_uncopyable
+ 		virtual void DoWrite (const void *data,
+ 							  uint32 count,
+ 							  uint64 offset);
+-		
++
++		#if qDNGStreamCheckForUnflushedStreams
++
++		// Call this from dtor of derived class for derived classes
++		// which allow for destruction of an UNFLUSHED writable stream.
++		// This helps with fBufferDirty check in dtor.
++
++		void DestructionOfUnflushedInstancesIsAllowed ()
++			{
++			fBufferDirty = false;
++			}
++
++		#endif
++
+ 	public:
+ 	
+ 		/// Construct a stream with initial data.
+@@ -252,6 +273,8 @@ class dng_stream: private dng_uncopyable
+ 		
+ 		void Get (void *data, uint32 count, uint32 maxOverRead=0);
+ 
++		void Get (dng_fingerprint &digest);
++
+ 		/// Seek to a new position in stream for writing.
+ 		
+ 		void SetWritePosition (uint64 offset);
+@@ -271,6 +294,24 @@ class dng_stream: private dng_uncopyable
+ 
+ 		void Put (const void *data, uint32 count);
+ 
++		/// Write data to stream, performing 4-byte aligned swapping if
++		/// needed. If byte-swapping is not needed, this routine is equivalent
++		/// to Put.
++		/// \param data Buffer of data to write to stream.
++		/// \param countMul4 Length of data in bytes. Must be a multiple of 4.
++
++		void Put_swap4 (const void *data,
++						uint32 countMul4);
++		
++		/// Write data to stream, performing 8-byte aligned swapping if
++		/// needed. If byte-swapping is not needed, this routine is equivalent
++		/// to Put.
++		/// \param data Buffer of data to write to stream.
++		/// \param countMul8 Length of data in bytes. Must be a multiple of 8.
++
++		void Put_swap8 (const void *data,
++						uint32 countMul8);
++
+ 		/// Get an unsigned 8-bit integer from stream and advance read position.
+ 		/// \retval One unsigned 8-bit integer.
+ 		/// \exception dng_exception with fErrorCode equal to dng_error_end_of_file 
+@@ -350,7 +391,7 @@ class dng_stream: private dng_uncopyable
+ 		/// \exception dng_exception with fErrorCode equal to dng_error_end_of_file
+ 		/// if not enough data in stream.
+ 		
+-		uint32 Get_uint32();
++		uint32 Get_uint32 ();
+ 
+ #if !qDNGBigEndian
+ 		inline // ep, enable compiler inlining
+@@ -406,6 +447,21 @@ class dng_stream: private dng_uncopyable
+ 			Put_uint8 ((uint8) x);
+ 			}
+ 
++		/// Put a Boolean as a single byte.
++
++		void Put_bool (bool x)
++			{
++			Put_uint8 (x ? 1 : 0);
++			}
++
++		/// Put a size_t as 8 bytes.
++
++		void Put_size (size_t x)
++			{
++			static_assert (sizeof (size_t) <= 8, "size_t > 8 bytes");
++			Put_uint64 (uint64 (x));
++			}
++
+ 		/// Get one 16-bit integer from stream and advance read position. 
+ 		/// Byte swap if byte swapping is turned on.
+ 		/// \retval One 16-bit integer.
+@@ -445,7 +501,31 @@ class dng_stream: private dng_uncopyable
+ 			{
+ 			Put_uint32 ((uint32) x);
+ 			}
++
++		/// Put one dng_rect (as four sequential calls to Put_int32) and advance write position.
++		/// Byte swap if byte swapping is turned on.
++		/// \param x One dng_rect.
+ 			
++		void Put (const dng_rect &r);
++
++		void Put (const dng_rect_real64 &r);
++
++		/// Put one dng_fingerprint and advance write position.
++		/// No byte swapping.
++		/// \param x One dng_fingerprint.
++			
++		void Put (const dng_fingerprint &digest);
++
++		void Put (const dng_point &pt);
++
++		void Put (const dng_point_real64 &pt);
++
++		void Put (const dng_srational &value);
++
++		void Put (const dng_urational &value);
++
++		void Put (const dng_string &value);
++
+ 		/// Get one 64-bit integer from stream and advance read position. 
+ 		/// Byte swap if byte swapping is turned on.
+ 		/// \retval One 64-bit integer.
+diff --git a/source/dng_string.cpp b/source/dng_string.cpp
+index 066b7ea..aca3405 100644
+--- a/source/dng_string.cpp
++++ b/source/dng_string.cpp
+@@ -1239,7 +1239,7 @@ bool dng_string::TrimTrailingBlanks ()
+ 	
+ 	bool didTrim = false;
+ 	
+-	if (fData.get () && fData->back () == ' ')
++	if (fData.get () && !fData->empty () && fData->back () == ' ')
+ 		{
+ 		
+ 		const char *s = fData->c_str ();
+@@ -2173,8 +2173,8 @@ int32 dng_string::Compare (const dng_string &s,
+ 				
+ 				dng_lock_std_mutex lockMutex (gProtectUCCalls);
+ 
+-				UCCollateOptions aOptions = kUCCollateStandardOptions |
+-											kUCCollatePunctuationSignificantMask;
++				UCCollateOptions aOptions = static_cast<UCCollateOptions>(kUCCollateStandardOptions) |
++											static_cast<UCCollateOptions>(kUCCollatePunctuationSignificantMask);
+ 		   
+ 				if (digitsAsNumber)
+ 					{
+@@ -2459,10 +2459,10 @@ int32 dng_string::Compare (const dng_string &s,
+ 
+ size_t dng_string_hash::operator () (const dng_string &s) const
+ 	{
+-	
+-	dng_md5_printer printer;
+ 
+-	printer.Process (s.Get ());
++	dng_md5_direct_printer printer;
++
++	printer.ProcessString (s.Get ());
+ 
+ 	auto digest = printer.Result ();
+ 
+diff --git a/source/dng_string.h b/source/dng_string.h
+index 221f86c..4634a20 100644
+--- a/source/dng_string.h
++++ b/source/dng_string.h
+@@ -23,6 +23,7 @@
+ #include <memory>
+ #include <string>
+ #include <unordered_set>
++#include <set>
+ 
+ /*****************************************************************************/
+ 
+@@ -190,6 +191,22 @@ typedef std::unordered_set<dng_string,
+ 
+ /*****************************************************************************/
+ 
++struct dng_string_less
++	{
++
++	bool operator () (const dng_string& a, const dng_string& b) const
++		{
++		return (strcmp (a.Get(), b.Get()) < 0);
++		}
++
++	};
++
++/*****************************************************************************/
++
++typedef std::set<dng_string, dng_string_less> dng_string_ordered_table;
++
++/*****************************************************************************/
++
+ #endif	// __dng_string__
+ 	
+ /*****************************************************************************/
+diff --git a/source/dng_tag_codes.h b/source/dng_tag_codes.h
+index b60789c..095f089 100644
+--- a/source/dng_tag_codes.h
++++ b/source/dng_tag_codes.h
+@@ -215,6 +215,7 @@ enum
+ 	tcWaterDepth					= 37891,
+ 	tcAcceleration					= 37892,
+ 	tcCameraElevationAngle			= 37893,
++	tcDJIPrivateEXIFKeywords		= 40094,
+ 	tcFlashPixVersion				= 40960,
+ 	tcColorSpace					= 40961,
+ 	tcPixelXDimension				= 40962,
+@@ -369,6 +370,7 @@ enum
+ 	tcBigTableOffsets				= 52541,
+ 	tcBigTableByteCounts			= 52542,
+ 	tcProfileGainTableMap2			= 52544,
++	tcC2PAManifest					= 52545,
+ 	tcColumnInterleaveFactor		= 52547,
+ 	tcImageSequenceInfo				= 52548,
+ 	tcProfileToneMethod				= 52549,
+@@ -379,6 +381,7 @@ enum
+ 	tcJXLEffort						= 52554,
+ 	tcJXLDecodeSpeed				= 52555,
+ 	tcBigTableGroupIndex			= 52556,
++	tcGainMapMetadata_ISO_21496_1	= 52557,
+ 	tcKodakKDCPrivateIFD			= 65024
+ 	};
+ 
+diff --git a/source/dng_tag_values.h b/source/dng_tag_values.h
+index bccb29f..0e6df48 100644
+--- a/source/dng_tag_values.h
++++ b/source/dng_tag_values.h
+@@ -52,6 +52,10 @@ enum
+ 
+ 	sfGainMap					= 32,
+ 		
++	// Preview (reduced resolution) Gain Map.
++
++	sfPreviewGainMap			= sfPreviewImage + sfGainMap,
++		
+ 	// Preview image for non-primary settings.
+ 	
+ 	sfAltPreviewImage			= 0x10001,
+diff --git a/source/dng_update_meta.cpp b/source/dng_update_meta.cpp
+index ad85397..be1a09b 100644
+--- a/source/dng_update_meta.cpp
++++ b/source/dng_update_meta.cpp
+@@ -562,7 +562,7 @@ bool dng_tag_updater::GetArray_Fingerprint (dng_file_updater &updater,
+ 			
+ 			dng_fingerprint fingerprint;
+ 		
+-			updater.Stream ().Get (fingerprint.data, 16);
++			updater.Stream ().Get (fingerprint);
+ 			
+ 			values.push_back (fingerprint);
+ 			
+@@ -1976,7 +1976,7 @@ void dng_ifd_updater::UpdateAdobeData (dng_file_updater &updater,
+ 				
+ 				dng_fingerprint oldDigest;
+ 				
+-				stream.Get (oldDigest.data, 16);
++				stream.Get (oldDigest);
+ 				
+ 				if (iptcDigest != oldDigest)
+ 					{
+@@ -1990,7 +1990,7 @@ void dng_ifd_updater::UpdateAdobeData (dng_file_updater &updater,
+ 						
+ 					#endif
+  
+-					stream.Put (iptcDigest.data, 16);
++					stream.Put (iptcDigest);
+ 					
+ 					}
+ 				
+@@ -2966,7 +2966,7 @@ void DNGUpdateMetadata (dng_host &host,
+ 									   tcRawDataUniqueID,
+ 									   ttByte,
+ 									   16,
+-									   rawDataUniqueID.data);
++									   rawDataUniqueID.Data ());
+ 																					 
+ 			}
+ 		
+diff --git a/source/dng_validate.cpp b/source/dng_validate.cpp
+index bfd3582..9843a37 100644
+--- a/source/dng_validate.cpp
++++ b/source/dng_validate.cpp
+@@ -54,7 +54,7 @@
+ 		
+ /*****************************************************************************/
+ 
+-#define kDNGValidateVersion "1.7.1"
++#define kDNGValidateVersion (kDNGSDK_GetInfoVersion)
+ 		
+ /*****************************************************************************/
+ 
+@@ -688,14 +688,14 @@ int main (int argc, char *argv [])
+ 
+ 			fprintf (stderr,
+ 					 "\n"
+-					 "dng_validate, version " kDNGValidateVersion " "
++					 "dng_validate, version %s "
+ 					 #if qDNG64Bit
+ 					 "(64-bit)"
+ 					 #else
+ 					 "(32-bit)"
+ 					 #endif
+ 					 "\n"
+-					 "Copyright 2005-2023 Adobe Systems, Inc.\n"
++					 "Copyright 2005-2026 Adobe Systems, Inc.\n"
+ 					 "\n"
+ 					 "Usage:  %s [options] file1 file2 ...\n"
+ 					 "\n"
+@@ -730,6 +730,7 @@ int main (int argc, char *argv [])
+ 					 "-tif <file>           Write TIF image to \"<file>.tif\"\n"
+ 					 "-dng <file>           Write DNG image to \"<file>.dng\"\n"
+ 					 "\n",
++					 kDNGValidateVersion,
+ 					 argv [0]);
+ 					 
+ 			return 1;
+diff --git a/source/dng_xmp.cpp b/source/dng_xmp.cpp
+index 6af9885..746a38f 100644
+--- a/source/dng_xmp.cpp
++++ b/source/dng_xmp.cpp
+@@ -5133,6 +5133,54 @@ void dng_xmp::DocOpsUpdateMetadata (const char *srcMIME)
+ 
+ /*****************************************************************************/
+ 
++dng_string dng_xmp::GetProvenance () const
++	{
++
++	dng_string s;
++
++	if (GetString (XMP_NS_DC_TERMS, "provenance", s))
++		{
++
++		return s;
++
++		}
++
++	return dng_string ();
++
++	}
++
++/*****************************************************************************/
++
++void dng_xmp::SetProvenance (const char *s)
++	{
++
++	if (s && s [0])
++		{
++
++		dng_string ss;
++
++		ss.Set (s);
++
++		SetString (XMP_NS_DC_TERMS, "provenance", ss);
++
++		}
++
++	else
++		{
++
++		if (Exists (XMP_NS_DC_TERMS, "provenance"))
++			{
++
++			Remove (XMP_NS_DC_TERMS, "provenance");
++
++			}
++
++		}
++
++	}
++
++/*****************************************************************************/
++
+ #endif	// qDNGUseXMP
+ 
+ /*****************************************************************************/
+diff --git a/source/dng_xmp.h b/source/dng_xmp.h
+index 8a071fd..1be0fe6 100644
+--- a/source/dng_xmp.h
++++ b/source/dng_xmp.h
+@@ -348,6 +348,15 @@ class dng_xmp
+ 		
+ 		#endif
+ 
++		// Other public XMP settings.
++
++		// Provenance:
++		// https://www.dublincore.org/specifications/dublin-core/dcmi-terms/terms/provenance/
++
++		dng_string GetProvenance () const;
++
++		void SetProvenance (const char *s);
++
+ 	protected:
+ 	
+ 		static void TrimDecimal (char *s);
+diff --git a/source/dng_xmp_sdk.cpp b/source/dng_xmp_sdk.cpp
+index cc369c1..f4f765f 100644
+--- a/source/dng_xmp_sdk.cpp
++++ b/source/dng_xmp_sdk.cpp
+@@ -45,10 +45,6 @@
+ 
+ #define XMP_StaticBuild 1
+ 
+-#if qiPhone
+-#undef UNIX_ENV
+-#endif
+-
+ #include "XMP.incl_cpp"
+ 
+ /*****************************************************************************/
+@@ -60,6 +56,7 @@ const char *XMP_NS_PHOTOSHOP  = "http://ns.adobe.com/photoshop/1.0/";
+ const char *XMP_NS_XAP		  = "http://ns.adobe.com/xap/1.0/";
+ const char *XMP_NS_XAP_RIGHTS = "http://ns.adobe.com/xap/1.0/rights/";
+ const char *XMP_NS_DC		  = "http://purl.org/dc/elements/1.1/";
++const char *XMP_NS_DC_TERMS	  = "http://purl.org/dc/terms/";
+ const char *XMP_NS_XMP_NOTE	  = "http://ns.adobe.com/xmp/note/";
+ const char *XMP_NS_MM		  = "http://ns.adobe.com/xap/1.0/mm/";
+ 
+@@ -68,6 +65,8 @@ const char *XMP_NS_CRSS		  = "http://ns.adobe.com/camera-raw-saved-settings/1.0/
+ const char *XMP_NS_CRD		  = "http://ns.adobe.com/camera-raw-defaults/1.0/";
+ const char *XMP_NS_CRLCP	  = "http://ns.adobe.com/camera-raw-embedded-lens-profile/1.0/";
+ 
++const char *XMP_NS_VFS        = "http://ns.adobe.com/video-foundation-settings/1.0/";
++
+ const char *XMP_NS_LR		  = "http://ns.adobe.com/lightroom/1.0/";
+ 
+ const char *XMP_NS_LCP		  = "http://ns.adobe.com/photoshop/1.0/camera-profile";
+@@ -77,6 +76,8 @@ const char *XMP_NS_AUX		  = "http://ns.adobe.com/exif/1.0/aux/";
+ const char *XMP_NS_IPTC		  = "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/";
+ const char *XMP_NS_IPTC_EXT	  = "http://iptc.org/std/Iptc4xmpExt/2008-02-29/";
+ 
++const char *XMP_NS_PLUS 	  = "http://ns.useplus.org/ldf/xmp/1.0/";
++
+ const char *XMP_NS_CRX		  = "http://ns.adobe.com/lightroom-settings-experimental/1.0/";
+ 
+ const char *XMP_NS_DNG		  = "http://ns.adobe.com/dng/1.0/";
+@@ -300,6 +301,18 @@ void dng_xmp_sdk::InitializeSDK (dng_xmp_namespace * extraNamespaces,
+ 											 &ss);
+ 				
+ 				}
++				
++			// Register VideoFoundation namespace
++			
++				{
++				
++				TXMP_STRING_TYPE ss ("");
++				
++				SXMPMeta::RegisterNamespace (XMP_NS_VFS,
++											 "vfs",
++											 &ss);
++				
++				}
+ 			
+ 			// Register LR namespace
+ 			
+@@ -420,7 +433,23 @@ void dng_xmp_sdk::InitializeSDK (dng_xmp_namespace * extraNamespaces,
+ 											 &ss);
+ 				
+ 				}
++
++			// Note: IPTC EXT and plus namespaces already registered by the
++			// XMP SDK.
+ 			
++			// Register DC_TERMS namespace
++			// NOTE: Someday this may appear in a new XMP library drop and obviate the need to do it here?
++
++				{
++
++				TXMP_STRING_TYPE ss ("");
++
++				SXMPMeta::RegisterNamespace (XMP_NS_DC_TERMS,
++											 "dcterms",
++											 &ss);
++
++				}
++
+ 			// Register extra namespaces.
+ 			
+ 			if (extraNamespaces != NULL)
+diff --git a/source/dng_xmp_sdk.h b/source/dng_xmp_sdk.h
+index fc485e0..bbb8f43 100644
+--- a/source/dng_xmp_sdk.h
++++ b/source/dng_xmp_sdk.h
+@@ -29,6 +29,7 @@ extern const char *XMP_NS_PHOTOSHOP;
+ extern const char *XMP_NS_XAP;
+ extern const char *XMP_NS_XAP_RIGHTS;
+ extern const char *XMP_NS_DC;
++extern const char *XMP_NS_DC_TERMS;
+ extern const char *XMP_NS_XMP_NOTE;
+ extern const char *XMP_NS_MM;
+ 
+@@ -37,6 +38,8 @@ extern const char *XMP_NS_CRSS;
+ extern const char *XMP_NS_CRD;
+ extern const char *XMP_NS_CRLCP;
+ 
++extern const char *XMP_NS_VFS;
++
+ extern const char *XMP_NS_LR;
+ 
+ extern const char *XMP_NS_LCP;
+@@ -46,6 +49,8 @@ extern const char *XMP_NS_AUX;
+ extern const char *XMP_NS_IPTC;
+ extern const char *XMP_NS_IPTC_EXT;
+ 
++extern const char *XMP_NS_PLUS;
++
+ extern const char *XMP_NS_CRX;
+ 
+ extern const char *XMP_NS_DNG;
+-- 
+2.53.0.335.g19a08e0c02-goog
+

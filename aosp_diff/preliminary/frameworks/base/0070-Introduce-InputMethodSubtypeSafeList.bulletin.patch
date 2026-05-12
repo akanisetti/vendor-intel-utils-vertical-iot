@@ -1,0 +1,836 @@
+From e99cb1a4f240988380e43592d845c64f78e1a6d7 Mon Sep 17 00:00:00 2001
+From: Hiroki Sato <hirokisato@google.com>
+Date: Tue, 4 Nov 2025 17:29:42 +0900
+Subject: [PATCH] Introduce InputMethodSubtypeSafeList
+
+IMM#getEnabledInputMethodSubtypeList() can return a large list of
+subtypes, which may cause a TransactionTooLargeException.
+
+This patch introduces InputMethodSubtypeSafeList to wrap the list as a
+byte array, avoiding the exception. This mirrors the existing
+InputMethodInfoSafeList pattern introduced in [1].
+
+Additionally, this change extracts the common marshalling logic from
+InputMethodInfoSafeList into a new AbstractSafeList and refactors both
+SafeList classes to extend it.
+
+[1] I0a7667070fcdf17d34b248a5988c38064588718a
+
+Bug: 449416164
+Bug: 449181366
+Bug: 449393786
+Bug: 449227003
+Test: CtsInputMethodTestCases:{InputMethodRegistrationTest,InputMethodInfoTest}
+Test: InputMethodCoreTests
+Flag: EXEMPT BUGFIX
+Change-Id: Ied64a9f018fd3e79cfc51ccd82d361b43e5f29dc
+(cherry picked from commit 1d68a1099be2b99e8410dad01822851287994682)
+---
+ .../IInputMethodManagerGlobalInvoker.java     |   6 +-
+ .../inputmethod/AbstractSafeList.java         | 127 +++++++++++++++++
+ .../inputmethod/InputMethodInfoSafeList.java  | 105 +++-----------
+ .../InputMethodSubtypeSafeList.aidl           |  19 +++
+ .../InputMethodSubtypeSafeList.java           |  87 ++++++++++++
+ .../internal/view/IInputMethodManager.aidl    |   3 +-
+ .../inputmethod/AbstractSafeListTest.java     |  98 ++++++++++++++
+ .../InputMethodSubtypeSafeListTest.java       | 128 ++++++++++++++++++
+ .../inputmethod/IInputMethodManagerImpl.java  |   7 +-
+ .../InputMethodManagerService.java            |  13 +-
+ .../server/inputmethod/ZeroJankProxy.java     |   4 +-
+ 11 files changed, 497 insertions(+), 100 deletions(-)
+ create mode 100644 core/java/com/android/internal/inputmethod/AbstractSafeList.java
+ create mode 100644 core/java/com/android/internal/inputmethod/InputMethodSubtypeSafeList.aidl
+ create mode 100644 core/java/com/android/internal/inputmethod/InputMethodSubtypeSafeList.java
+ create mode 100644 core/tests/InputMethodCoreTests/src/com/android/internal/inputmethod/AbstractSafeListTest.java
+ create mode 100644 core/tests/InputMethodCoreTests/src/com/android/internal/inputmethod/InputMethodSubtypeSafeListTest.java
+
+diff --git a/core/java/android/view/inputmethod/IInputMethodManagerGlobalInvoker.java b/core/java/android/view/inputmethod/IInputMethodManagerGlobalInvoker.java
+index 290885593ee6..6fbb76577fb8 100644
+--- a/core/java/android/view/inputmethod/IInputMethodManagerGlobalInvoker.java
++++ b/core/java/android/view/inputmethod/IInputMethodManagerGlobalInvoker.java
+@@ -43,6 +43,7 @@ import com.android.internal.inputmethod.IRemoteAccessibilityInputConnection;
+ import com.android.internal.inputmethod.IRemoteInputConnection;
+ import com.android.internal.inputmethod.InputBindResult;
+ import com.android.internal.inputmethod.InputMethodInfoSafeList;
++import com.android.internal.inputmethod.InputMethodSubtypeSafeList;
+ import com.android.internal.inputmethod.SoftInputShowHideReason;
+ import com.android.internal.inputmethod.StartInputFlags;
+ import com.android.internal.inputmethod.StartInputReason;
+@@ -297,8 +298,9 @@ final class IInputMethodManagerGlobalInvoker {
+             return new ArrayList<>();
+         }
+         try {
+-            return service.getEnabledInputMethodSubtypeList(imiId,
+-                    allowsImplicitlyEnabledSubtypes, userId);
++            return InputMethodSubtypeSafeList.extractFrom(
++                    service.getEnabledInputMethodSubtypeList(imiId,
++                            allowsImplicitlyEnabledSubtypes, userId));
+         } catch (RemoteException e) {
+             throw e.rethrowFromSystemServer();
+         }
+diff --git a/core/java/com/android/internal/inputmethod/AbstractSafeList.java b/core/java/com/android/internal/inputmethod/AbstractSafeList.java
+new file mode 100644
+index 000000000000..697b153afecf
+--- /dev/null
++++ b/core/java/com/android/internal/inputmethod/AbstractSafeList.java
+@@ -0,0 +1,127 @@
++/*
++ * Copyright 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.internal.inputmethod;
++
++import android.annotation.NonNull;
++import android.annotation.Nullable;
++import android.os.Parcel;
++import android.os.Parcelable;
++
++import com.android.internal.annotations.VisibleForTesting;
++
++import java.util.ArrayList;
++import java.util.List;
++
++/**
++ * An abstract base class for creating a {@link Parcelable} container that can hold an arbitrary
++ * number of {@link Parcelable} objects without worrying about
++ * {@link android.os.TransactionTooLargeException}.
++ *
++ * @see Parcel#readBlob()
++ * @see Parcel#writeBlob(byte[])
++ *
++ * @param <T> The type of the {@link Parcelable} objects.
++ */
++public abstract class AbstractSafeList<T extends Parcelable> implements Parcelable {
++    @Nullable
++    private byte[] mBuffer;
++
++    protected AbstractSafeList(@Nullable List<T> list) {
++        if (list != null && !list.isEmpty()) {
++            mBuffer = marshall(list);
++        }
++    }
++
++    protected AbstractSafeList(@Nullable byte[] buffer) {
++        mBuffer = buffer;
++    }
++
++    /**
++     * Extracts the list of {@link Parcelable} objects from a {@link AbstractSafeList}, and
++     * clears the internal buffer of the list.
++     *
++     * @param from The {@link AbstractSafeList} to extract from.
++     * @param creator The {@link Parcelable.Creator} for the {@link Parcelable} objects.
++     * @param <T> The type of the {@link Parcelable} objects.
++     * @return The list of {@link Parcelable} objects.
++     */
++    @NonNull
++    protected static <T extends Parcelable> List<T> extractFrom(
++            @Nullable AbstractSafeList<T> from, @NonNull Parcelable.Creator<T> creator) {
++        if (from == null) {
++            return new ArrayList<>();
++        }
++        final byte[] buf = from.mBuffer;
++        from.mBuffer = null;
++        if (buf != null) {
++            final List<T> list = unmarshall(buf, creator);
++            if (list != null) {
++                return list;
++            }
++        }
++        return new ArrayList<>();
++    }
++
++    @Override
++    public int describeContents() {
++        // As long as the parcelled classes return 0, we can also return 0 here.
++        return 0;
++    }
++
++    @Override
++    public void writeToParcel(@NonNull Parcel dest, int flags) {
++        dest.writeBlob(mBuffer);
++    }
++
++    /**
++     * Marshalls a list of {@link Parcelable} objects into a byte array.
++     */
++    @Nullable
++    @VisibleForTesting
++    public static <T extends Parcelable> byte[] marshall(@NonNull List<T> list) {
++        Parcel parcel = null;
++        try {
++            parcel = Parcel.obtain();
++            parcel.writeTypedList(list);
++            return parcel.marshall();
++        } finally {
++            if (parcel != null) {
++                parcel.recycle();
++            }
++        }
++    }
++
++    /**
++     * Unmarshalls a byte array into a list of {@link Parcelable} objects.
++     */
++    @Nullable
++    @VisibleForTesting
++    public static <T extends Parcelable> List<T> unmarshall(
++            @NonNull byte[] data, @NonNull Parcelable.Creator<T> creator) {
++        Parcel parcel = null;
++        try {
++            parcel = Parcel.obtain();
++            parcel.unmarshall(data, 0, data.length);
++            parcel.setDataPosition(0);
++            return parcel.createTypedArrayList(creator);
++        } finally {
++            if (parcel != null) {
++                parcel.recycle();
++            }
++        }
++    }
++}
+diff --git a/core/java/com/android/internal/inputmethod/InputMethodInfoSafeList.java b/core/java/com/android/internal/inputmethod/InputMethodInfoSafeList.java
+index 9e720fb6ccee..a2ea5b08f13f 100644
+--- a/core/java/com/android/internal/inputmethod/InputMethodInfoSafeList.java
++++ b/core/java/com/android/internal/inputmethod/InputMethodInfoSafeList.java
+@@ -19,24 +19,24 @@ package com.android.internal.inputmethod;
+ import android.annotation.NonNull;
+ import android.annotation.Nullable;
+ import android.os.Parcel;
+-import android.os.Parcelable;
+ import android.view.inputmethod.InputMethodInfo;
+ 
+-import java.util.ArrayList;
+-import java.util.Arrays;
+ import java.util.List;
+ 
+ /**
+- * A {@link Parcelable} container that can holds an arbitrary number of {@link InputMethodInfo}
+- * without worrying about {@link android.os.TransactionTooLargeException} when passing across
+- * process boundary.
+- *
+- * @see Parcel#readBlob()
+- * @see Parcel#writeBlob(byte[])
++ * A {@link android.os.Parcelable} container that can hold an arbitrary number of
++ * {@link InputMethodInfo} without worrying about
++ * {@link android.os.TransactionTooLargeException} when passing across process boundary.
+  */
+-public final class InputMethodInfoSafeList implements Parcelable {
+-    @Nullable
+-    private byte[] mBuffer;
++public final class InputMethodInfoSafeList extends AbstractSafeList<InputMethodInfo> {
++
++    private InputMethodInfoSafeList(@Nullable byte[] buffer) {
++        super(buffer);
++    }
++
++    private InputMethodInfoSafeList(@Nullable List<InputMethodInfo> list) {
++        super(list);
++    }
+ 
+     /**
+      * Instantiates a list of {@link InputMethodInfo} from the given {@link InputMethodInfoSafeList}
+@@ -53,81 +53,20 @@ public final class InputMethodInfoSafeList implements Parcelable {
+      */
+     @NonNull
+     public static List<InputMethodInfo> extractFrom(@Nullable InputMethodInfoSafeList from) {
+-        final byte[] buf = from.mBuffer;
+-        from.mBuffer = null;
+-        if (buf != null) {
+-            final InputMethodInfo[] array = unmarshall(buf);
+-            if (array != null) {
+-                return new ArrayList<>(Arrays.asList(array));
+-            }
+-        }
+-        return new ArrayList<>();
+-    }
+-
+-    @NonNull
+-    private static InputMethodInfo[] toArray(@Nullable List<InputMethodInfo> original) {
+-        if (original == null) {
+-            return new InputMethodInfo[0];
+-        }
+-        return original.toArray(new InputMethodInfo[0]);
+-    }
+-
+-    @Nullable
+-    private static byte[] marshall(@NonNull InputMethodInfo[] array) {
+-        Parcel parcel = null;
+-        try {
+-            parcel = Parcel.obtain();
+-            parcel.writeTypedArray(array, 0);
+-            return parcel.marshall();
+-        } finally {
+-            if (parcel != null) {
+-                parcel.recycle();
+-            }
+-        }
+-    }
+-
+-    @Nullable
+-    private static InputMethodInfo[] unmarshall(byte[] data) {
+-        Parcel parcel = null;
+-        try {
+-            parcel = Parcel.obtain();
+-            parcel.unmarshall(data, 0, data.length);
+-            parcel.setDataPosition(0);
+-            return parcel.createTypedArray(InputMethodInfo.CREATOR);
+-        } finally {
+-            if (parcel != null) {
+-                parcel.recycle();
+-            }
+-        }
+-    }
+-
+-    private InputMethodInfoSafeList(@Nullable byte[] blob) {
+-        mBuffer = blob;
++        return AbstractSafeList.extractFrom(from, InputMethodInfo.CREATOR);
+     }
+ 
+     /**
+      * Instantiates {@link InputMethodInfoSafeList} from the given list of {@link InputMethodInfo}.
+      *
+      * @param list list of {@link InputMethodInfo} from which {@link InputMethodInfoSafeList} will
+-     *             be created
++     *             be created. Giving {@code null} will result in an empty
++     *             {@link InputMethodInfoSafeList}.
+      * @return {@link InputMethodInfoSafeList} that stores the given list of {@link InputMethodInfo}
+      */
+     @NonNull
+     public static InputMethodInfoSafeList create(@Nullable List<InputMethodInfo> list) {
+-        if (list == null || list.isEmpty()) {
+-            return empty();
+-        }
+-        return new InputMethodInfoSafeList(marshall(toArray(list)));
+-    }
+-
+-    /**
+-     * Creates an empty {@link InputMethodInfoSafeList}.
+-     *
+-     * @return {@link InputMethodInfoSafeList} that is empty
+-     */
+-    @NonNull
+-    public static InputMethodInfoSafeList empty() {
+-        return new InputMethodInfoSafeList(null);
++        return new InputMethodInfoSafeList(list);
+     }
+ 
+     public static final Creator<InputMethodInfoSafeList> CREATOR = new Creator<>() {
+@@ -141,16 +80,4 @@ public final class InputMethodInfoSafeList implements Parcelable {
+             return new InputMethodInfoSafeList[size];
+         }
+     };
+-
+-    @Override
+-    public int describeContents() {
+-        // As long as InputMethodInfo#describeContents() is guaranteed to return 0, we can always
+-        // return 0 here.
+-        return 0;
+-    }
+-
+-    @Override
+-    public void writeToParcel(Parcel dest, int flags) {
+-        dest.writeBlob(mBuffer);
+-    }
+ }
+diff --git a/core/java/com/android/internal/inputmethod/InputMethodSubtypeSafeList.aidl b/core/java/com/android/internal/inputmethod/InputMethodSubtypeSafeList.aidl
+new file mode 100644
+index 000000000000..11000632eba5
+--- /dev/null
++++ b/core/java/com/android/internal/inputmethod/InputMethodSubtypeSafeList.aidl
+@@ -0,0 +1,19 @@
++/*
++ * Copyright 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.internal.inputmethod;
++
++parcelable InputMethodSubtypeSafeList;
+diff --git a/core/java/com/android/internal/inputmethod/InputMethodSubtypeSafeList.java b/core/java/com/android/internal/inputmethod/InputMethodSubtypeSafeList.java
+new file mode 100644
+index 000000000000..cd95088f5cf0
+--- /dev/null
++++ b/core/java/com/android/internal/inputmethod/InputMethodSubtypeSafeList.java
+@@ -0,0 +1,87 @@
++/*
++ * Copyright 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.internal.inputmethod;
++
++import android.annotation.NonNull;
++import android.annotation.Nullable;
++import android.os.Parcel;
++import android.view.inputmethod.InputMethodSubtype;
++
++import java.util.List;
++
++/**
++ * A {@link android.os.Parcelable} container that can hold an arbitrary number of
++ * {@link InputMethodSubtype} without worrying about
++ * {@link android.os.TransactionTooLargeException} when passing across process boundary.
++ */
++public final class InputMethodSubtypeSafeList extends AbstractSafeList<InputMethodSubtype> {
++
++    private InputMethodSubtypeSafeList(@Nullable byte[] buffer) {
++        super(buffer);
++    }
++
++    private InputMethodSubtypeSafeList(@Nullable List<InputMethodSubtype> list) {
++        super(list);
++    }
++
++    /**
++     * Instantiates a list of {@link InputMethodSubtype} from the given
++     * {@link InputMethodSubtypeSafeList} then clears the internal buffer of
++     * {@link InputMethodSubtypeSafeList}.
++     *
++     * <p>Note that each {@link InputMethodSubtype} item is guaranteed to be a copy of the original
++     * {@link InputMethodSubtype} object.</p>
++     *
++     * <p>Any subsequent call will return an empty list.</p>
++     *
++     * @param from {@link InputMethodSubtypeSafeList} from which the list of
++     *             {@link InputMethodSubtype} will be extracted
++     * @return list of {@link InputMethodSubtype} stored in the given
++     *         {@link InputMethodSubtypeSafeList}
++     */
++    @NonNull
++    public static List<InputMethodSubtype> extractFrom(@Nullable InputMethodSubtypeSafeList from) {
++        return AbstractSafeList.extractFrom(from, InputMethodSubtype.CREATOR);
++    }
++
++    /**
++     * Instantiates {@link InputMethodSubtypeSafeList} from the given list of
++     * {@link InputMethodSubtype}.
++     *
++     * @param list list of {@link InputMethodSubtype} from which
++     *             {@link InputMethodSubtypeSafeList} will be created. Giving {@code null} will
++     *             result in an empty {@link InputMethodSubtypeSafeList}.
++     * @return {@link InputMethodSubtypeSafeList} that stores the given list of
++     *         {@link InputMethodSubtype}
++     */
++    @NonNull
++    public static InputMethodSubtypeSafeList create(@Nullable List<InputMethodSubtype> list) {
++        return new InputMethodSubtypeSafeList(list);
++    }
++
++    public static final Creator<InputMethodSubtypeSafeList> CREATOR = new Creator<>() {
++        @Override
++        public InputMethodSubtypeSafeList createFromParcel(Parcel in) {
++            return new InputMethodSubtypeSafeList(in.readBlob());
++        }
++
++        @Override
++        public InputMethodSubtypeSafeList[] newArray(int size) {
++            return new InputMethodSubtypeSafeList[size];
++        }
++    };
++}
+diff --git a/core/java/com/android/internal/view/IInputMethodManager.aidl b/core/java/com/android/internal/view/IInputMethodManager.aidl
+index 0791612fa0e8..d9b52404724e 100644
+--- a/core/java/com/android/internal/view/IInputMethodManager.aidl
++++ b/core/java/com/android/internal/view/IInputMethodManager.aidl
+@@ -32,6 +32,7 @@ import com.android.internal.inputmethod.IRemoteAccessibilityInputConnection;
+ import com.android.internal.inputmethod.IRemoteInputConnection;
+ import com.android.internal.inputmethod.InputBindResult;
+ import com.android.internal.inputmethod.InputMethodInfoSafeList;
++import com.android.internal.inputmethod.InputMethodSubtypeSafeList;
+ 
+ /**
+  * Public interface to the global input method manager, used by all client applications.
+@@ -67,7 +68,7 @@ interface IInputMethodManager {
+ 
+     @JavaPassthrough(annotation="@android.annotation.RequiresPermission(value = "
+             + "android.Manifest.permission.INTERACT_ACROSS_USERS_FULL, conditional = true)")
+-    List<InputMethodSubtype> getEnabledInputMethodSubtypeList(in @nullable String imiId,
++    InputMethodSubtypeSafeList getEnabledInputMethodSubtypeList(in @nullable String imiId,
+             boolean allowsImplicitlyEnabledSubtypes, int userId);
+ 
+     @JavaPassthrough(annotation="@android.annotation.RequiresPermission(value = "
+diff --git a/core/tests/InputMethodCoreTests/src/com/android/internal/inputmethod/AbstractSafeListTest.java b/core/tests/InputMethodCoreTests/src/com/android/internal/inputmethod/AbstractSafeListTest.java
+new file mode 100644
+index 000000000000..0f72f095dbe3
+--- /dev/null
++++ b/core/tests/InputMethodCoreTests/src/com/android/internal/inputmethod/AbstractSafeListTest.java
+@@ -0,0 +1,98 @@
++/*
++ * Copyright 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.internal.inputmethod;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertNotNull;
++
++import android.os.Parcel;
++import android.os.Parcelable;
++import android.platform.test.annotations.Presubmit;
++
++import androidx.test.ext.junit.runners.AndroidJUnit4;
++import androidx.test.filters.SmallTest;
++
++import org.junit.Test;
++import org.junit.runner.RunWith;
++
++import java.util.List;
++
++@SmallTest
++@Presubmit
++@RunWith(AndroidJUnit4.class)
++public class AbstractSafeListTest {
++
++    private static class TestParcelable implements Parcelable {
++        final int mData;
++
++        TestParcelable(int data) {
++            mData = data;
++        }
++
++        TestParcelable(Parcel parcel) {
++            mData = parcel.readInt();
++        }
++
++        @Override
++        public void writeToParcel(Parcel parcel, int flags) {
++            parcel.writeInt(mData);
++        }
++
++        @Override
++        public int describeContents() {
++            return 0;
++        }
++
++        @SuppressWarnings("EffectivelyPrivate") // Parcelable must have CREATOR.
++        public static final Creator<TestParcelable> CREATOR = new Creator<TestParcelable>() {
++            @Override
++            public TestParcelable createFromParcel(Parcel parcel) {
++                return new TestParcelable(parcel);
++            }
++
++            @Override
++            public TestParcelable[] newArray(int size) {
++                return new TestParcelable[size];
++            }
++        };
++    }
++
++    @Test
++    public void testMarshallThenUnmarshall() {
++        List<TestParcelable> originalArray = List.of(new TestParcelable(1), new TestParcelable(2));
++        byte[] marshalled = AbstractSafeList.marshall(originalArray);
++        assertNotNull(marshalled);
++        List<TestParcelable> unmarshalled =
++                AbstractSafeList.unmarshall(marshalled, TestParcelable.CREATOR);
++        assertNotNull(unmarshalled);
++        assertEquals(originalArray.size(), unmarshalled.size());
++        for (int i = 0; i < originalArray.size(); i++) {
++            assertEquals(originalArray.get(i).mData, unmarshalled.get(i).mData);
++        }
++    }
++
++    @Test
++    public void testMarshallEmptyArray() {
++        List<TestParcelable> originalArray = List.of();
++        byte[] marshalled = AbstractSafeList.marshall(originalArray);
++        assertNotNull(marshalled);
++        List<TestParcelable> unmarshalled =
++                AbstractSafeList.unmarshall(marshalled, TestParcelable.CREATOR);
++        assertNotNull(unmarshalled);
++        assertEquals(0, unmarshalled.size());
++    }
++}
+diff --git a/core/tests/InputMethodCoreTests/src/com/android/internal/inputmethod/InputMethodSubtypeSafeListTest.java b/core/tests/InputMethodCoreTests/src/com/android/internal/inputmethod/InputMethodSubtypeSafeListTest.java
+new file mode 100644
+index 000000000000..089ffb80d7a9
+--- /dev/null
++++ b/core/tests/InputMethodCoreTests/src/com/android/internal/inputmethod/InputMethodSubtypeSafeListTest.java
+@@ -0,0 +1,128 @@
++/*
++ * Copyright 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.internal.inputmethod;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertNotNull;
++import static org.junit.Assert.assertNotSame;
++import static org.junit.Assert.assertTrue;
++
++import android.os.Parcel;
++import android.platform.test.annotations.Presubmit;
++import android.view.inputmethod.InputMethodSubtype;
++
++import androidx.test.ext.junit.runners.AndroidJUnit4;
++import androidx.test.filters.SmallTest;
++
++import org.junit.Test;
++import org.junit.runner.RunWith;
++
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.List;
++import java.util.function.Function;
++
++@SmallTest
++@Presubmit
++@RunWith(AndroidJUnit4.class)
++public class InputMethodSubtypeSafeListTest {
++
++    private static InputMethodSubtype createFakeInputMethodSubtype(String locale, String mode) {
++        return new InputMethodSubtype.InputMethodSubtypeBuilder()
++                .setSubtypeLocale(locale)
++                .setSubtypeMode(mode)
++                .build();
++    }
++
++    private static List<InputMethodSubtype> createTestInputMethodSubtypeList() {
++        List<InputMethodSubtype> list = new ArrayList<>();
++        list.add(createFakeInputMethodSubtype("en_US", "keyboard"));
++        list.add(createFakeInputMethodSubtype("ja_JP", "keyboard"));
++        list.add(createFakeInputMethodSubtype("en_GB", "voice"));
++        return list;
++    }
++
++    private static void assertItemsAfterExtract(
++            List<InputMethodSubtype> originals,
++            Function<List<InputMethodSubtype>, InputMethodSubtypeSafeList> factory) {
++        InputMethodSubtypeSafeList list = factory.apply(originals);
++        List<InputMethodSubtype> extracted = InputMethodSubtypeSafeList.extractFrom(list);
++        assertEquals(originals.size(), extracted.size());
++        for (int i = 0; i < originals.size(); i++) {
++            assertNotSame(
++                    "InputMethodSubtypeSafeList.extractFrom() must clone each instance",
++                    originals.get(i), extracted.get(i));
++            assertEquals(
++                    "Verify the cloned instances have the equal locale",
++                    originals.get(i).getLocale(), extracted.get(i).getLocale());
++            assertEquals(
++                    "Verify the cloned instances have the equal mode",
++                    originals.get(i).getMode(), extracted.get(i).getMode());
++        }
++
++        // Subsequent calls of InputMethodSubtypeSafeList.extractFrom() return an empty list.
++        List<InputMethodSubtype> extracted2 = InputMethodSubtypeSafeList.extractFrom(list);
++        assertTrue(extracted2.isEmpty());
++    }
++
++    private static InputMethodSubtypeSafeList cloneViaParcel(InputMethodSubtypeSafeList original) {
++        Parcel parcel = null;
++        try {
++            parcel = Parcel.obtain();
++            original.writeToParcel(parcel, 0);
++            parcel.setDataPosition(0);
++            InputMethodSubtypeSafeList newInstance =
++                    InputMethodSubtypeSafeList.CREATOR.createFromParcel(parcel);
++            assertNotNull(newInstance);
++            return newInstance;
++        } finally {
++            if (parcel != null) {
++                parcel.recycle();
++            }
++        }
++    }
++
++    @Test
++    public void testCreate() {
++        assertNotNull(InputMethodSubtypeSafeList.create(createTestInputMethodSubtypeList()));
++    }
++
++    @Test
++    public void testExtract() {
++        assertItemsAfterExtract(
++                createTestInputMethodSubtypeList(),
++                InputMethodSubtypeSafeList::create);
++    }
++
++    @Test
++    public void testExtractAfterParceling() {
++        assertItemsAfterExtract(
++                createTestInputMethodSubtypeList(),
++                originals -> cloneViaParcel(InputMethodSubtypeSafeList.create(originals)));
++    }
++
++    @Test
++    public void testExtractEmptyList() {
++        assertItemsAfterExtract(Collections.emptyList(), InputMethodSubtypeSafeList::create);
++    }
++
++    @Test
++    public void testExtractAfterParcelingEmptyList() {
++        assertItemsAfterExtract(Collections.emptyList(),
++                originals -> cloneViaParcel(InputMethodSubtypeSafeList.create(originals)));
++    }
++}
+diff --git a/services/core/java/com/android/server/inputmethod/IInputMethodManagerImpl.java b/services/core/java/com/android/server/inputmethod/IInputMethodManagerImpl.java
+index 15f186b047f2..7845a73111d6 100644
+--- a/services/core/java/com/android/server/inputmethod/IInputMethodManagerImpl.java
++++ b/services/core/java/com/android/server/inputmethod/IInputMethodManagerImpl.java
+@@ -48,6 +48,7 @@ import com.android.internal.inputmethod.IRemoteAccessibilityInputConnection;
+ import com.android.internal.inputmethod.IRemoteInputConnection;
+ import com.android.internal.inputmethod.InputBindResult;
+ import com.android.internal.inputmethod.InputMethodInfoSafeList;
++import com.android.internal.inputmethod.InputMethodSubtypeSafeList;
+ import com.android.internal.inputmethod.SoftInputShowHideReason;
+ import com.android.internal.inputmethod.StartInputFlags;
+ import com.android.internal.inputmethod.StartInputReason;
+@@ -108,7 +109,8 @@ final class IInputMethodManagerImpl extends IInputMethodManager.Stub {
+         @NonNull
+         List<InputMethodInfo> getEnabledInputMethodListLegacy(@UserIdInt int userId);
+ 
+-        List<InputMethodSubtype> getEnabledInputMethodSubtypeList(String imiId,
++        @NonNull
++        InputMethodSubtypeSafeList getEnabledInputMethodSubtypeList(String imiId,
+                 boolean allowsImplicitlyEnabledSubtypes, @UserIdInt int userId);
+ 
+         InputMethodSubtype getLastInputMethodSubtype(@UserIdInt int userId);
+@@ -278,8 +280,9 @@ final class IInputMethodManagerImpl extends IInputMethodManager.Stub {
+         return mCallback.getEnabledInputMethodListLegacy(userId);
+     }
+ 
++    @NonNull
+     @Override
+-    public List<InputMethodSubtype> getEnabledInputMethodSubtypeList(String imiId,
++    public InputMethodSubtypeSafeList getEnabledInputMethodSubtypeList(String imiId,
+             boolean allowsImplicitlyEnabledSubtypes, @UserIdInt int userId) {
+         return mCallback.getEnabledInputMethodSubtypeList(imiId, allowsImplicitlyEnabledSubtypes,
+                 userId);
+diff --git a/services/core/java/com/android/server/inputmethod/InputMethodManagerService.java b/services/core/java/com/android/server/inputmethod/InputMethodManagerService.java
+index 5e3224d1012e..7df43d114906 100644
+--- a/services/core/java/com/android/server/inputmethod/InputMethodManagerService.java
++++ b/services/core/java/com/android/server/inputmethod/InputMethodManagerService.java
+@@ -172,6 +172,7 @@ import com.android.internal.inputmethod.InputMethodDebug;
+ import com.android.internal.inputmethod.InputMethodInfoSafeList;
+ import com.android.internal.inputmethod.InputMethodNavButtonFlags;
+ import com.android.internal.inputmethod.InputMethodSubtypeHandle;
++import com.android.internal.inputmethod.InputMethodSubtypeSafeList;
+ import com.android.internal.inputmethod.SoftInputShowHideReason;
+ import com.android.internal.inputmethod.StartInputFlags;
+ import com.android.internal.inputmethod.StartInputReason;
+@@ -1590,7 +1591,7 @@ public final class InputMethodManagerService implements IInputMethodManagerImpl.
+                     Manifest.permission.INTERACT_ACROSS_USERS_FULL, null);
+         }
+         if (!mUserManagerInternal.exists(userId)) {
+-            return InputMethodInfoSafeList.empty();
++            return InputMethodInfoSafeList.create(null);
+         }
+         final int callingUid = Binder.getCallingUid();
+         final long ident = Binder.clearCallingIdentity();
+@@ -1611,7 +1612,7 @@ public final class InputMethodManagerService implements IInputMethodManagerImpl.
+                     Manifest.permission.INTERACT_ACROSS_USERS_FULL, null);
+         }
+         if (!mUserManagerInternal.exists(userId)) {
+-            return InputMethodInfoSafeList.empty();
++            return InputMethodInfoSafeList.create(null);
+         }
+         final int callingUid = Binder.getCallingUid();
+         final long ident = Binder.clearCallingIdentity();
+@@ -1738,8 +1739,9 @@ public final class InputMethodManagerService implements IInputMethodManagerImpl.
+      *                                        subtypes
+      * @param userId                          the user ID to be queried about
+      */
++    @NonNull
+     @Override
+-    public List<InputMethodSubtype> getEnabledInputMethodSubtypeList(String imiId,
++    public InputMethodSubtypeSafeList getEnabledInputMethodSubtypeList(String imiId,
+             boolean allowsImplicitlyEnabledSubtypes, @UserIdInt int userId) {
+         if (UserHandle.getCallingUserId() != userId) {
+             mContext.enforceCallingOrSelfPermission(
+@@ -1749,8 +1751,9 @@ public final class InputMethodManagerService implements IInputMethodManagerImpl.
+         final int callingUid = Binder.getCallingUid();
+         final long ident = Binder.clearCallingIdentity();
+         try {
+-            return getEnabledInputMethodSubtypeListInternal(imiId,
+-                    allowsImplicitlyEnabledSubtypes, userId, callingUid);
++            return InputMethodSubtypeSafeList.create(
++                    getEnabledInputMethodSubtypeListInternal(imiId,
++                        allowsImplicitlyEnabledSubtypes, userId, callingUid));
+         } finally {
+             Binder.restoreCallingIdentity(ident);
+         }
+diff --git a/services/core/java/com/android/server/inputmethod/ZeroJankProxy.java b/services/core/java/com/android/server/inputmethod/ZeroJankProxy.java
+index 12c1d9cbb2a1..6a83475fb774 100644
+--- a/services/core/java/com/android/server/inputmethod/ZeroJankProxy.java
++++ b/services/core/java/com/android/server/inputmethod/ZeroJankProxy.java
+@@ -65,6 +65,7 @@ import com.android.internal.inputmethod.IRemoteAccessibilityInputConnection;
+ import com.android.internal.inputmethod.IRemoteInputConnection;
+ import com.android.internal.inputmethod.InputBindResult;
+ import com.android.internal.inputmethod.InputMethodInfoSafeList;
++import com.android.internal.inputmethod.InputMethodSubtypeSafeList;
+ import com.android.internal.inputmethod.SoftInputShowHideReason;
+ import com.android.internal.inputmethod.StartInputFlags;
+ import com.android.internal.inputmethod.StartInputReason;
+@@ -160,8 +161,9 @@ final class ZeroJankProxy implements IInputMethodManagerImpl.Callback {
+         return mInner.getEnabledInputMethodListLegacy(userId);
+     }
+ 
++    @NonNull
+     @Override
+-    public List<InputMethodSubtype> getEnabledInputMethodSubtypeList(String imiId,
++    public InputMethodSubtypeSafeList getEnabledInputMethodSubtypeList(String imiId,
+             boolean allowsImplicitlyEnabledSubtypes, int userId) {
+         return mInner.getEnabledInputMethodSubtypeList(imiId, allowsImplicitlyEnabledSubtypes,
+                 userId);
+-- 
+2.53.0.335.g19a08e0c02-goog
+

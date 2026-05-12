@@ -1,0 +1,132 @@
+From 2d15c462b6d6c47771715990beb976df7146489e Mon Sep 17 00:00:00 2001
+From: Garvita Jain <garvitajain@google.com>
+Date: Tue, 29 Jul 2025 10:59:51 +0000
+Subject: [PATCH] Store calling package uid of create bulk requests for
+ permission checks
+
+Use package info of the create bulk request caller to verify if explicit
+user consent is required and granting uri permission on positive action
+in the PermissionActivity.
+
+BUG: 369105011
+Flag: EXEMPT bugfix
+Test: atest PermissionActivityTest
+(cherry picked from https://googleplex-android-review.googlesource.com/q/commit:96bb34d4348019b7521530b81a5c565a3aacc884)
+Merged-In: Ib3e1601e15bb5fabceb8c1bb0e081c4724da27e2
+Change-Id: Ib3e1601e15bb5fabceb8c1bb0e081c4724da27e2
+---
+ .../providers/media/MediaProvider.java        |  2 ++
+ .../providers/media/PermissionActivity.java   | 28 ++++++++++++++-----
+ 2 files changed, 23 insertions(+), 7 deletions(-)
+
+diff --git a/src/com/android/providers/media/MediaProvider.java b/src/com/android/providers/media/MediaProvider.java
+index 46e961b52..0d75628c5 100644
+--- a/src/com/android/providers/media/MediaProvider.java
++++ b/src/com/android/providers/media/MediaProvider.java
+@@ -31,6 +31,7 @@ import static android.database.Cursor.FIELD_TYPE_BLOB;
+ import static android.provider.CloudMediaProviderContract.EXTRA_ASYNC_CONTENT_PROVIDER;
+ import static android.provider.CloudMediaProviderContract.MANAGE_CLOUD_MEDIA_PROVIDERS_PERMISSION;
+ import static android.provider.CloudMediaProviderContract.METHOD_GET_ASYNC_CONTENT_PROVIDER;
++import static android.provider.MediaStore.EXTRA_CALLING_PACKAGE_UID;
+ import static android.provider.MediaStore.EXTRA_IS_STABLE_URIS_ENABLED;
+ import static android.provider.MediaStore.EXTRA_OPEN_ASSET_FILE_REQUEST;
+ import static android.provider.MediaStore.EXTRA_OPEN_FILE_REQUEST;
+@@ -8384,6 +8385,7 @@ public class MediaProvider extends ContentProvider {
+ 
+         final Context context = getContext();
+         final Intent intent = new Intent(method, null, context, PermissionActivity.class);
++        extras.putInt(EXTRA_CALLING_PACKAGE_UID, getCallingUidOrSelf());
+         intent.putExtras(extras);
+         final ActivityOptions options = ActivityOptions.makeBasic();
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+diff --git a/src/com/android/providers/media/PermissionActivity.java b/src/com/android/providers/media/PermissionActivity.java
+index 5ebe51fa8..9f62a64d6 100644
+--- a/src/com/android/providers/media/PermissionActivity.java
++++ b/src/com/android/providers/media/PermissionActivity.java
+@@ -16,6 +16,9 @@
+ 
+ package com.android.providers.media;
+ 
++import static android.os.UserHandle.getUserHandleForUid;
++import static android.provider.MediaStore.EXTRA_CALLING_PACKAGE_UID;
++
+ import static com.android.providers.media.LocalUriMatcher.AUDIO_MEDIA_ID;
+ import static com.android.providers.media.LocalUriMatcher.AUDIO_PLAYLISTS_ID;
+ import static com.android.providers.media.LocalUriMatcher.FILES_ID;
+@@ -58,6 +61,7 @@ import android.os.AsyncTask;
+ import android.os.Build;
+ import android.os.Bundle;
+ import android.os.Handler;
++import android.os.UserHandle;
+ import android.provider.MediaStore;
+ import android.provider.MediaStore.MediaColumns;
+ import android.text.TextUtils;
+@@ -217,14 +221,14 @@ public class PermissionActivity extends Activity {
+                 shouldShowActionDialog = true;
+             } else {
+                 shouldShowActionDialog = shouldShowActionDialog(this, -1 /* pid */, appInfo.uid,
+-                        getCallingPackage(), null /* attributionTag */, verb,
++                        appInfo.packageName, null /* attributionTag */, verb,
+                         mShouldCheckMediaPermissions, mShouldCheckReadAudio, mShouldCheckReadImages,
+                         mShouldCheckReadVideo, mShouldCheckReadAudioOrReadVideo,
+                         isTargetSdkAtLeastT);
+             }
+         } else {
+             shouldShowActionDialog = shouldShowActionDialog(this, -1 /* pid */, appInfo.uid,
+-                    getCallingPackage(), null /* attributionTag */, verb);
++                    appInfo.packageName, null /* attributionTag */, verb);
+         }
+ 
+         if (!shouldShowActionDialog) {
+@@ -388,12 +392,12 @@ public class PermissionActivity extends Activity {
+             protected Void doInBackground(Void... params) {
+                 Log.d(TAG, "User allowed grant for " + uris);
+                 Metrics.logPermissionGranted(volumeName, appInfo.uid,
+-                        getCallingPackage(), uris.size());
++                        appInfo.packageName, uris.size());
+                 try {
+                     switch (getIntent().getAction()) {
+                         case MediaStore.CREATE_WRITE_REQUEST_CALL: {
+                             for (Uri uri : uris) {
+-                                grantUriPermission(getCallingPackage(), uri,
++                                grantUriPermission(appInfo.packageName, uri,
+                                         Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                                 | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                             }
+@@ -460,7 +464,7 @@ public class PermissionActivity extends Activity {
+             @Override
+             protected Void doInBackground(Void... params) {
+                 Log.d(TAG, "User declined request for " + uris);
+-                Metrics.logPermissionDenied(volumeName, appInfo.uid, getCallingPackage(),
++                Metrics.logPermissionDenied(volumeName, appInfo.uid, appInfo.packageName,
+                         1);
+                 return null;
+             }
+@@ -616,12 +620,22 @@ public class PermissionActivity extends Activity {
+      * Resolve the application info of the calling app.
+      */
+     private @NonNull ApplicationInfo resolveCallingAppInfo() throws NameNotFoundException {
+-        final String callingPackage = getCallingPackage();
++        String callingPackage = getCallingPackage();
++        UserHandle userHandle = getUser();
++
++        Bundle extras = getIntent().getExtras();
++        if (extras != null) {
++            int callingUid = extras.getInt(EXTRA_CALLING_PACKAGE_UID);
++            callingPackage = Objects.requireNonNull(
++                    getPackageManager().getPackagesForUid(callingUid))[0];
++            userHandle = getUserHandleForUid(callingUid);
++        }
++
+         if (TextUtils.isEmpty(callingPackage)) {
+             throw new NameNotFoundException("Missing calling package");
+         }
+ 
+-        return getPackageManager().getApplicationInfo(callingPackage, 0);
++        return getPackageManager().getApplicationInfoAsUser(callingPackage, 0, userHandle);
+     }
+ 
+     private @NonNull String resolveVerb() {
+-- 
+2.53.0.335.g19a08e0c02-goog
+

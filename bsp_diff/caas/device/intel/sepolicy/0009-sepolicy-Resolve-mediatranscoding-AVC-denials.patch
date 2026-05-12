@@ -1,0 +1,47 @@
+From 60b43e832508c94701f675b71751d163e4e46e5c Mon Sep 17 00:00:00 2001
+From: preddycx <prashanthx.reddy.chintapally@intel.com>
+Date: Wed, 11 Mar 2026 10:09:39 +0000
+Subject: [PATCH] sepolicy: Resolve mediatranscoding AVC denials
+
+Resolves AVC denials by granting mediatranscoding the necessary
+permissions to discover the media_quality_service and access shared
+graphics allocator buffers for video processing.
+
+avc denial Logs:
+avc: denied { find } for name=media_quality scontext=u:r:mediatranscoding:s0
+tcontext=u:object_r:media_quality_service:s0 tclass=service_manager
+
+avc: denied { read write } for dev="tmpfs" scontext=u:r:mediatranscoding:s0
+tcontext=u:object_r:hal_graphics_allocator_default_tmpfs:s0 tclass=file
+
+avc: denied { map } for dev="tmpfs" scontext=u:r:mediatranscoding:s0
+tcontext=u:object_r:hal_graphics_allocator_default_tmpfs:s0 tclass=file
+
+Tracked-On: NIACP3-1201
+Signed-off-by: preddycx <prashanthx.reddy.chintapally@intel.com>
+---
+ system_ext/public/mediatranscoding.te | 2 +-
+ vendor/mediatranscoding.te            | 1 +
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+ create mode 100644 vendor/mediatranscoding.te
+
+diff --git a/system_ext/public/mediatranscoding.te b/system_ext/public/mediatranscoding.te
+index 82d29f5..1d31be0 100644
+--- a/system_ext/public/mediatranscoding.te
++++ b/system_ext/public/mediatranscoding.te
+@@ -3,4 +3,4 @@ allow mediatranscoding surfaceflinger_service:service_manager find;
+ allow mediatranscoding gpu_device:dir { open read search };
+ allow mediatranscoding gpu_device:chr_file { getattr ioctl map open read write };
+ allow mediatranscoding graphics_device:chr_file { getattr };
+-
++allow mediatranscoding media_quality_service:service_manager find;
+diff --git a/vendor/mediatranscoding.te b/vendor/mediatranscoding.te
+new file mode 100644
+index 0000000..7ecf8f4
+--- /dev/null
++++ b/vendor/mediatranscoding.te
+@@ -0,0 +1 @@
++allow mediatranscoding hal_graphics_allocator_default_tmpfs:file { read write map open };
+-- 
+2.34.1
+

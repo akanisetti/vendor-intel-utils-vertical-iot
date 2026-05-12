@@ -1,0 +1,33 @@
+From c552db42595bc5d472d29a60e09566e59877c33b Mon Sep 17 00:00:00 2001
+From: Ibrahim Yilmaz <iyz@google.com>
+Date: Wed, 21 May 2025 13:16:05 +0000
+Subject: [PATCH] [ENR] Only skip hide sensitive anim for showing public
+
+We don't want to play hide sensitive animation when layout is not changed and mShowingPublic is true. Current code is too aggressive and can cause 0 content alpha.
+
+Bug: 414782247
+Bug: 392614656
+Test: Check hideSensitive animation play and appear animations.
+Flag: EXEMPT trivial bugfix
+Change-Id: Ia417a27dcb7d26609df5629bae9bbba1785983a0
+(cherry picked from commit e93d4b015c283e55cb08d68a499aab41f03e1272)
+---
+ .../statusbar/notification/row/ExpandableNotificationRow.java   | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/ExpandableNotificationRow.java b/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/ExpandableNotificationRow.java
+index 3fed78674cf9..fcafa448bed8 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/ExpandableNotificationRow.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/ExpandableNotificationRow.java
+@@ -3531,7 +3531,7 @@ public class ExpandableNotificationRow extends ActivatableNotificationView
+         }
+ 
+         final boolean shouldSkipHideSensitiveAnimation =
+-                Flags.skipHideSensitiveNotifAnimation() && isShowingLayoutNotChanged;
++                mShowingPublic && isShowingLayoutNotChanged;
+         if (!animated || shouldSkipHideSensitiveAnimation) {
+             if (!NotificationContentAlphaOptimization.isEnabled()
+                     || mShowingPublic != oldShowingPublic) {
+-- 
+2.53.0.335.g19a08e0c02-goog
+

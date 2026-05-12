@@ -1,0 +1,33 @@
+From d8c26fe8668b5f6d1e86dfa0c31dab66df5acda1 Mon Sep 17 00:00:00 2001
+From: preddycx <prashanthx.reddy.chintapally@intel.com>
+Date: Mon, 13 Apr 2026 11:28:22 +0000
+Subject: [PATCH] media: Update c2.intel.hevc.encoder minimum resolution to
+ 176x144
+
+This change fixes CTS failures in CtsMediaV2TestCases where the
+CodecEncoderTest fails because the encoder reported a minimum width
+of 176 and minimum height of 176, causing an AssertionError when
+the test attempts to encode a 176x144 stream.
+
+Tracked-On: NIACP3-1184
+Signed-off-by: preddycx <prashanthx.reddy.chintapally@intel.com>
+---
+ groups/codec2/true/media_codecs_intel_c2_video.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/groups/codec2/true/media_codecs_intel_c2_video.xml b/groups/codec2/true/media_codecs_intel_c2_video.xml
+index e0cb20a7..9cc167d8 100644
+--- a/groups/codec2/true/media_codecs_intel_c2_video.xml
++++ b/groups/codec2/true/media_codecs_intel_c2_video.xml
+@@ -169,7 +169,7 @@ and updated to vendor media codecs.
+ 
+ {{#hw_ve_h265}}
+         <MediaCodec name="c2.intel.hevc.encoder" type="video/hevc" >
+-            <Limit name="size" min="176x176" max="8192x8192" />
++            <Limit name="size" min="176x144" max="8192x8192" />
+             <Limit name="alignment" value="2x2" />
+             <Limit name="block-size" value="16x16" />
+             <Limit name="block-count" range="1-262144" />
+-- 
+2.34.1
+

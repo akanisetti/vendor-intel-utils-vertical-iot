@@ -1,0 +1,37 @@
+From f3fecb02978030ae4066235cbe638250996b6a9a Mon Sep 17 00:00:00 2001
+From: Alec Mouri <alecmouri@google.com>
+Date: Wed, 5 Nov 2025 21:29:10 +0000
+Subject: [PATCH] Clip to layer bounds when drawing blur regions
+
+Otherwise blurs can "escape" layer bounds. This would make 1-2
+pixel-large layers fill the entire screen if the blur region is
+appropriately crafted, which is not great.
+
+Bug: 455563813
+Flag: EXEMPT CVE_FIX
+Test: PoC app
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:123f8fec995a3103acbc3a1191b9cef71523e013
+Merged-In: If59833f2d5060f5f81395d602e2dcb369a10fdbb
+Change-Id: If59833f2d5060f5f81395d602e2dcb369a10fdbb
+---
+ libs/renderengine/skia/SkiaRenderEngine.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libs/renderengine/skia/SkiaRenderEngine.cpp b/libs/renderengine/skia/SkiaRenderEngine.cpp
+index 5b6edb4e30..46c58b0c27 100644
+--- a/libs/renderengine/skia/SkiaRenderEngine.cpp
++++ b/libs/renderengine/skia/SkiaRenderEngine.cpp
+@@ -907,6 +907,10 @@ void SkiaRenderEngine::drawLayersInternal(
+             SkAutoCanvasRestore acr(canvas, true);
+             if (!roundRectClip.isEmpty()) {
+                 canvas->clipRRect(roundRectClip, true);
++            } else {
++                // We need to clip bounds here since otherwise a client sending a bigger blur region
++                // enables the blur to "escape" the layer bounds which is very bad for security
++                canvas->clipRRect(bounds, true);
+             }
+ 
+             // TODO(b/182216890): Filter out empty layers earlier
+-- 
+2.53.0.335.g19a08e0c02-goog
+

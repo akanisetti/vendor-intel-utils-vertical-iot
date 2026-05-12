@@ -1,0 +1,236 @@
+From 70fe31848f073029cdb38cd6c5fe47f200dd4c78 Mon Sep 17 00:00:00 2001
+From: Julia Reynolds <juliacr@google.com>
+Date: Wed, 12 Nov 2025 12:09:31 -0500
+Subject: [PATCH] Be more strict about content types for message array
+
+Now with fewer class cast exceptions
+
+Test: ConversationNotification
+Test: NotificationManagerServiceTest
+Bug: 433746973
+Flag: EXEMPT BUGFIX
+Change-Id: I3022e010de95f14dcd0d09d123684ee265101e0a
+(cherry picked from commit 71d4afae00c7d6d9238f8ec82303e1e13da50fbb)
+---
+ core/java/android/app/Notification.java       |  18 ++--
+ .../NotificationManagerServiceTest.java       | 101 +++++++++++++++++-
+ 2 files changed, 107 insertions(+), 12 deletions(-)
+
+diff --git a/core/java/android/app/Notification.java b/core/java/android/app/Notification.java
+index 2ed95ab7ad82..b921280da563 100644
+--- a/core/java/android/app/Notification.java
++++ b/core/java/android/app/Notification.java
+@@ -3152,8 +3152,8 @@ public class Notification implements Parcelable
+                 person.visitUris(visitor);
+             }
+ 
+-            final Parcelable[] messages = extras.getParcelableArray(EXTRA_MESSAGES,
+-                    Parcelable.class);
++            final Bundle[] messages =
++                    getParcelableArrayFromBundle(extras, EXTRA_MESSAGES, Bundle.class);
+             if (!ArrayUtils.isEmpty(messages)) {
+                 for (MessagingStyle.Message message : MessagingStyle.Message
+                         .getMessagesFromBundleArray(messages)) {
+@@ -3161,8 +3161,8 @@ public class Notification implements Parcelable
+                 }
+             }
+ 
+-            final Parcelable[] historic = extras.getParcelableArray(EXTRA_HISTORIC_MESSAGES,
+-                    Parcelable.class);
++            final Parcelable[] historic =
++                    getParcelableArrayFromBundle(extras, EXTRA_HISTORIC_MESSAGES, Bundle.class);
+             if (!ArrayUtils.isEmpty(historic)) {
+                 for (MessagingStyle.Message message : MessagingStyle.Message
+                         .getMessagesFromBundleArray(historic)) {
+@@ -8203,8 +8203,8 @@ public class Notification implements Parcelable
+      */
+     public boolean hasImage() {
+         if (isStyle(MessagingStyle.class) && extras != null) {
+-            final Parcelable[] messages = extras.getParcelableArray(EXTRA_MESSAGES,
+-                    Parcelable.class);
++            final Bundle[] messages =
++                    getParcelableArrayFromBundle(extras, EXTRA_MESSAGES, Bundle.class);
+             if (!ArrayUtils.isEmpty(messages)) {
+                 for (MessagingStyle.Message m : MessagingStyle.Message
+                         .getMessagesFromBundleArray(messages)) {
+@@ -9485,10 +9485,10 @@ public class Notification implements Parcelable
+                 mUser = user;
+             }
+             mConversationTitle = extras.getCharSequence(EXTRA_CONVERSATION_TITLE);
+-            Parcelable[] messages = extras.getParcelableArray(EXTRA_MESSAGES, Parcelable.class);
++            Bundle[] messages = getParcelableArrayFromBundle(extras, EXTRA_MESSAGES, Bundle.class);
+             mMessages = Message.getMessagesFromBundleArray(messages);
+-            Parcelable[] histMessages = extras.getParcelableArray(EXTRA_HISTORIC_MESSAGES,
+-                    Parcelable.class);
++            Bundle[] histMessages = getParcelableArrayFromBundle(
++                    extras, EXTRA_HISTORIC_MESSAGES, Bundle.class);
+             mHistoricMessages = Message.getMessagesFromBundleArray(histMessages);
+             mIsGroupConversation = extras.getBoolean(EXTRA_IS_GROUP_CONVERSATION);
+             mUnreadMessageCount = extras.getInt(EXTRA_CONVERSATION_UNREAD_MESSAGE_COUNT);
+diff --git a/services/tests/uiservicestests/src/com/android/server/notification/NotificationManagerServiceTest.java b/services/tests/uiservicestests/src/com/android/server/notification/NotificationManagerServiceTest.java
+index 6edc3b0b7091..851594e7e446 100644
+--- a/services/tests/uiservicestests/src/com/android/server/notification/NotificationManagerServiceTest.java
++++ b/services/tests/uiservicestests/src/com/android/server/notification/NotificationManagerServiceTest.java
+@@ -27,6 +27,8 @@ import static android.app.Flags.FLAG_KEYGUARD_PRIVATE_NOTIFICATIONS;
+ import static android.app.Flags.FLAG_NM_SUMMARIZATION;
+ import static android.app.Flags.FLAG_SORT_SECTION_BY_TIME;
+ import static android.app.Notification.EXTRA_ALLOW_DURING_SETUP;
++import static android.app.Notification.EXTRA_MESSAGES;
++import static android.app.Notification.EXTRA_MESSAGING_PERSON;
+ import static android.app.Notification.EXTRA_PICTURE;
+ import static android.app.Notification.EXTRA_PICTURE_ICON;
+ import static android.app.Notification.EXTRA_TEXT;
+@@ -81,6 +83,7 @@ import static android.app.NotificationManager.Policy.SUPPRESSED_EFFECT_STATUS_BA
+ import static android.app.PendingIntent.FLAG_IMMUTABLE;
+ import static android.app.PendingIntent.FLAG_MUTABLE;
+ import static android.app.PendingIntent.FLAG_ONE_SHOT;
++import static android.app.PendingIntent.FLAG_UPDATE_CURRENT;
+ import static android.app.StatusBarManager.ACTION_KEYGUARD_PRIVATE_NOTIFICATIONS_CHANGED;
+ import static android.app.StatusBarManager.EXTRA_KM_PRIVATE_NOTIFS_ALLOWED;
+ import static android.app.backup.NotificationLoggingConstants.DATA_TYPE_ZEN_CONFIG;
+@@ -235,11 +238,13 @@ import android.companion.ICompanionDeviceManager;
+ import android.compat.testing.PlatformCompatChangeRule;
+ import android.content.BroadcastReceiver;
+ import android.content.ComponentName;
++import android.content.ContentProvider;
+ import android.content.ContentUris;
+ import android.content.Context;
+ import android.content.IIntentSender;
+ import android.content.Intent;
+ import android.content.IntentFilter;
++import android.content.UriPermission;
+ import android.content.pm.ActivityInfo;
+ import android.content.pm.ApplicationInfo;
+ import android.content.pm.IPackageManager;
+@@ -256,6 +261,7 @@ import android.content.pm.VersionedPackage;
+ import android.content.res.Resources;
+ import android.graphics.Bitmap;
+ import android.graphics.Color;
++import android.graphics.Rect;
+ import android.graphics.drawable.Icon;
+ import android.media.AudioAttributes;
+ import android.media.AudioManager;
+@@ -1516,6 +1522,95 @@ public class NotificationManagerServiceTest extends UiServiceTestCase {
+                 captor.getValue().getIntent().getPackage());
+     }
+ 
++    public void testNoUriGrantsForBadMessagesList() throws RemoteException {
++        Uri targetUri = Uri.parse("content://com.android.contacts/display_photo/1");
++
++        // create message person
++        Person person = new Person.Builder()
++                .setName("Name")
++                .setIcon(Icon.createWithContentUri(targetUri))
++                .setKey("user_123")
++                .setBot(false)
++                .build();
++
++        // create MessagingStyle
++        Notification.MessagingStyle messagingStyle = new Notification.MessagingStyle(person)
++                .setConversationTitle("Bug discussion")
++                .setGroupConversation(true)
++                .addMessage("Hi，look my photo", System.currentTimeMillis() - 60000, person)
++                .addMessage("Oho, you used my contacts photo",
++                        System.currentTimeMillis() - 30000, "Friend");
++
++        // create Notification
++        Notification notification = new Notification.Builder(mContext, TEST_CHANNEL_ID)
++                .setSmallIcon(R.drawable.sym_def_app_icon)
++                .setContentTitle("")
++                .setContentText("")
++                .setAutoCancel(true)
++                .setStyle(messagingStyle)
++                .setCategory(Notification.CATEGORY_MESSAGE)
++                .setFlag(Notification.FLAG_GROUP_SUMMARY, true)
++                .build();
++        notification.contentIntent = createPendingIntent("open");
++
++        notification.extras.remove(EXTRA_MESSAGING_PERSON);
++
++        // add BadClipDescription to avoid visitUri check uris in EXTRA_MESSAGES value
++        ArrayList<Parcelable> parcelableArray =
++                new ArrayList<>(List.of(notification.extras.getParcelableArray(EXTRA_MESSAGES)));
++        parcelableArray.add(new MyParceledListSlice());
++        notification.extras.putParcelableArray(
++                EXTRA_MESSAGES, parcelableArray.toArray(new Parcelable[0]));
++        try {
++            mBinderService.enqueueNotificationWithTag(mPkg, mPkg,
++                    "testNoUriGrantsForBadMessagesList",
++                    1, notification, mContext.getUserId());
++            waitForIdle();
++            fail("should have failed to parse messages");
++        } catch (java.lang.ArrayStoreException e) {
++            verify(mUgmInternal, never()).checkGrantUriPermission(
++                    anyInt(), any(), eq(ContentProvider.getUriWithoutUserId(targetUri)),
++                    anyInt(), anyInt());
++        }
++    }
++
++    private class MyParceledListSlice extends Intent {
++        @Override
++        public void writeToParcel(Parcel dest, int i) {
++            Parcel test = Parcel.obtain();
++            test.writeString(this.getClass().getName());
++            int strLength = test.dataSize();
++            test.recycle();
++            dest.setDataPosition(dest.dataPosition() - strLength);
++            dest.writeString("android.content.pm.ParceledListSlice");
++
++            dest.writeInt(1);
++            dest.writeString(UriPermission.class.getName());
++            dest.writeInt(0); // use binder
++            dest.writeStrongBinder(new Binder() {
++                private int callingPid = -1;
++                @Override
++                public boolean onTransact(int code, Parcel data, Parcel reply, int flags)
++                        throws RemoteException {
++                    if (code == 1) {
++                        reply.writeNoException();
++                        reply.writeInt(1);
++                        if (getCallingUid() == 1000 && callingPid == -1) {
++                            reply.writeParcelable(new Rect(), 0);
++                            callingPid = getCallingPid();
++                        } else {
++                            reply.writeInt(-1);
++                            reply.writeInt(-1);
++                            reply.writeLong(0);
++                        }
++                        return true;
++                    }
++                    return super.onTransact(code, data, reply, flags);
++                }
++            });
++        }
++    }
++
+     @Test
+     public void testDefaultAssistant_overrideDefault() {
+         final int userId = mContext.getUserId();
+@@ -8092,7 +8187,7 @@ public class NotificationManagerServiceTest extends UiServiceTestCase {
+         Bundle extras = new Bundle();
+         extras.putParcelable(Notification.EXTRA_AUDIO_CONTENTS_URI, audioContents);
+         extras.putString(Notification.EXTRA_BACKGROUND_IMAGE_URI, backgroundImage.toString());
+-        extras.putParcelable(Notification.EXTRA_MESSAGING_PERSON, person1);
++        extras.putParcelable(EXTRA_MESSAGING_PERSON, person1);
+         extras.putParcelableArrayList(Notification.EXTRA_PEOPLE_LIST,
+                 new ArrayList<>(Arrays.asList(person2, person3)));
+         extras.putParcelableArray(Notification.EXTRA_REMOTE_INPUT_HISTORY_ITEMS,
+@@ -8230,13 +8325,13 @@ public class NotificationManagerServiceTest extends UiServiceTestCase {
+                 .setSmallIcon(android.R.drawable.sym_def_app_icon);
+ 
+         Bundle messagingExtras = new Bundle();
+-        messagingExtras.putParcelable(Notification.EXTRA_MESSAGING_PERSON,
++        messagingExtras.putParcelable(EXTRA_MESSAGING_PERSON,
+                 personWithIcon("content://user"));
+         messagingExtras.putParcelableArray(Notification.EXTRA_HISTORIC_MESSAGES,
+                 new Bundle[] { new Notification.MessagingStyle.Message("Heyhey!",
+                         System.currentTimeMillis() - 100,
+                         personWithIcon("content://historicalMessenger")).toBundle()});
+-        messagingExtras.putParcelableArray(Notification.EXTRA_MESSAGES,
++        messagingExtras.putParcelableArray(EXTRA_MESSAGES,
+                 new Bundle[] { new Notification.MessagingStyle.Message("Are you there?",
+                         System.currentTimeMillis(),
+                         personWithIcon("content://messenger")).toBundle()});
+-- 
+2.53.0.335.g19a08e0c02-goog
+

@@ -1,0 +1,40 @@
+From 13714bcfaff6ef1c16d0aa3d359b1c8bc1859ac3 Mon Sep 17 00:00:00 2001
+From: Evan Chen <evanxinchen@google.com>
+Date: Tue, 18 Nov 2025 22:34:11 +0000
+Subject: [PATCH] Remove any revoked associations after reboot
+
+Test: manually
+Bug: 442392902
+Flag: EXEMPT bugfix
+Change-Id: I94b96d98608d6702e1d3a9581e135280149bf7e1
+---
+ .../server/companion/CompanionDeviceManagerService.java     | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/services/companion/java/com/android/server/companion/CompanionDeviceManagerService.java b/services/companion/java/com/android/server/companion/CompanionDeviceManagerService.java
+index 7ff1ddb7dc79..fdefbc412136 100644
+--- a/services/companion/java/com/android/server/companion/CompanionDeviceManagerService.java
++++ b/services/companion/java/com/android/server/companion/CompanionDeviceManagerService.java
+@@ -33,6 +33,7 @@ import static com.android.internal.util.CollectionUtils.any;
+ import static com.android.internal.util.Preconditions.checkState;
+ import static com.android.server.companion.association.DisassociationProcessor.REASON_API;
+ import static com.android.server.companion.association.DisassociationProcessor.REASON_PKG_DATA_CLEARED;
++import static com.android.server.companion.association.DisassociationProcessor.REASON_REVOKED;
+ import static com.android.server.companion.utils.PackageUtils.enforceUsesCompanionDeviceFeature;
+ import static com.android.server.companion.utils.PackageUtils.isRestrictedSettingsAllowed;
+ import static com.android.server.companion.utils.PermissionsUtils.enforceCallerCanManageAssociationsForPackage;
+@@ -197,6 +198,11 @@ public class CompanionDeviceManagerService extends SystemService {
+         // Init association stores
+         mAssociationStore.refreshCache();
+ 
++        // Remove any revoked associations after reboot.
++        for (AssociationInfo ai : mAssociationStore.getRevokedAssociations()) {
++            mDisassociationProcessor.disassociate(ai.getId(), REASON_REVOKED);
++        }
++
+         // Init UUID store
+         mObservableUuidStore.getObservableUuidsForUser(getContext().getUserId());
+ 
+-- 
+2.53.0.335.g19a08e0c02-goog
+
