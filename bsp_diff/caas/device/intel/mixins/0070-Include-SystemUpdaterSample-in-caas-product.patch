@@ -1,0 +1,30 @@
+From 8d508c0adae3ab89765f25b0c1feca137651e337 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 29 May 2026 13:31:21 +0000
+Subject: [PATCH] Include SystemUpdaterSample in caas product
+
+Add SystemUpdaterSample to caas PRODUCT_PACKAGES so the updater app is
+included in built images.
+
+Tracked-On: NIACP3-1352
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ groups/device-specific/caas/product.mk | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/groups/device-specific/caas/product.mk b/groups/device-specific/caas/product.mk
+index e1ab404f..a5ec26a6 100755
+--- a/groups/device-specific/caas/product.mk
++++ b/groups/device-specific/caas/product.mk
+@@ -17,6 +17,8 @@ PRODUCT_COPY_FILES += \
+ 
+ PRODUCT_PACKAGES += vndservicemanager
+ 
++PRODUCT_PACKAGES += SystemUpdaterSample
++
+ # PRODUCT_PACKAGES += androidx.window.extensions \
+ 		    androidx.window.sidecar
+ 
+-- 
+2.34.1
+

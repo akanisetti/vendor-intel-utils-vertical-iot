@@ -1,0 +1,55 @@
+From 8e275d3032cb147e5dc605071cfea51dc24a136e Mon Sep 17 00:00:00 2001
+From: preddycx <prashanthx.reddy.chintapally@intel.com>
+Date: Wed, 8 Jul 2026 16:52:49 +0000
+Subject: [PATCH] caas: suppress android.hardware.location.network feature
+
+android.hardware.location.network is declared in AOSP
+tablet_core_hardware.xml which is copied for caas product, but
+LocationManager.NETWORK_PROVIDER is not available at runtime.
+
+CTS test android.app.cts.SystemFeaturesTest#testLocationFeatures fails
+because hasSystemFeature() returns true for a provider that does not
+exist.
+
+Add caas_feature_overrides.xml with unavailable-feature entry to suppress
+the feature declaration, scoped only to the caas product.
+
+Test: android.app.cts.SystemFeaturesTest#testLocationFeatures
+
+Tracked-On: NIACP3-1484
+Signed-off-by: preddycx <prashanthx.reddy.chintapally@intel.com>
+---
+ .../caas/permissions/caas_feature_overrides.xml              | 5 +++++
+ groups/device-specific/caas/product.mk                       | 4 ++++
+ 2 files changed, 9 insertions(+)
+ create mode 100644 groups/device-specific/caas/permissions/caas_feature_overrides.xml
+
+diff --git a/groups/device-specific/caas/permissions/caas_feature_overrides.xml b/groups/device-specific/caas/permissions/caas_feature_overrides.xml
+new file mode 100644
+index 00000000..b7e62b3b
+--- /dev/null
++++ b/groups/device-specific/caas/permissions/caas_feature_overrides.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Suppress features that are not supported on this product -->
++<permissions>
++    <unavailable-feature name="android.hardware.location.network" />
++</permissions>
+diff --git a/groups/device-specific/caas/product.mk b/groups/device-specific/caas/product.mk
+index a5ec26a6..06d9baf5 100755
+--- a/groups/device-specific/caas/product.mk
++++ b/groups/device-specific/caas/product.mk
+@@ -48,6 +48,10 @@ PRODUCT_COPY_FILES += \
+     frameworks/native/data/etc/android.software.managed_users.xml:vendor/etc/permissions/android.software.managed_users.xml \
+     frameworks/native/data/etc/android.software.secure_lock_screen.xml:vendor/etc/permissions/android.software.secure_lock_screen.xml
+ 
++# Suppress features not supported on this product
++PRODUCT_COPY_FILES += \
++    $(LOCAL_PATH)/permissions/caas_feature_overrides.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/caas_feature_overrides.xml
++
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/file_share.sh:$(TARGET_COPY_OUT_VENDOR)/bin/file_share.sh
+ PRODUCT_COPY_FILES += vendor/intel/utils_vertical/bsp_diff/file_for_flashfile:$(PRODUCT_OUT)/LICENSE
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/auto_switch_pt_usb_vms.sh:$(PRODUCT_OUT)/scripts/auto_switch_pt_usb_vms.sh
+-- 
+2.34.1
+

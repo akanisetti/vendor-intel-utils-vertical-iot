@@ -1,0 +1,106 @@
+From 221cb01167f7093e46d176768a6e7ea4c19eb8b0 Mon Sep 17 00:00:00 2001
+From: Riddle Hsu <riddlehsu@google.com>
+Date: Mon, 28 Apr 2025 13:15:08 +0800
+Subject: [PATCH 30/38] Remove enabled flag
+ use_visible_requested_for_process_tracker
+
+Bug: 414269923
+Flag: EXEMPT flag removal
+Test: BackgroundActivityLaunchTest
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:01358ba370c7fe020dfbe4328ae65ac3997de6f5
+Merged-In: I61169d7adafbb8c43a9a1e97fe963cfe50bb90ad
+Change-Id: I61169d7adafbb8c43a9a1e97fe963cfe50bb90ad
+---
+ .../android/window/flags/windowing_frontend.aconfig  | 11 -----------
+ .../android/server/wm/WindowProcessController.java   | 12 +++---------
+ .../server/wm/WindowProcessControllerTests.java      |  8 ++------
+ 3 files changed, 5 insertions(+), 26 deletions(-)
+
+diff --git a/core/java/android/window/flags/windowing_frontend.aconfig b/core/java/android/window/flags/windowing_frontend.aconfig
+index 99f9929e1071..2b8631e8eb94 100644
+--- a/core/java/android/window/flags/windowing_frontend.aconfig
++++ b/core/java/android/window/flags/windowing_frontend.aconfig
+@@ -286,17 +286,6 @@ flag {
+   }
+ }
+ 
+-flag {
+-  name: "use_visible_requested_for_process_tracker"
+-  namespace: "windowing_frontend"
+-  description: "Do not count closing activity as visible process"
+-  bug: "396653764"
+-  is_fixed_read_only: true
+-  metadata {
+-    purpose: PURPOSE_BUGFIX
+-  }
+-}
+-
+ flag {
+   name: "ensure_wallpaper_in_transitions"
+   namespace: "windowing_frontend"
+diff --git a/services/core/java/com/android/server/wm/WindowProcessController.java b/services/core/java/com/android/server/wm/WindowProcessController.java
+index 4f79b9e86033..9782568a9a89 100644
+--- a/services/core/java/com/android/server/wm/WindowProcessController.java
++++ b/services/core/java/com/android/server/wm/WindowProcessController.java
+@@ -337,11 +337,6 @@ public class WindowProcessController extends ConfigurationContainer<Configuratio
+     public static final int ACTIVITY_STATE_FLAG_VISIBLE_MULTI_WINDOW_MODE = 1 << 25;
+     public static final int ACTIVITY_STATE_FLAG_MASK_MIN_TASK_LAYER = 0x0000ffff;
+ 
+-    private static final int ACTIVITY_STATE_VISIBLE =
+-            com.android.window.flags.Flags.useVisibleRequestedForProcessTracker()
+-                    ? ACTIVITY_STATE_FLAG_IS_VISIBLE
+-                    : ACTIVITY_STATE_FLAG_IS_VISIBLE | ACTIVITY_STATE_FLAG_IS_WINDOW_VISIBLE;
+-
+     /**
+      * The state for oom-adjustment calculation. The higher 16 bits are the activity states, and the
+      * lower 16 bits are the task layer rank (see {@link Task#mLayerRank}). This field is written by
+@@ -1281,7 +1276,7 @@ public class WindowProcessController extends ConfigurationContainer<Configuratio
+         int nonOccludedRatio = 0;
+         long perceptibleTaskStoppedTimeMillis = Long.MIN_VALUE;
+         final boolean wasResumed = hasResumedActivity();
+-        final boolean wasAnyVisible = (mActivityStateFlags & ACTIVITY_STATE_VISIBLE) != 0;
++        final boolean wasAnyVisible = (mActivityStateFlags & ACTIVITY_STATE_FLAG_IS_VISIBLE) != 0;
+         for (int i = mActivities.size() - 1; i >= 0; i--) {
+             final ActivityRecord r = mActivities.get(i);
+             if (r.isVisible()) {
+@@ -1326,8 +1321,7 @@ public class WindowProcessController extends ConfigurationContainer<Configuratio
+                     bestInvisibleState = PAUSING;
+                     // Treat PAUSING as visible in case the next activity in the same process has
+                     // not yet been set as visible-requested.
+-                    if (com.android.window.flags.Flags.useVisibleRequestedForProcessTracker()
+-                            && r.isVisible()) {
++                    if (r.isVisible()) {
+                         stateFlags |= ACTIVITY_STATE_FLAG_IS_VISIBLE;
+                     }
+                 } else if (state == PAUSED) {
+@@ -1380,7 +1374,7 @@ public class WindowProcessController extends ConfigurationContainer<Configuratio
+         mActivityStateFlags = stateFlags;
+         mPerceptibleTaskStoppedTimeMillis = perceptibleTaskStoppedTimeMillis;
+ 
+-        final boolean anyVisible = (stateFlags & ACTIVITY_STATE_VISIBLE) != 0;
++        final boolean anyVisible = (stateFlags & ACTIVITY_STATE_FLAG_IS_VISIBLE) != 0;
+         if (!wasAnyVisible && anyVisible) {
+             mAtm.mVisibleActivityProcessTracker.onAnyActivityVisible(this);
+             mAtm.mWindowManager.onProcessActivityVisibilityChanged(mUid, true /*visible*/);
+diff --git a/services/tests/wmtests/src/com/android/server/wm/WindowProcessControllerTests.java b/services/tests/wmtests/src/com/android/server/wm/WindowProcessControllerTests.java
+index 5347f9a36652..229d8f5b9521 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/WindowProcessControllerTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/WindowProcessControllerTests.java
+@@ -383,12 +383,8 @@ public class WindowProcessControllerTests extends WindowTestsBase {
+         assertTrue(mWpc.hasForegroundActivities());
+ 
+         activity.setVisibleRequested(false);
+-        if (com.android.window.flags.Flags.useVisibleRequestedForProcessTracker()) {
+-            assertTrue("PAUSING is visible", mWpc.hasVisibleActivities());
+-            activity.setState(PAUSED, "test");
+-        } else {
+-            activity.setVisible(false);
+-        }
++        assertTrue("PAUSING is visible", mWpc.hasVisibleActivities());
++        activity.setState(PAUSED, "test");
+         verify(tracker).onAllActivitiesInvisible(mWpc);
+         assertFalse(mWpc.hasVisibleActivities());
+ 
+-- 
+2.53.0
+

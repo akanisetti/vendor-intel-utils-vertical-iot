@@ -1,0 +1,107 @@
+From e094eb16a5cb718a5375b4c44af68ff66eabcee1 Mon Sep 17 00:00:00 2001
+From: patelank <patelank@intel.com>
+Date: Wed, 8 Jul 2026 04:05:14 +0000
+Subject: [PATCH] Fix VINTF HAL version mismatches for VTS treble tests
+
+health: update manifest version 3 to 4 to match running service
+power: update manifest version 5 to 6 to match running service
+thermal: update NDK from V2 to V3 and add forecastSkinTemperature stub
+to satisfy FCM A16 requirement of version 3
+
+Fixes test 61 HalIsServed health, test 62 HalIsServed power,
+test 63 HalIsServed thermal, test 59 VendorFrameworkCompatibility
+---
+ health/aidl/android.hardware.health-service.example.xml | 2 +-
+ health/aidl/android.hardware.health-service.intel.xml   | 2 +-
+ power/aidl/default/power-default.intel.xml              | 3 +--
+ thermal/aidl/default/Android.bp                         | 2 +-
+ thermal/aidl/default/Thermal.cpp                        | 7 +++++++
+ thermal/aidl/default/Thermal.h                          | 3 +++
+ 6 files changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/health/aidl/android.hardware.health-service.example.xml b/health/aidl/android.hardware.health-service.example.xml
+index 2acaaba..8ddfbda 100644
+--- a/health/aidl/android.hardware.health-service.example.xml
++++ b/health/aidl/android.hardware.health-service.example.xml
+@@ -1,7 +1,7 @@
+ <manifest version="1.0" type="device">
+     <hal format="aidl">
+         <name>android.hardware.health</name>
+-        <version>3</version>
++        <version>4</version>
+         <fqname>IHealth/default</fqname>
+     </hal>
+ </manifest>
+diff --git a/health/aidl/android.hardware.health-service.intel.xml b/health/aidl/android.hardware.health-service.intel.xml
+index 2acaaba..8ddfbda 100644
+--- a/health/aidl/android.hardware.health-service.intel.xml
++++ b/health/aidl/android.hardware.health-service.intel.xml
+@@ -1,7 +1,7 @@
+ <manifest version="1.0" type="device">
+     <hal format="aidl">
+         <name>android.hardware.health</name>
+-        <version>3</version>
++        <version>4</version>
+         <fqname>IHealth/default</fqname>
+     </hal>
+ </manifest>
+diff --git a/power/aidl/default/power-default.intel.xml b/power/aidl/default/power-default.intel.xml
+index e8c1be8..1bb73f3 100644
+--- a/power/aidl/default/power-default.intel.xml
++++ b/power/aidl/default/power-default.intel.xml
+@@ -1,8 +1,7 @@
+ <manifest version="1.0" type="device">
+     <hal format="aidl">
+         <name>android.hardware.power</name>
+-        <version>5</version>
++        <version>6</version>
+         <fqname>IPower/default</fqname>
+     </hal>
+ </manifest>
+-
+diff --git a/thermal/aidl/default/Android.bp b/thermal/aidl/default/Android.bp
+index 0b8d53c..0764a57 100644
+--- a/thermal/aidl/default/Android.bp
++++ b/thermal/aidl/default/Android.bp
+@@ -27,7 +27,7 @@ cc_binary {
+     vendor: true,
+     stl: "c++_static",
+     static_libs: [
+-        "android.hardware.thermal-V2-ndk",
++        "android.hardware.thermal-V3-ndk",
+         "libbase",
+     ],
+     shared_libs: [
+diff --git a/thermal/aidl/default/Thermal.cpp b/thermal/aidl/default/Thermal.cpp
+index cf3998b..b53d51b 100644
+--- a/thermal/aidl/default/Thermal.cpp
++++ b/thermal/aidl/default/Thermal.cpp
+@@ -760,4 +760,11 @@ ScopedAStatus Thermal::unregisterCoolingDeviceChangedCallback(
+     }
+     return ScopedAStatus::ok();
+ }
++ScopedAStatus Thermal::forecastSkinTemperature(int32_t /* in_forecastSeconds */,
++                                              float* _aidl_return) {
++    LOG(VERBOSE) << __func__;
++    *_aidl_return = 0.0f;
++    return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
+ }  // namespace aidl::android::hardware::thermal::impl::example
+diff --git a/thermal/aidl/default/Thermal.h b/thermal/aidl/default/Thermal.h
+index 5b5b1d5..66e1eae 100644
+--- a/thermal/aidl/default/Thermal.h
++++ b/thermal/aidl/default/Thermal.h
+@@ -72,6 +72,9 @@ class Thermal : public BnThermal {
+ 
+     ndk::ScopedAStatus unregisterCoolingDeviceChangedCallback(
+             const std::shared_ptr<ICoolingDeviceChangedCallback>& in_callback) override;
++
++    ndk::ScopedAStatus forecastSkinTemperature(int32_t in_forecastSeconds,
++                                               float* _aidl_return) override;
+   private:
+     std::mutex thermal_callback_mutex_;
+     std::vector<std::shared_ptr<IThermalChangedCallback>> thermal_callbacks_;
+-- 
+2.34.1
+

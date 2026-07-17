@@ -1,0 +1,987 @@
+From 45d96862592d595002e941962658020469c404bb Mon Sep 17 00:00:00 2001
+From: Chun-Ku Lin <chunkulin@google.com>
+Date: Thu, 20 Nov 2025 09:14:56 +0000
+Subject: [PATCH 11/38] Sanitize a11y qs shortcut tile service name before
+ using it
+
+Get the valid a11y tile services outside of the lock mechanism to
+prevent AccessibilityManagerService holding the lock for a long time
+while processing valid tile services by calling PackageManager
+
+Bug: 449392803
+Bug: 441506794
+Test: manual
+Test: atest AccessibilityUserStateTest
+Test: atest AccessibilityTileUtilsTest
+Test: atest AccessibilityManagerServiceTest
+Flag: EXEMPT CVE_FIX
+
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:637f5b4aa4fbc87010f49f69555f6d14caef6a1f
+
+Merged-In: Id05b4fe4ee0619d2bdc0421e8bfc5b4d62e322e0
+Change-Id: Id05b4fe4ee0619d2bdc0421e8bfc5b4d62e322e0
+---
+ .../AccessibilityManagerService.java          |  74 +++-
+ .../accessibility/AccessibilityTileUtils.java | 183 +++++++++
+ .../accessibility/AccessibilityUserState.java |  33 +-
+ .../AccessibilityManagerServiceTest.java      |  13 +-
+ .../AccessibilityTileUtilsTest.java           | 369 ++++++++++++++++++
+ .../AccessibilityUserStateTest.java           |   2 +-
+ .../accessibility/utils/TileServiceUtil.java  |  96 +++++
+ 7 files changed, 747 insertions(+), 23 deletions(-)
+ create mode 100644 services/accessibility/java/com/android/server/accessibility/AccessibilityTileUtils.java
+ create mode 100644 services/tests/servicestests/src/com/android/server/accessibility/AccessibilityTileUtilsTest.java
+ create mode 100644 services/tests/servicestests/src/com/android/server/accessibility/utils/TileServiceUtil.java
+
+diff --git a/services/accessibility/java/com/android/server/accessibility/AccessibilityManagerService.java b/services/accessibility/java/com/android/server/accessibility/AccessibilityManagerService.java
+index b4c45aba0131..c8d8a7c153ce 100644
+--- a/services/accessibility/java/com/android/server/accessibility/AccessibilityManagerService.java
++++ b/services/accessibility/java/com/android/server/accessibility/AccessibilityManagerService.java
+@@ -915,13 +915,15 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+ 
+     private void onSomePackagesChangedLocked(
+             @Nullable List<AccessibilityServiceInfo> parsedAccessibilityServiceInfos,
+-            @Nullable List<AccessibilityShortcutInfo> parsedAccessibilityShortcutInfos) {
++            @Nullable List<AccessibilityShortcutInfo> parsedAccessibilityShortcutInfos,
++            @NonNull Set<ComponentName> validA11yTileServices) {
+         final AccessibilityUserState userState = getCurrentUserStateLocked();
+         // Reload the installed services since some services may have different attributes
+         // or resolve info (does not support equals), etc. Remove them then to force reload.
+         userState.mInstalledServices.clear();
+-        if (readConfigurationForUserStateLocked(userState,
+-                    parsedAccessibilityServiceInfos, parsedAccessibilityShortcutInfos)) {
++        if (readConfigurationForUserStateLocked(
++                userState, parsedAccessibilityServiceInfos, parsedAccessibilityShortcutInfos,
++                validA11yTileServices)) {
+             onUserStateChangedLocked(userState);
+         }
+     }
+@@ -2128,6 +2130,14 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+         List<AccessibilityShortcutInfo> parsedAccessibilityShortcutInfos = null;
+         parsedAccessibilityServiceInfos = parseAccessibilityServiceInfos(userId);
+         parsedAccessibilityShortcutInfos = parseAccessibilityShortcutInfos(userId);
++        Set<ComponentName> validA11yTileServices = AccessibilityTileUtils.getValidA11yTileServices(
++                mContext,
++                LocalServices.getService(PackageManagerInternal.class),
++                parsedAccessibilityServiceInfos,
++                parsedAccessibilityShortcutInfos,
++                userId
++        );
++
+         synchronized (mLock) {
+             if (mCurrentUserId == userId && mInitialized) {
+                 Slog.w(LOG_TAG, String.format("userId: %d is already initialized", userId));
+@@ -2150,7 +2160,8 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+             AccessibilityUserState userState = getCurrentUserStateLocked();
+ 
+             readConfigurationForUserStateLocked(userState,
+-                    parsedAccessibilityServiceInfos, parsedAccessibilityShortcutInfos);
++                    parsedAccessibilityServiceInfos, parsedAccessibilityShortcutInfos,
++                    validA11yTileServices);
+             mSecurityPolicy.onSwitchUserLocked(mCurrentUserId, userState.mEnabledServices);
+             // Even if reading did not yield change, we have to update
+             // the state since the context in which the current user
+@@ -2565,7 +2576,8 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+     }
+ 
+     private boolean readInstalledAccessibilityServiceLocked(AccessibilityUserState userState,
+-            @Nullable List<AccessibilityServiceInfo> parsedAccessibilityServiceInfos) {
++            @Nullable List<AccessibilityServiceInfo> parsedAccessibilityServiceInfos,
++            @NonNull Set<ComponentName> validA11yTileServices) {
+         for (int i = 0, count = parsedAccessibilityServiceInfos.size(); i < count; i++) {
+             AccessibilityServiceInfo accessibilityServiceInfo =
+                     parsedAccessibilityServiceInfos.get(i);
+@@ -2574,14 +2586,18 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+                 accessibilityServiceInfo.crashed = true;
+             }
+         }
++        boolean serviceInfosChanged = false;
+ 
+         if (!parsedAccessibilityServiceInfos.equals(userState.mInstalledServices)) {
+             userState.mInstalledServices.clear();
+             userState.mInstalledServices.addAll(parsedAccessibilityServiceInfos);
+-            userState.updateTileServiceMapForAccessibilityServiceLocked();
+-            return true;
++            serviceInfosChanged = true;
+         }
+-        return false;
++        // Sometimes when the package changes is called (especially for the initial load), the
++        // package manager may not be able to resolve the TileService at that time. Always
++        // rebuild the feature to tileService map could solve the problem.
++        userState.updateTileServiceMapForAccessibilityServiceLocked(validA11yTileServices);
++        return serviceInfosChanged;
+     }
+ 
+     /**
+@@ -2600,7 +2616,9 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+     }
+ 
+     private boolean readInstalledAccessibilityShortcutLocked(AccessibilityUserState userState,
+-            List<AccessibilityShortcutInfo> parsedAccessibilityShortcutInfos) {
++            List<AccessibilityShortcutInfo> parsedAccessibilityShortcutInfos,
++            @NonNull Set<ComponentName> validA11yTileServices) {
++        boolean shortcutInfosChanged = false;
+         if (!parsedAccessibilityShortcutInfos.equals(userState.mInstalledShortcuts)) {
+             if (Flags.clearShortcutsWhenActivityUpdatesToService()) {
+                 List<String> componentNames = userState.mInstalledShortcuts.stream()
+@@ -2617,10 +2635,13 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+ 
+             userState.mInstalledShortcuts.clear();
+             userState.mInstalledShortcuts.addAll(parsedAccessibilityShortcutInfos);
+-            userState.updateTileServiceMapForAccessibilityActivityLocked();
+-            return true;
++            shortcutInfosChanged = true;
+         }
+-        return false;
++        // Sometimes when the package changes is called (especially for the initial load), the
++        // package manager may not be able to resolve the TileService at that time. Always
++        // rebuild the feature to tileService map could solve the problem.
++        userState.updateTileServiceMapForAccessibilityActivityLocked(validA11yTileServices);
++        return shortcutInfosChanged;
+     }
+ 
+     private boolean readEnabledAccessibilityServicesLocked(AccessibilityUserState userState) {
+@@ -3444,11 +3465,12 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+     private boolean readConfigurationForUserStateLocked(
+             AccessibilityUserState userState,
+             List<AccessibilityServiceInfo> parsedAccessibilityServiceInfos,
+-            List<AccessibilityShortcutInfo> parsedAccessibilityShortcutInfos) {
++            List<AccessibilityShortcutInfo> parsedAccessibilityShortcutInfos,
++            @NonNull Set<ComponentName> validA11yTileServices) {
+         boolean somethingChanged = readInstalledAccessibilityServiceLocked(
+-                userState, parsedAccessibilityServiceInfos);
++                userState, parsedAccessibilityServiceInfos, validA11yTileServices);
+         somethingChanged |= readInstalledAccessibilityShortcutLocked(
+-                userState, parsedAccessibilityShortcutInfos);
++                userState, parsedAccessibilityShortcutInfos, validA11yTileServices);
+         somethingChanged |= readEnabledAccessibilityServicesLocked(userState);
+         somethingChanged |= readTouchExplorationGrantedAccessibilityServicesLocked(userState);
+         somethingChanged |= readTouchExplorationEnabledSettingLocked(userState);
+@@ -6529,6 +6551,14 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+                     .parseAccessibilityServiceInfos(userId);
+             List<AccessibilityShortcutInfo> parsedAccessibilityShortcutInfos = mManagerService
+                     .parseAccessibilityShortcutInfos(userId);
++            Set<ComponentName> validA11yTileServices =
++                    AccessibilityTileUtils.getValidA11yTileServices(
++                            mManagerService.mContext,
++                            LocalServices.getService(PackageManagerInternal.class),
++                            parsedAccessibilityServiceInfos,
++                            parsedAccessibilityShortcutInfos,
++                            userId
++                    );
+             synchronized (mManagerService.getLock()) {
+                 // Only the profile parent can install accessibility services.
+                 // Therefore we ignore packages from linked profiles.
+@@ -6544,7 +6574,7 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+                     return;
+                 }
+                 mManagerService.onSomePackagesChangedLocked(parsedAccessibilityServiceInfos,
+-                        parsedAccessibilityShortcutInfos);
++                        parsedAccessibilityShortcutInfos, validA11yTileServices);
+             }
+         }
+ 
+@@ -6566,6 +6596,14 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+                     .parseAccessibilityServiceInfos(userId);
+             List<AccessibilityShortcutInfo> parsedAccessibilityShortcutInfos =
+                     mManagerService.parseAccessibilityShortcutInfos(userId);
++            Set<ComponentName> validA11yTileServices =
++                    AccessibilityTileUtils.getValidA11yTileServices(
++                            mManagerService.mContext,
++                            LocalServices.getService(PackageManagerInternal.class),
++                            parsedAccessibilityServiceInfos,
++                            parsedAccessibilityShortcutInfos,
++                            userId
++                    );
+             synchronized (mManagerService.getLock()) {
+                 if (userId != mManagerService.getCurrentUserIdLocked()) {
+                     return;
+@@ -6582,7 +6620,9 @@ public class AccessibilityManagerService extends IAccessibilityManager.Stub
+                 final boolean configurationChanged;
+                 configurationChanged = mManagerService.readConfigurationForUserStateLocked(
+                         userState, parsedAccessibilityServiceInfos,
+-                        parsedAccessibilityShortcutInfos);
++                        parsedAccessibilityShortcutInfos,
++                        validA11yTileServices
++                );
+                 if (reboundAService || configurationChanged) {
+                     mManagerService.onUserStateChangedLocked(userState);
+                 }
+diff --git a/services/accessibility/java/com/android/server/accessibility/AccessibilityTileUtils.java b/services/accessibility/java/com/android/server/accessibility/AccessibilityTileUtils.java
+new file mode 100644
+index 000000000000..68e2b32ba705
+--- /dev/null
++++ b/services/accessibility/java/com/android/server/accessibility/AccessibilityTileUtils.java
+@@ -0,0 +1,183 @@
++/*
++ * Copyright (C) 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.server.accessibility;
++
++import android.Manifest;
++import android.accessibilityservice.AccessibilityServiceInfo;
++import android.accessibilityservice.AccessibilityShortcutInfo;
++import android.annotation.NonNull;
++import android.annotation.Nullable;
++import android.annotation.UserIdInt;
++import android.content.ComponentName;
++import android.content.Context;
++import android.content.Intent;
++import android.content.pm.PackageManager;
++import android.content.pm.PackageManagerInternal;
++import android.content.pm.ResolveInfo;
++import android.content.pm.ServiceInfo;
++import android.os.Process;
++import android.service.quicksettings.TileService;
++import android.text.TextUtils;
++import android.util.ArraySet;
++import android.util.Slog;
++
++import java.util.List;
++import java.util.Set;
++
++/**
++ * Collection of utilities for Accessibility feature's TileServices.
++ */
++public class AccessibilityTileUtils {
++    private AccessibilityTileUtils() {}
++    private static final String TAG = "AccessibilityTileUtils";
++
++    /**
++     * Checks if a given {@link ComponentName} corresponds to a valid and enabled TileService
++     * for the current user.
++     *
++     * @param componentName The {@link ComponentName} of the service to validate.
++     * @return {@code true} if the component is a valid and enabled TileService, {@code false}
++     * otherwise.
++     */
++    private static boolean isComponentValidTileService(
++            @NonNull Context context, @NonNull PackageManagerInternal pm,
++            @NonNull ComponentName componentName, @UserIdInt int userId) {
++        Intent intent = new Intent(TileService.ACTION_QS_TILE);
++        intent.setComponent(componentName);
++
++        ResolveInfo resolveInfo = pm.resolveService(intent,
++                intent.resolveTypeIfNeeded(context.getContentResolver()),
++                /* flags= */ 0L,
++                userId,
++                android.os.Process.myUid());
++
++        if (resolveInfo == null || resolveInfo.serviceInfo == null) {
++            Slog.w(TAG, "TileService could not be resolved: " + componentName);
++            return false;
++        }
++
++        ServiceInfo serviceInfo = resolveInfo.serviceInfo;
++        if (!serviceInfo.exported) {
++            Slog.w(TAG, "TileService is not exported: " + componentName);
++            return false;
++        }
++
++        if (!Manifest.permission.BIND_QUICK_SETTINGS_TILE.equals(serviceInfo.permission)) {
++            Slog.w(TAG, "TileService is not protected by BIND_QUICK_SETTINGS_TILE permission: "
++                    + componentName);
++            return false;
++        }
++
++        int enabledSetting = pm.getComponentEnabledSetting(componentName, Process.myUid(), userId);
++        if (!resolveEnabledComponent(enabledSetting, serviceInfo.enabled)) {
++            Slog.w(TAG, "TileService is not enabled: " + componentName.flattenToShortString());
++            return false;
++        }
++
++        return true;
++    }
++
++    /**
++     * Resolves the effective enabled state of a component by considering both its dynamic setting
++     * and its static manifest declaration.
++     *
++     * @param pmResult     The component's dynamic enabled state, as returned by
++     *                     {@link PackageManager#getComponentEnabledSetting(ComponentName)}.
++     * @param defaultValue The component's static enabled state from its manifest (e.g.,
++     *                     {@link android.content.pm.ServiceInfo#enabled}). This value is used
++     *                     when {@code pmResult} is
++     *                     {@link PackageManager#COMPONENT_ENABLED_STATE_DEFAULT}.
++     * @return {@code true} if the component is considered enabled, {@code false} otherwise.
++     */
++    private static boolean resolveEnabledComponent(int pmResult, boolean defaultValue) {
++        if (pmResult == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
++            return true;
++        }
++        if (pmResult == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT) {
++            return defaultValue;
++        }
++        return false;
++    }
++
++    /**
++     * Returns a set of {@link ComponentName}s for valid Accessibility TileServices.
++     * A TileService is considered valid if it is properly declared, exported, protected by the
++     * {@link Manifest.permission#BIND_QUICK_SETTINGS_TILE} permission, and enabled.
++     *
++     * @param context The current context.
++     * @param pm The {@link PackageManagerInternal} instance.
++     * @param accessibilityServiceInfos A list of installed {@link AccessibilityServiceInfo}s.
++     * @param accessibilityShortcutInfos A list of installed {@link AccessibilityShortcutInfo}s.
++     * @param userId The user ID for which to retrieve the TileServices.
++     * @return A {@link Set} of valid {@link ComponentName}s for Accessibility TileServices.
++     */
++    @NonNull
++    public static Set<ComponentName> getValidA11yTileServices(
++            @NonNull Context context,
++            @Nullable PackageManagerInternal pm,
++            @Nullable List<AccessibilityServiceInfo> accessibilityServiceInfos,
++            @Nullable List<AccessibilityShortcutInfo> accessibilityShortcutInfos,
++            @UserIdInt int userId
++    ) {
++        Set<ComponentName> validA11yTileServices = new ArraySet<>();
++        if (pm == null) {
++            return validA11yTileServices;
++        }
++
++        if (accessibilityServiceInfos != null) {
++            accessibilityServiceInfos.forEach(
++                    a11yServiceInfo -> {
++                        String tileServiceName = a11yServiceInfo.getTileServiceName();
++                        if (!TextUtils.isEmpty(tileServiceName)) {
++                            ResolveInfo resolveInfo = a11yServiceInfo.getResolveInfo();
++                            ComponentName a11yFeature = new ComponentName(
++                                    resolveInfo.serviceInfo.packageName,
++                                    resolveInfo.serviceInfo.name
++                            );
++                            ComponentName tileService = new ComponentName(
++                                    a11yFeature.getPackageName(),
++                                    tileServiceName
++                            );
++                            if (isComponentValidTileService(context, pm, tileService, userId)) {
++                                validA11yTileServices.add(tileService);
++                            }
++                        }
++                    }
++            );
++        }
++
++        if (accessibilityShortcutInfos != null) {
++            accessibilityShortcutInfos.forEach(
++                    a11yShortcutInfo -> {
++                        String tileServiceName = a11yShortcutInfo.getTileServiceName();
++                        if (!TextUtils.isEmpty(tileServiceName)) {
++                            ComponentName a11yFeature = a11yShortcutInfo.getComponentName();
++                            ComponentName tileService = new ComponentName(
++                                    a11yFeature.getPackageName(),
++                                    tileServiceName);
++                            if (isComponentValidTileService(context, pm, tileService, userId)) {
++                                validA11yTileServices.add(tileService);
++                            }
++                        }
++                    }
++            );
++        }
++
++        return validA11yTileServices;
++    }
++
++}
+diff --git a/services/accessibility/java/com/android/server/accessibility/AccessibilityUserState.java b/services/accessibility/java/com/android/server/accessibility/AccessibilityUserState.java
+index 8b3e63d0dc5e..01d8dc91179a 100644
+--- a/services/accessibility/java/com/android/server/accessibility/AccessibilityUserState.java
++++ b/services/accessibility/java/com/android/server/accessibility/AccessibilityUserState.java
+@@ -1120,8 +1120,19 @@ class AccessibilityUserState {
+         return false;
+     }
+ 
+-    public void updateTileServiceMapForAccessibilityServiceLocked() {
++    /**
++     * Updates the internal map of accessibility services to their corresponding tile services.
++     *
++     * @param validA11yTileServices A set of valid {@link ComponentName}s for accessibility tile
++     *                              services.
++     */
++    public void updateTileServiceMapForAccessibilityServiceLocked(
++            @NonNull Set<ComponentName> validA11yTileServices) {
+         mA11yServiceToTileService.clear();
++        if (validA11yTileServices.isEmpty()) {
++            return;
++        }
++
+         mInstalledServices.forEach(
+                 a11yServiceInfo -> {
+                     String tileServiceName = a11yServiceInfo.getTileServiceName();
+@@ -1135,14 +1146,26 @@ class AccessibilityUserState {
+                                 a11yFeature.getPackageName(),
+                                 tileServiceName
+                         );
+-                        mA11yServiceToTileService.put(a11yFeature, tileService);
++                        if (validA11yTileServices.contains(tileService)) {
++                            mA11yServiceToTileService.put(a11yFeature, tileService);
++                        }
+                     }
+                 }
+         );
+     }
+ 
+-    public void updateTileServiceMapForAccessibilityActivityLocked() {
++    /**
++     * Updates the internal map of accessibility activities to their corresponding tile services.
++     *
++     * @param validA11yTileServices A set of valid {@link ComponentName}s for accessibility tile
++     *                              services.
++     */
++    public void updateTileServiceMapForAccessibilityActivityLocked(
++            @NonNull Set<ComponentName> validA11yTileServices) {
+         mA11yActivityToTileService.clear();
++        if (validA11yTileServices.isEmpty()) {
++            return;
++        }
+         mInstalledShortcuts.forEach(
+                 a11yShortcutInfo -> {
+                     String tileServiceName = a11yShortcutInfo.getTileServiceName();
+@@ -1151,7 +1174,9 @@ class AccessibilityUserState {
+                         ComponentName tileService = new ComponentName(
+                                 a11yFeature.getPackageName(),
+                                 tileServiceName);
+-                        mA11yActivityToTileService.put(a11yFeature, tileService);
++                        if (validA11yTileServices.contains(tileService)) {
++                            mA11yActivityToTileService.put(a11yFeature, tileService);
++                        }
+                     }
+                 }
+         );
+diff --git a/services/tests/servicestests/src/com/android/server/accessibility/AccessibilityManagerServiceTest.java b/services/tests/servicestests/src/com/android/server/accessibility/AccessibilityManagerServiceTest.java
+index 457d8a96fea4..0cd924264cc3 100644
+--- a/services/tests/servicestests/src/com/android/server/accessibility/AccessibilityManagerServiceTest.java
++++ b/services/tests/servicestests/src/com/android/server/accessibility/AccessibilityManagerServiceTest.java
+@@ -141,6 +141,7 @@ import com.android.server.accessibility.magnification.FullScreenMagnificationCon
+ import com.android.server.accessibility.magnification.MagnificationConnectionManager;
+ import com.android.server.accessibility.magnification.MagnificationController;
+ import com.android.server.accessibility.magnification.MagnificationProcessor;
++import com.android.server.accessibility.utils.TileServiceUtil;
+ import com.android.server.pm.UserManagerInternal;
+ import com.android.server.statusbar.StatusBarManagerInternal;
+ import com.android.server.wm.ActivityTaskManagerInternal;
+@@ -2523,7 +2524,17 @@ public class AccessibilityManagerServiceTest {
+                 /* isAlwaysOnService= */ false);
+         userState.mInstalledServices.addAll(
+                 List.of(alwaysOnServiceInfo, standardServiceInfo));
+-        userState.updateTileServiceMapForAccessibilityServiceLocked();
++        ComponentName alwaysOnA11yServiceTile =
++                new ComponentName(TARGET_ALWAYS_ON_A11Y_SERVICE.getPackageName(),
++                        alwaysOnServiceInfo.getTileServiceName());
++        TileServiceUtil.setupPackageManagerForValidTileService(
++                mMockPackageManagerInternal,
++                userState.mUserId,
++                alwaysOnA11yServiceTile
++        );
++        userState.updateTileServiceMapForAccessibilityServiceLocked(
++                Set.of(alwaysOnA11yServiceTile)
++        );
+     }
+ 
+     private void sendBroadcastToAccessibilityManagerService(Intent intent, @UserIdInt int userId) {
+diff --git a/services/tests/servicestests/src/com/android/server/accessibility/AccessibilityTileUtilsTest.java b/services/tests/servicestests/src/com/android/server/accessibility/AccessibilityTileUtilsTest.java
+new file mode 100644
+index 000000000000..c06f17ef60b6
+--- /dev/null
++++ b/services/tests/servicestests/src/com/android/server/accessibility/AccessibilityTileUtilsTest.java
+@@ -0,0 +1,369 @@
++/*
++ * Copyright (C) 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.server.accessibility;
++
++import static com.google.common.truth.Truth.assertThat;
++
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.anyInt;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.when;
++
++import android.accessibilityservice.AccessibilityServiceInfo;
++import android.accessibilityservice.AccessibilityShortcutInfo;
++import android.annotation.NonNull;
++import android.annotation.Nullable;
++import android.content.ComponentName;
++import android.content.Context;
++import android.content.pm.ActivityInfo;
++import android.content.pm.ApplicationInfo;
++import android.content.pm.PackageManager;
++import android.content.pm.PackageManagerInternal;
++import android.content.pm.ResolveInfo;
++import android.content.pm.ServiceInfo;
++import android.content.res.Resources;
++import android.content.res.TypedArray;
++import android.content.res.XmlResourceParser;
++import android.test.mock.MockContentResolver;
++import android.util.AttributeSet;
++
++import androidx.test.ext.junit.runners.AndroidJUnit4;
++
++import com.android.server.LocalServices;
++import com.android.server.accessibility.utils.TileServiceUtil;
++
++import org.junit.After;
++import org.junit.Before;
++import org.junit.Rule;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.mockito.Mock;
++import org.mockito.junit.MockitoJUnit;
++import org.mockito.junit.MockitoRule;
++import org.xmlpull.v1.XmlPullParser;
++import org.xmlpull.v1.XmlPullParserException;
++
++import java.io.IOException;
++import java.util.Collections;
++import java.util.Set;
++
++/**
++ * Tests for {@link AccessibilityTileUtils}.
++ */
++@RunWith(AndroidJUnit4.class)
++public class AccessibilityTileUtilsTest {
++    private static final String A11Y_FEATURE_PACKAGE = "com.example.test";
++    private static final String A11Y_SERVICE_NAME = "TestAccessibilityService";
++    private static final String A11Y_SHORTCUT_NAME = "TestAccessibilityShortcut";
++    private static final String TILE_SERVICE_NAME = "TestTileService";
++    private static final String TILE_SERVICE_NAME2 = "TestTileService2";
++    private static final int USER_ID = 0;
++
++    private final ComponentName mTileServiceComponent =
++            new ComponentName(A11Y_FEATURE_PACKAGE, TILE_SERVICE_NAME);
++    private final ComponentName mTileServiceComponent2 =
++            new ComponentName(A11Y_FEATURE_PACKAGE, TILE_SERVICE_NAME2);
++    private final ComponentName mA11yFeatureComponent =
++            new ComponentName(A11Y_FEATURE_PACKAGE, A11Y_SERVICE_NAME);
++    private final ComponentName mA11yShortcutComponent =
++            new ComponentName(A11Y_FEATURE_PACKAGE, A11Y_SHORTCUT_NAME);
++
++    @Rule
++    public final MockitoRule mMockitoRule = MockitoJUnit.rule();
++
++    @Mock
++    private Context mMockContext;
++    @Mock
++    private PackageManagerInternal mMockPackageManagerInternal;
++    private final MockContentResolver mMockResolver = new MockContentResolver();
++
++    @Before
++    public void setUp() {
++        LocalServices.removeServiceForTest(PackageManagerInternal.class);
++        LocalServices.addService(PackageManagerInternal.class, mMockPackageManagerInternal);
++        when(mMockContext.getContentResolver()).thenReturn(mMockResolver);
++    }
++
++    @After
++    public void cleanUp() {
++        LocalServices.removeServiceForTest(PackageManagerInternal.class);
++    }
++
++    @Test
++    public void getValidA11yTileServices_pmIsNull_returnsEmptySet() {
++        TileServiceUtil.setupPackageManagerForValidTileService(mMockPackageManagerInternal, USER_ID,
++                mTileServiceComponent);
++
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, /* pm= */ null, Collections.singletonList(
++                        createMockAccessibilityServiceInfo(mA11yFeatureComponent,
++                                mTileServiceComponent)),
++                Collections.emptyList(), USER_ID);
++
++        assertThat(result).isEmpty();
++    }
++
++    @Test
++    public void getValidA11yTileServices_nullLists_returnsEmptySet() {
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal, null, null, USER_ID);
++
++        assertThat(result).isEmpty();
++    }
++
++    @Test
++    public void getValidA11yTileServices_emptyLists_returnsEmptySet() {
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal, Collections.emptyList(),
++                Collections.emptyList(), USER_ID);
++
++        assertThat(result).isEmpty();
++    }
++
++    @Test
++    public void getValidA11yTileServices_withA11yService_returnsComponent() {
++        TileServiceUtil.setupPackageManagerForValidTileService(mMockPackageManagerInternal, USER_ID,
++                mTileServiceComponent);
++        AccessibilityServiceInfo a11yServiceInfo = createMockAccessibilityServiceInfo(
++                mA11yFeatureComponent, mTileServiceComponent
++        );
++
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal,
++                Collections.singletonList(a11yServiceInfo), /* accessibilityShortcutInfos=*/null,
++                USER_ID);
++
++        assertThat(result).hasSize(1);
++        assertThat(result).contains(mTileServiceComponent);
++    }
++
++    @Test
++    public void getValidA11yTileServices_withShortcutInfo_returnsComponent() throws Exception {
++        TileServiceUtil.setupPackageManagerForValidTileService(mMockPackageManagerInternal, USER_ID,
++                mTileServiceComponent2);
++        AccessibilityShortcutInfo a11yShortcutInfo = createFakeAccessibilityShortcutInfo(
++                mA11yShortcutComponent, mTileServiceComponent2
++        );
++
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal,
++                /* accessibilityServiceInfos=*/ null, Collections.singletonList(a11yShortcutInfo),
++                USER_ID);
++
++        assertThat(result).hasSize(1);
++        assertThat(result).contains(mTileServiceComponent2);
++    }
++
++    @Test
++    public void getValidA11yTileServices_serviceWithNoTileName_returnsEmptySet() {
++        TileServiceUtil.setupPackageManagerForValidTileService(mMockPackageManagerInternal, USER_ID,
++                mTileServiceComponent);
++        AccessibilityServiceInfo a11yServiceInfo = createMockAccessibilityServiceInfo(
++                mA11yFeatureComponent, /* tileServiceName= */ null
++        );
++
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal,
++                Collections.singletonList(a11yServiceInfo), /* accessibilityShortcutInfos=*/ null,
++                USER_ID);
++
++        assertThat(result).isEmpty();
++    }
++
++    @Test
++    public void getValidA11yTileServices_shortcutWithNoTileName_returnsEmptySet() throws Exception {
++        TileServiceUtil.setupPackageManagerForValidTileService(mMockPackageManagerInternal, USER_ID,
++                mTileServiceComponent2);
++        AccessibilityShortcutInfo a11yShortcutInfo = createFakeAccessibilityShortcutInfo(
++                mA11yShortcutComponent, /* tileServiceName= */ null
++        );
++
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal,
++                /* accessibilityServiceInfos=*/ null, Collections.singletonList(a11yShortcutInfo),
++                USER_ID);
++
++        assertThat(result).isEmpty();
++    }
++
++    @Test
++    public void getValidA11yTileServices_tileServiceNotExist_returnsEmptySet() {
++        TileServiceUtil.setupPackageManagerForValidTileService(
++                mMockPackageManagerInternal, USER_ID, mTileServiceComponent);
++        AccessibilityServiceInfo a11yServiceInfo = createMockAccessibilityServiceInfo(
++                mA11yFeatureComponent, /* tileServiceName= */ mTileServiceComponent2
++        );
++
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal,
++                Collections.singletonList(a11yServiceInfo), /* accessibilityShortcutInfos=*/ null,
++                USER_ID);
++
++        assertThat(result).isEmpty();
++    }
++
++    @Test
++    public void getValidA11yTileServices_tileServiceNotExported_returnsEmptySet() {
++        TileServiceUtil.setupPackageManagerForTileService(
++                mMockPackageManagerInternal, USER_ID, mTileServiceComponent,
++                serviceInfo -> serviceInfo.exported = false);
++        AccessibilityServiceInfo a11yServiceInfo = createMockAccessibilityServiceInfo(
++                mA11yFeatureComponent, /* tileServiceName= */ mTileServiceComponent
++        );
++
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal,
++                Collections.singletonList(a11yServiceInfo), /* accessibilityShortcutInfos=*/ null,
++                USER_ID);
++
++        assertThat(result).isEmpty();
++    }
++
++    @Test
++    public void getValidA11yTileServices_tileServiceWrongPermission_returnsEmptySet() {
++        TileServiceUtil.setupPackageManagerForTileService(
++                mMockPackageManagerInternal, USER_ID, mTileServiceComponent,
++                serviceInfo -> serviceInfo.permission = "some.wrong.permission");
++        AccessibilityServiceInfo a11yServiceInfo = createMockAccessibilityServiceInfo(
++                mA11yFeatureComponent, /* tileServiceName= */ mTileServiceComponent
++        );
++
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal,
++                Collections.singletonList(a11yServiceInfo), /* accessibilityShortcutInfos=*/ null,
++                USER_ID);
++
++        assertThat(result).isEmpty();
++    }
++
++    @Test
++    public void getValidA11yTileServices_tileServiceDisabled_returnsEmptySet() {
++        TileServiceUtil.setupPackageManagerForTileService(
++                mMockPackageManagerInternal, USER_ID, mTileServiceComponent,
++                serviceInfo -> serviceInfo.enabled = false);
++        AccessibilityServiceInfo a11yServiceInfo = createMockAccessibilityServiceInfo(
++                mA11yFeatureComponent, /* tileServiceName= */ mTileServiceComponent
++        );
++
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal,
++                Collections.singletonList(a11yServiceInfo), /* accessibilityShortcutInfos=*/ null,
++                USER_ID);
++
++        assertThat(result).isEmpty();
++    }
++
++    @Test
++    public void getValidA11yTileServices_tileServiceEnabledByDefault_returnsComponent() {
++        TileServiceUtil.setupPackageManagerForTileService(
++                mMockPackageManagerInternal, USER_ID, mTileServiceComponent,
++                serviceInfo -> serviceInfo.enabled = true);
++        AccessibilityServiceInfo a11yServiceInfo = createMockAccessibilityServiceInfo(
++                mA11yFeatureComponent, /* tileServiceName= */ mTileServiceComponent
++        );
++        when(mMockPackageManagerInternal.getComponentEnabledSetting(
++                eq(mTileServiceComponent), anyInt(), anyInt()))
++                .thenReturn(PackageManager.COMPONENT_ENABLED_STATE_DEFAULT);
++
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal,
++                Collections.singletonList(a11yServiceInfo), /* accessibilityShortcutInfos=*/ null,
++                USER_ID);
++
++        assertThat(result).hasSize(1);
++        assertThat(result).contains(mTileServiceComponent);
++    }
++
++    @Test
++    public void getValidA11yTileServices_tileServiceDisabledByDefault_returnsEmptySet() {
++        TileServiceUtil.setupPackageManagerForTileService(
++                mMockPackageManagerInternal, USER_ID, mTileServiceComponent,
++                serviceInfo -> serviceInfo.enabled = false);
++        AccessibilityServiceInfo a11yServiceInfo = createMockAccessibilityServiceInfo(
++                mA11yFeatureComponent, /* tileServiceName= */ mTileServiceComponent
++        );
++        when(mMockPackageManagerInternal.getComponentEnabledSetting(
++                eq(mTileServiceComponent), anyInt(), anyInt()))
++                .thenReturn(PackageManager.COMPONENT_ENABLED_STATE_DEFAULT);
++
++        Set<ComponentName> result = AccessibilityTileUtils.getValidA11yTileServices(
++                mMockContext, mMockPackageManagerInternal,
++                Collections.singletonList(a11yServiceInfo), /* accessibilityShortcutInfos=*/ null,
++                USER_ID);
++
++        assertThat(result).isEmpty();
++    }
++
++    private AccessibilityShortcutInfo createFakeAccessibilityShortcutInfo(
++            @NonNull ComponentName shortcutInfoComponentName,
++            @Nullable ComponentName tileServiceName)
++            throws XmlPullParserException, IOException, PackageManager.NameNotFoundException {
++        Context context = mock(Context.class);
++        Resources resources = mock(Resources.class);
++        PackageManager packageManager = mock(PackageManager.class);
++        ActivityInfo activityInfo = mock(ActivityInfo.class);
++        XmlResourceParser xmlParser = mock(XmlResourceParser.class);
++        TypedArray typedArray = mock(TypedArray.class);
++
++        // 1. Configure the mock ActivityInfo
++        activityInfo.applicationInfo = mock(ApplicationInfo.class);
++        when(activityInfo.getComponentName()).thenReturn(shortcutInfoComponentName);
++        // 2. Mock the context to return the mock PackageManager
++        when(context.getPackageManager()).thenReturn(packageManager);
++        // 3. Mock the PackageManager to return mock Resources
++        when(packageManager.getResourcesForApplication(any(ApplicationInfo.class))).thenReturn(
++                resources);
++
++        // 4. Mock the XML parsing flow
++        // Simulate finding the <accessibility-shortcut-target> tag
++        when(activityInfo.loadXmlMetaData(packageManager,
++                AccessibilityShortcutInfo.META_DATA)).thenReturn(xmlParser);
++        when(xmlParser.next())
++                .thenReturn(XmlPullParser.START_TAG)
++                .thenReturn(XmlPullParser.END_DOCUMENT);
++        when(xmlParser.getName()).thenReturn("accessibility-shortcut-target");
++
++        // 5. Mock the Resources to return our mock TypedArray for attributes
++        when(resources.obtainAttributes(any(AttributeSet.class), any(int[].class)))
++                .thenReturn(typedArray);
++
++        // 6. Configure the mock TypedArray to return our test data
++        if (tileServiceName != null) {
++            when(typedArray.getString(
++                    com.android.internal.R.styleable.AccessibilityShortcutTarget_tileService))
++                    .thenReturn(tileServiceName.getClassName());
++        }
++
++        return new AccessibilityShortcutInfo(context, activityInfo);
++    }
++
++    private AccessibilityServiceInfo createMockAccessibilityServiceInfo(
++            @NonNull ComponentName a11yServiceComponent, @Nullable ComponentName tileServiceName) {
++        AccessibilityServiceInfo serviceInfo = mock(AccessibilityServiceInfo.class);
++        when(serviceInfo.getComponentName()).thenReturn(a11yServiceComponent);
++        if (tileServiceName != null) {
++            when(serviceInfo.getTileServiceName()).thenReturn(tileServiceName.getClassName());
++        }
++        ResolveInfo a11yResolveInfo = new ResolveInfo();
++        a11yResolveInfo.serviceInfo = new ServiceInfo();
++        a11yResolveInfo.serviceInfo.packageName = a11yServiceComponent.getPackageName();
++        a11yResolveInfo.serviceInfo.name = a11yServiceComponent.getClassName();
++        when(serviceInfo.getResolveInfo()).thenReturn(a11yResolveInfo);
++        return serviceInfo;
++    }
++}
+diff --git a/services/tests/servicestests/src/com/android/server/accessibility/AccessibilityUserStateTest.java b/services/tests/servicestests/src/com/android/server/accessibility/AccessibilityUserStateTest.java
+index cb52eef6adfe..4c6ce0798475 100644
+--- a/services/tests/servicestests/src/com/android/server/accessibility/AccessibilityUserStateTest.java
++++ b/services/tests/servicestests/src/com/android/server/accessibility/AccessibilityUserStateTest.java
+@@ -496,7 +496,7 @@ public class AccessibilityUserStateTest {
+         when(mMockServiceInfo.getTileServiceName()).thenReturn(tileComponent.getClassName());
+         when(mMockServiceInfo.getResolveInfo()).thenReturn(resolveInfo);
+         mUserState.mInstalledServices.add(mMockServiceInfo);
+-        mUserState.updateTileServiceMapForAccessibilityServiceLocked();
++        mUserState.updateTileServiceMapForAccessibilityServiceLocked(Set.of(tileComponent));
+ 
+         Map<ComponentName, AccessibilityServiceInfo> actual =
+                 mUserState.getTileServiceToA11yServiceInfoMapLocked();
+diff --git a/services/tests/servicestests/src/com/android/server/accessibility/utils/TileServiceUtil.java b/services/tests/servicestests/src/com/android/server/accessibility/utils/TileServiceUtil.java
+new file mode 100644
+index 000000000000..a6a61b793613
+--- /dev/null
++++ b/services/tests/servicestests/src/com/android/server/accessibility/utils/TileServiceUtil.java
+@@ -0,0 +1,96 @@
++/*
++ * Copyright (C) 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.server.accessibility.utils;
++
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.argThat;
++import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.when;
++
++import android.Manifest;
++import android.annotation.NonNull;
++import android.annotation.UserIdInt;
++import android.content.ComponentName;
++import android.content.pm.PackageManager;
++import android.content.pm.PackageManagerInternal;
++import android.content.pm.ResolveInfo;
++import android.content.pm.ServiceInfo;
++import android.os.Process;
++
++import java.util.function.Consumer;
++
++/**
++ * A test utility for setting up a mock {@link PackageManagerInternal} for TileService queries.
++ */
++public class TileServiceUtil {
++    private TileServiceUtil() {
++        // Utility class
++    }
++
++    /**
++     * Sets up a mock {@link PackageManagerInternal} to respond to queries for a tile service.
++     *
++     * <p>This is a convenience method that configures a valid, enabled TileService.
++     *
++     * @param pm The mock {@link PackageManagerInternal} instance.
++     * @param userId The user ID for the query.
++     * @param tileComponent The {@link ComponentName} of the TileService to mock.
++     */
++    public static void setupPackageManagerForValidTileService(@NonNull PackageManagerInternal pm,
++            @UserIdInt int userId,
++            @NonNull ComponentName tileComponent) {
++        // A valid service is one with no special mutations.
++        setupPackageManagerForTileService(pm, userId, tileComponent, serviceInfo -> {});
++    }
++
++    /**
++     * Sets up a mock {@link PackageManagerInternal} to respond to queries for a tile service,
++     * allowing for custom modifications to simulate different states.
++     *
++     * <p>By default, this prepares a valid TileService. The {@code serviceInfoMutator} can be
++     * used to configure invalid states (e.g., disabled, missing permission) for testing.
++     *
++     * @param pm The mock {@link PackageManagerInternal} instance.
++     * @param userId The user ID for the query.
++     * @param tileComponent The {@link ComponentName} of the TileService to mock.
++     * @param serviceInfoMutator A {@link Consumer} that can modify the default {@link ServiceInfo}.
++     */
++    public static void setupPackageManagerForTileService(@NonNull PackageManagerInternal pm,
++            @UserIdInt int userId,
++            @NonNull ComponentName tileComponent,
++            @NonNull Consumer<ServiceInfo> serviceInfoMutator) {
++        // Create the base ServiceInfo for a valid TileService.
++        final ServiceInfo serviceInfo = new ServiceInfo();
++        serviceInfo.exported = true;
++        serviceInfo.permission = Manifest.permission.BIND_QUICK_SETTINGS_TILE;
++        serviceInfo.enabled = true;
++
++        final ResolveInfo tileResolveInfo = new ResolveInfo();
++        tileResolveInfo.serviceInfo = serviceInfo;
++
++        // Allow the caller to mutate the ServiceInfo to create invalid or custom states.
++        serviceInfoMutator.accept(serviceInfo);
++
++        when(pm.resolveService(
++                argThat(intent -> intent != null && tileComponent.equals(intent.getComponent())),
++                any(), eq(0L), eq(userId), eq(Process.myUid()))).thenReturn(tileResolveInfo);
++
++        when(pm.getComponentEnabledSetting(
++                eq(tileComponent), eq(Process.myUid()), eq(userId)))
++                .thenReturn(PackageManager.COMPONENT_ENABLED_STATE_DEFAULT);
++    }
++}
+-- 
+2.53.0
+

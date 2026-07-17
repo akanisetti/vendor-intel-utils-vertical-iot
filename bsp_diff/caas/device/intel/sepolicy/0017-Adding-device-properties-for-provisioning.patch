@@ -1,0 +1,86 @@
+From 5f36178f35c38d76b95310d9e690e43a1a13f5ca Mon Sep 17 00:00:00 2001
+From: gdonthu <gangadhar.donthu@intel.com>
+Date: Thu, 9 Jul 2026 07:45:39 +0000
+Subject: [PATCH] Adding device properties for provisioning.
+
+Tracked-On: NICACP3-1403
+
+Signed-off-by: gdonthu <gangadhar.donthu@intel.com>
+---
+ tee/trusty/file_contexts          |  3 +++
+ tee/trusty/property.te            |  4 ++++
+ tee/trusty/property_contexts      |  1 +
+ tee/trusty/set_attestation_ids.te | 33 +++++++++++++++++++++++++++++++
+ 4 files changed, 41 insertions(+)
+ create mode 100644 tee/trusty/set_attestation_ids.te
+
+diff --git a/tee/trusty/file_contexts b/tee/trusty/file_contexts
+index 290f1f0..038fef0 100644
+--- a/tee/trusty/file_contexts
++++ b/tee/trusty/file_contexts
+@@ -14,3 +14,6 @@
+ /vendor/bin/hw/android.hardware.keymaster@4.0-service.trusty      u:object_r:hal_keymaster_default_exec:s0
+ /vendor/bin/hw/android.hardware.security.keymint-service.trusty      u:object_r:hal_keymint_default_exec:s0
+ /vendor/bin/hw/android.hardware.security.keymint-service.rust.trusty u:object_r:hal_keymint_default_exec:s0
++/vendor/bin/trusty_keymaster_set_attestation_ids      u:object_r:set_attestation_ids_exec:s0
++/vendor/bin/auto_provision_attestation\.sh             u:object_r:set_attestation_ids_exec:s0
++
+diff --git a/tee/trusty/property.te b/tee/trusty/property.te
+index b7b61e2..fbf0357 100644
+--- a/tee/trusty/property.te
++++ b/tee/trusty/property.te
+@@ -1 +1,5 @@
+ vendor_internal_prop(vendor_trusty_storage_prop)
++
++# Marker set once after first-boot attestation-ID provisioning completes
++vendor_internal_prop(vendor_attestation_prop)
++
+diff --git a/tee/trusty/property_contexts b/tee/trusty/property_contexts
+index cc1ec1d..3be6cc8 100644
+--- a/tee/trusty/property_contexts
++++ b/tee/trusty/property_contexts
+@@ -1 +1,2 @@
+ ro.vendor.trusty.storage.fs_ready               u:object_r:vendor_trusty_storage_prop:s0
++persist.vendor.attestation.done                 u:object_r:vendor_attestation_prop:s0
+diff --git a/tee/trusty/set_attestation_ids.te b/tee/trusty/set_attestation_ids.te
+new file mode 100644
+index 0000000..c2935d2
+--- /dev/null
++++ b/tee/trusty/set_attestation_ids.te
+@@ -0,0 +1,33 @@
++#============= set attestation ids ==============
++type set_attestation_ids, domain;
++type set_attestation_ids_exec, exec_type, file_type, vendor_file_type;
++init_daemon_domain(set_attestation_ids);
++hal_server_domain(set_attestation_ids, hal_keymint);
++
++# Allow reading device properties
++get_prop(set_attestation_ids, serialno_prop);
++get_prop(set_attestation_ids, build_attestation_prop);
++get_prop(set_attestation_ids, vendor_default_prop);
++
++# Allow the provisioning domain to read and set the first-boot marker
++# (the script reads it to early-exit, then sets it on success)
++get_prop(set_attestation_ids, vendor_attestation_prop);
++set_prop(set_attestation_ids, vendor_attestation_prop);
++
++# vendor_init must read the marker to evaluate the init.rc trigger:
++#   on property:sys.boot_completed=1 && property:persist.vendor.attestation.done=""
++get_prop(vendor_init, vendor_attestation_prop);
++
++# Allow shell script execution.
++# On the vendor partition /vendor/bin/{sh,toolbox} are labeled vendor_shell_exec /
++# vendor_toolbox_exec (NOT the system shell_exec / toolbox_exec), so the domain must
++# be allowed to execute those vendor types for the script and its getprop/setprop calls.
++allow set_attestation_ids vendor_shell_exec:file { rx_file_perms execute_no_trans };
++allow set_attestation_ids vendor_toolbox_exec:file { rx_file_perms execute_no_trans };
++
++# The script (domain set_attestation_ids) execs the provisioning binary, which is
++# labeled with this domain's own exec type; allow running it without a transition.
++allow set_attestation_ids set_attestation_ids_exec:file { rx_file_perms execute_no_trans };
++
++# Allow shell to execute the wrapper script (for manual testing via adb)
++allow shell set_attestation_ids_exec:file { read open map getattr execute };
+-- 
+2.34.1
+

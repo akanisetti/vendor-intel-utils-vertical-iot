@@ -1,0 +1,38 @@
+From 3d96d9dd107b8dd47a5d8893e5feede8257abf47 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 8 Jul 2026 05:03:39 +0000
+Subject: [PATCH] Remove invalid HAL requirements from device DCM
+
+Remove android.frameworks.sensorservice and android.hardware.media.c2
+software entries from device compatibility matrix. These HALs are not
+provided by the A16 GSI framework manifest causing the framework
+manifest device matrix compatibility check to fail.
+
+Fixes: vts_treble_vintf_framework_test FrameworkManifestDeviceMatrixCompatibility
+
+Tracked-On: NIACP3-1474
+Signed-off-by: patelank <patelank@intel.com>
+---
+ groups/device-specific/caas/compatibility_matrix.xml | 8 --------
+ 1 file changed, 8 deletions(-)
+
+diff --git a/groups/device-specific/caas/compatibility_matrix.xml b/groups/device-specific/caas/compatibility_matrix.xml
+index e0babf6a..495b35f9 100644
+--- a/groups/device-specific/caas/compatibility_matrix.xml
++++ b/groups/device-specific/caas/compatibility_matrix.xml
+@@ -1,12 +1,4 @@
+ <compatibility-matrix version="1.0" type="device">
+-    <hal format="aidl">
+-        <name>android.frameworks.sensorservice</name>
+-        <fqname>ISensorManager/default</fqname>
+-    </hal>
+-    <hal format="aidl">
+-        <name>android.hardware.media.c2</name>
+-        <fqname>IComponentStore/software</fqname>
+-    </hal>
+     <system-sdk>
+         <version>35</version>
+     </system-sdk>
+-- 
+2.34.1
+

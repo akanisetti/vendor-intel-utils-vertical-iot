@@ -1,0 +1,101 @@
+From 13e6d894171a2acd4a1d7c44f349811f826039b3 Mon Sep 17 00:00:00 2001
+From: Beverly <beverlyt@google.com>
+Date: Wed, 28 Jan 2026 12:06:12 +0000
+Subject: [PATCH 28/38] On face auth success, verify the face auth'd user is
+ the current user
+
+Flag: EXEMPT BUGFIX
+Bug: 463674813
+Test: setup two users with one of them with
+face enrolled, on user switching to the non-enrolled
+face auth user, observe face auth doesn't unlock the device
+Test: atest DeviceEntryFaceAuthRepositoryTest
+Change-Id: Iddef7ea490f63517550ebe74b3312f8f59bd72cc
+
+Change-Id: Ia006cf4220872208fc90fae293f63acbffdf4a66
+(cherry picked from commit f09f1e9a96669af2c73125083c42f8c1cc3ed3c3)
+---
+ .../DeviceEntryFaceAuthRepositoryTest.kt       | 18 ++++++------------
+ .../DeviceEntryFaceAuthRepository.kt           |  2 +-
+ 2 files changed, 7 insertions(+), 13 deletions(-)
+
+diff --git a/packages/SystemUI/multivalentTests/src/com/android/systemui/deviceentry/data/repository/DeviceEntryFaceAuthRepositoryTest.kt b/packages/SystemUI/multivalentTests/src/com/android/systemui/deviceentry/data/repository/DeviceEntryFaceAuthRepositoryTest.kt
+index 651d474d78b9..d466d63aaaec 100644
+--- a/packages/SystemUI/multivalentTests/src/com/android/systemui/deviceentry/data/repository/DeviceEntryFaceAuthRepositoryTest.kt
++++ b/packages/SystemUI/multivalentTests/src/com/android/systemui/deviceentry/data/repository/DeviceEntryFaceAuthRepositoryTest.kt
+@@ -127,6 +127,7 @@ class DeviceEntryFaceAuthRepositoryTest : SysuiTestCase() {
+     @Mock private lateinit var sessionTracker: SessionTracker
+     @Mock private lateinit var uiEventLogger: UiEventLogger
+     @Mock private lateinit var dumpManager: DumpManager
++    @Mock private lateinit var authenticationResult: FaceManager.AuthenticationResult
+ 
+     @Captor
+     private lateinit var authenticationCallback: ArgumentCaptor<FaceManager.AuthenticationCallback>
+@@ -176,6 +177,7 @@ class DeviceEntryFaceAuthRepositoryTest : SysuiTestCase() {
+     fun setup() {
+         MockitoAnnotations.initMocks(this)
+         fakeUserRepository.setUserInfos(listOf(primaryUser, secondaryUser))
++        whenever(authenticationResult.userId).thenReturn(primaryUserId)
+         featureFlags = FakeFeatureFlags()
+ 
+         bypassStateChangedListener =
+@@ -789,9 +791,7 @@ class DeviceEntryFaceAuthRepositoryTest : SysuiTestCase() {
+ 
+             triggerFaceAuth(false)
+ 
+-            authenticationCallback.value.onAuthenticationSucceeded(
+-                mock(FaceManager.AuthenticationResult::class.java)
+-            )
++            authenticationCallback.value.onAuthenticationSucceeded(authenticationResult)
+ 
+             assertThat(authenticated()).isTrue()
+ 
+@@ -808,9 +808,7 @@ class DeviceEntryFaceAuthRepositoryTest : SysuiTestCase() {
+ 
+             triggerFaceAuth(false)
+ 
+-            authenticationCallback.value.onAuthenticationSucceeded(
+-                mock(FaceManager.AuthenticationResult::class.java)
+-            )
++            authenticationCallback.value.onAuthenticationSucceeded(authenticationResult)
+ 
+             assertThat(authenticated()).isTrue()
+ 
+@@ -827,9 +825,7 @@ class DeviceEntryFaceAuthRepositoryTest : SysuiTestCase() {
+ 
+             triggerFaceAuth(false)
+ 
+-            authenticationCallback.value.onAuthenticationSucceeded(
+-                mock(FaceManager.AuthenticationResult::class.java)
+-            )
++            authenticationCallback.value.onAuthenticationSucceeded(authenticationResult)
+ 
+             assertThat(authenticated()).isTrue()
+ 
+@@ -850,9 +846,7 @@ class DeviceEntryFaceAuthRepositoryTest : SysuiTestCase() {
+             triggerFaceAuth(false)
+ 
+             keyguardRepository.setStatusBarState(StatusBarState.KEYGUARD)
+-            authenticationCallback.value.onAuthenticationSucceeded(
+-                mock(FaceManager.AuthenticationResult::class.java)
+-            )
++            authenticationCallback.value.onAuthenticationSucceeded(authenticationResult)
+ 
+             assertThat(authenticated()).isTrue()
+ 
+diff --git a/packages/SystemUI/src/com/android/systemui/deviceentry/data/repository/DeviceEntryFaceAuthRepository.kt b/packages/SystemUI/src/com/android/systemui/deviceentry/data/repository/DeviceEntryFaceAuthRepository.kt
+index 449a995b782a..c8543f6a665e 100644
+--- a/packages/SystemUI/src/com/android/systemui/deviceentry/data/repository/DeviceEntryFaceAuthRepository.kt
++++ b/packages/SystemUI/src/com/android/systemui/deviceentry/data/repository/DeviceEntryFaceAuthRepository.kt
+@@ -508,7 +508,7 @@ constructor(
+                 // boolean is updated to new value before the event is propagated.
+                 // TODO (b/310592822): once all consumers can use the new system directly, we don't
+                 //  have to worry about this ordering.
+-                _isAuthenticated.value = true
++                _isAuthenticated.value = result.userId == currentUserId
+                 _authenticationStatus.value = SuccessFaceAuthenticationStatus(result)
+                 faceAuthLogger.faceAuthSuccess(result)
+                 onFaceAuthRequestCompleted()
+-- 
+2.53.0
+

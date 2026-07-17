@@ -1,0 +1,145 @@
+From 70e10d7c525321fdf3f5e3b3ed0d7cc91fde5f1f Mon Sep 17 00:00:00 2001
+From: Ivan Chiang <chiangi@google.com>
+Date: Wed, 15 Oct 2025 03:27:26 +0000
+Subject: [PATCH 14/38] Reapply "[PM] Check unknown sources user restriction
+ for intent installation"
+
+This reverts commit 29962260bd043c197e411b690e862a318b31bae5.
+Fix the issues and reland the patch.
+
+Bypass the unknown source user restrictions check when either of the
+following two conditions is met:
+1. An installer with the INSTALL_PACKAGES permission initiated the
+   installation via the PackageInstaller APIs and not via an
+   ACTION_VIEW or ACTION_INSTALL_PACKAGE intent.
+2. An installer is a privileged app and initiated the installer via
+   the ACTION_INSTALL_PACKAGE or ACTION_VIEW intent, but it has set
+   the EXTRA_NOT_UNKNOWN_SOURCE flag to be true in the intent.
+
+Flag: EXEMPT BUGFIX
+Bug: 438352252
+Test: atest CtsDevicePolicyManagerTestCases:MixedProfileOwnerTest#testPackageInstallUserRestrictions
+Test: atest CtsDevicePolicyManagerTestCases:MixedManagedProfileOwnerTest#testPackageInstallUserRestrictions
+Test: atest CtsPackageInstallTestCases:IntentTest
+Test: atest CtsPackageInstallSessionTestCases:SessionTest
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:81f83fdb0944d0d8a3337d2578d73dd77d60143b
+Merged-In: Ib917acb2c4738f6a4758b8ca149b80943f00acca
+Change-Id: Ib917acb2c4738f6a4758b8ca149b80943f00acca
+---
+ .../packageinstaller/InstallStart.java        | 20 +++++++--
+ .../v2/model/InstallRepository.kt             | 43 +++++++++++--------
+ 2 files changed, 42 insertions(+), 21 deletions(-)
+
+diff --git a/packages/PackageInstaller/src/com/android/packageinstaller/InstallStart.java b/packages/PackageInstaller/src/com/android/packageinstaller/InstallStart.java
+index 6c06fab16502..9fba07dbe13e 100644
+--- a/packages/PackageInstaller/src/com/android/packageinstaller/InstallStart.java
++++ b/packages/PackageInstaller/src/com/android/packageinstaller/InstallStart.java
+@@ -100,6 +100,7 @@ public class InstallStart extends Activity {
+         // be PIA.
+         int originatingUid = callingUid;
+ 
++        String intentAction = intent.getAction();
+         final boolean isSessionInstall =
+                 PackageInstaller.ACTION_CONFIRM_PRE_APPROVAL.equals(intent.getAction())
+                         || PackageInstaller.ACTION_CONFIRM_INSTALL.equals(intent.getAction());
+@@ -160,7 +161,20 @@ public class InstallStart extends Activity {
+             mAbortInstall = true;
+         }
+ 
+-        checkDevicePolicyRestrictions(isTrustedSource);
++        // Bypass the unknown source user restrictions check when either of the following
++        // two conditions is met:
++        // 1. An installer with the INSTALL_PACKAGES permission initiated the
++        // installation via the PackageInstaller APIs and not via an
++        // ACTION_VIEW or ACTION_INSTALL_PACKAGE intent.
++        // 2. An installer is a privileged app and initiated the installer via
++        // the ACTION_INSTALL_PACKAGE or ACTION_VIEW intent, but it has set the
++        // EXTRA_NOT_UNKNOWN_SOURCE flag to be true in the intent.
++        final boolean isIntentInstall =
++                Intent.ACTION_VIEW.equals(intentAction)
++                        || Intent.ACTION_INSTALL_PACKAGE.equals(intentAction);
++        final boolean bypassUnknownSourceRestrictions =
++                (!isIntentInstall && isInstallPkgPermissionGranted) || isPrivilegedAndKnown;
++        checkDevicePolicyRestrictions(bypassUnknownSourceRestrictions);
+ 
+         final String installerPackageNameFromIntent = getIntent().getStringExtra(
+                 Intent.EXTRA_INSTALLER_PACKAGE_NAME);
+@@ -322,9 +336,9 @@ public class InstallStart extends Activity {
+         return callingUid == installerUid;
+     }
+ 
+-    private void checkDevicePolicyRestrictions(boolean isTrustedSource) {
++    private void checkDevicePolicyRestrictions(boolean bypassUnknownSourceRestrictions) {
+         String[] restrictions;
+-        if(isTrustedSource) {
++        if (bypassUnknownSourceRestrictions) {
+             restrictions = new String[] { UserManager.DISALLOW_INSTALL_APPS };
+         } else {
+             restrictions =  new String[] {
+diff --git a/packages/PackageInstaller/src/com/android/packageinstaller/v2/model/InstallRepository.kt b/packages/PackageInstaller/src/com/android/packageinstaller/v2/model/InstallRepository.kt
+index 3b0faf0cb56c..77d35eba2898 100644
+--- a/packages/PackageInstaller/src/com/android/packageinstaller/v2/model/InstallRepository.kt
++++ b/packages/PackageInstaller/src/com/android/packageinstaller/v2/model/InstallRepository.kt
+@@ -201,12 +201,32 @@ class InstallRepository(private val context: Context) {
+             return InstallAborted(ABORT_REASON_INTERNAL_ERROR)
+         }
+ 
+-        isTrustedSource = isInstallRequestFromTrustedSource(sourceInfo, this.intent, callingUid)
+-        if (!isInstallPermissionGrantedOrRequested(context, callingUid, isTrustedSource)) {
++        val isPrivilegedAndKnown = sourceInfo != null && sourceInfo.isPrivilegedApp &&
++                intent.getBooleanExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, false)
++        val isInstallPkgPermissionGranted = callingUid != Process.INVALID_UID &&
++                isPermissionGranted(context, Manifest.permission.INSTALL_PACKAGES, callingUid)
++
++        isTrustedSource = isPrivilegedAndKnown || isInstallPkgPermissionGranted
++
++        if (callingUid != Process.INVALID_UID
++            && !isInstallPermissionGrantedOrRequested(context, callingUid, isTrustedSource)) {
+             return InstallAborted(ABORT_REASON_INTERNAL_ERROR)
+         }
+ 
+-        val restriction = getDevicePolicyRestrictions(isTrustedSource)
++        // Bypass the unknown source user restrictions check when either of the following
++        // two conditions is met:
++        // 1. An installer with the INSTALL_PACKAGES permission initiated the
++        // installation via the PackageInstaller APIs and not via an
++        // ACTION_VIEW or ACTION_INSTALL_PACKAGE intent.
++        // 2. An installer is a privileged app and initiated the installer via
++        // the ACTION_INSTALL_PACKAGE or ACTION_VIEW intent, but it has set the
++        // EXTRA_NOT_UNKNOWN_SOURCE flag to be true in the intent.
++        val isIntentInstall =
++            Intent.ACTION_VIEW == intent.action
++                    || Intent.ACTION_INSTALL_PACKAGE == intent.action
++        val bypassUnknownSourceRestrictions =
++            (!isIntentInstall && isInstallPkgPermissionGranted) || isPrivilegedAndKnown
++        val restriction = getDevicePolicyRestrictions(bypassUnknownSourceRestrictions)
+         if (restriction != null) {
+             val adminSupportDetailsIntent =
+                 devicePolicyManager!!.createAdminSupportIntent(restriction)
+@@ -232,21 +252,8 @@ class InstallRepository(private val context: Context) {
+         }
+     }
+ 
+-    private fun isInstallRequestFromTrustedSource(
+-        sourceInfo: ApplicationInfo?,
+-        intent: Intent,
+-        callingUid: Int,
+-    ): Boolean {
+-        val isPrivilegedAndKnown = sourceInfo != null && sourceInfo.isPrivilegedApp &&
+-            intent.getBooleanExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, false)
+-        val isInstallPkgPermissionGranted =
+-            isPermissionGranted(context, Manifest.permission.INSTALL_PACKAGES, callingUid)
+-
+-        return isPrivilegedAndKnown || isInstallPkgPermissionGranted
+-    }
+-
+-    private fun getDevicePolicyRestrictions(isTrustedSource: Boolean): String? {
+-        val restrictions: Array<String> = if (isTrustedSource) {
++    private fun getDevicePolicyRestrictions(bypassUnknownSourceRestrictions: Boolean): String? {
++        val restrictions: Array<String> = if (bypassUnknownSourceRestrictions) {
+             arrayOf(UserManager.DISALLOW_INSTALL_APPS)
+         } else {
+             arrayOf(
+-- 
+2.53.0
+

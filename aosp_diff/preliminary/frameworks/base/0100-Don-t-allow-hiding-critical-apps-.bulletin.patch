@@ -1,0 +1,93 @@
+From c2ec8df1f4def8a898f43e5b5ed6b00d729de11a Mon Sep 17 00:00:00 2001
+From: Pavel Grafov <pgrafov@google.com>
+Date: Tue, 2 Dec 2025 17:12:41 +0000
+Subject: [PATCH 24/38] Don't allow hiding critical apps.
+
+Hiding these apps in the work profile may cause failure to boot.
+
+Bug: 438186009
+Test: atest CtsDevicePolicyManagerTestCases:com.android.cts.devicepolicy.ManagedProfileTest#testHideAllApps
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:79cca47a6201c9debdf5695b240926c3f1944166
+Merged-In: I2ade10f20636fe8dfe875f4827e5e97d734bf8a1
+Change-Id: I2ade10f20636fe8dfe875f4827e5e97d734bf8a1
+---
+ core/res/res/values/policy_exempt_apps.xml        | 10 ++++++++++
+ core/res/res/values/symbols.xml                   |  1 +
+ .../devicepolicy/DevicePolicyManagerService.java  | 15 ++++++++++++++-
+ 3 files changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/core/res/res/values/policy_exempt_apps.xml b/core/res/res/values/policy_exempt_apps.xml
+index 1cead8322e55..e3591e517397 100644
+--- a/core/res/res/values/policy_exempt_apps.xml
++++ b/core/res/res/values/policy_exempt_apps.xml
+@@ -21,4 +21,14 @@
+     -->
+     <string-array translatable="false" name="policy_exempt_apps">
+     </string-array>
++
++    <!--
++    A collection of apps that are critical for the device and hence will never be affected by
++    DevicePolicyManager.setApplicationHidden policy.
++    -->
++    <string-array translatable="false" name="application_hidden_policy_exempt_apps">
++        <item>com.android.nfc</item>
++        <item>com.android.settings</item>
++        <item>com.android.providers.settings</item>
++    </string-array>
+ </resources>
+diff --git a/core/res/res/values/symbols.xml b/core/res/res/values/symbols.xml
+index 70e3356a46fe..3db987473bab 100644
+--- a/core/res/res/values/symbols.xml
++++ b/core/res/res/values/symbols.xml
+@@ -1315,6 +1315,7 @@
+   <java-symbol type="array" name="vendor_cross_profile_apps" />
+   <java-symbol type="array" name="policy_exempt_apps" />
+   <java-symbol type="array" name="vendor_policy_exempt_apps" />
++  <java-symbol type="array" name="application_hidden_policy_exempt_apps" />
+   <java-symbol type="array" name="cloneable_apps" />
+   <java-symbol type="array" name="config_securityStatePackages" />
+   <java-symbol type="array" name="stoppable_fgs_system_apps" />
+diff --git a/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java b/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java
+index 64560f7acc05..a1cb0c0edd81 100644
+--- a/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java
++++ b/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java
+@@ -11533,6 +11533,8 @@ public class DevicePolicyManagerService extends IDevicePolicyManager.Stub {
+                 R.array.config_packagesExemptFromSuspension);
+         dumpResources(pw, mContext, "policy_exempt_apps", R.array.policy_exempt_apps);
+         dumpResources(pw, mContext, "vendor_policy_exempt_apps", R.array.vendor_policy_exempt_apps);
++        dumpResources(pw, mContext, "application_hidden_policy_exempt_apps",
++                R.array.application_hidden_policy_exempt_apps);
+         pw.decreaseIndent();
+         pw.println();
+     }
+@@ -13400,6 +13402,17 @@ public class DevicePolicyManagerService extends IDevicePolicyManager.Stub {
+         return new ArrayList<>(apps);
+     }
+ 
++    private boolean isPackageExemptFromHiding(@NonNull String packageName) {
++        var exemptPackages = mContext.getResources().getStringArray(
++                R.array.application_hidden_policy_exempt_apps);
++        for (var exemptPackage : exemptPackages) {
++            if (packageName.equals(exemptPackage)) {
++                return true;
++            }
++        }
++        return false;
++    }
++
+     @Override
+     public void setUserRestriction(
+             ComponentName who, String callerPackage, String key, boolean enabledFromThisOwner,
+@@ -13927,7 +13940,7 @@ public class DevicePolicyManagerService extends IDevicePolicyManager.Stub {
+         enforcePermission(MANAGE_DEVICE_POLICY_PACKAGE_STATE, caller.getPackageName(), userId);
+ 
+         List<String> exemptApps = listPolicyExemptAppsUnchecked(mContext);
+-        if (exemptApps.contains(packageName)) {
++        if (exemptApps.contains(packageName) || isPackageExemptFromHiding(packageName)) {
+             Slogf.d(LOG_TAG, "setApplicationHidden(): ignoring %s as it's on policy-exempt list",
+                     packageName);
+             return false;
+-- 
+2.53.0
+

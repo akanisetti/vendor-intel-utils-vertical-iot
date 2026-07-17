@@ -1,0 +1,39 @@
+From 23db8878f2fff33d0d232de278acaa3a609f8874 Mon Sep 17 00:00:00 2001
+From: Joshua Duong <joshuaduong@google.com>
+Date: Fri, 9 Jan 2026 14:48:22 -0800
+Subject: [PATCH] Fix EVP_PKEY_cmp usage.
+
+Not all non-zero values mean success.
+
+Flag: EXEMPT CVE_FIX
+Bug: 469080888
+Test: b/469080888#comment6
+Change-Id: I20f3abf93ab9bd0bd349d17cce2ba7f56fa88e36
+(cherry picked from commit 8248d2b1f479aebc66ed7d96ba1f19a4144bc537)
+---
+ daemon/auth.cpp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/daemon/auth.cpp b/daemon/auth.cpp
+index 495df66d..3971ec19 100644
+--- a/daemon/auth.cpp
++++ b/daemon/auth.cpp
+@@ -336,11 +336,13 @@ int adbd_tls_verify_cert(X509_STORE_CTX* ctx, std::string* auth_key) {
+         bool verified = false;
+         bssl::UniquePtr<EVP_PKEY> known_evp(EVP_PKEY_new());
+         EVP_PKEY_set1_RSA(known_evp.get(), key);
+-        if (EVP_PKEY_cmp(known_evp.get(), evp_pkey.get())) {
++        int cmp_result = EVP_PKEY_cmp(known_evp.get(), evp_pkey.get());
++        if (cmp_result == 1) {
+             VLOG(AUTH) << "Matched auth_key=" << public_key;
+             verified = true;
+         } else {
+-            VLOG(AUTH) << "auth_key doesn't match [" << public_key << "]";
++            VLOG(AUTH) << "auth_key doesn't match [" << public_key << "] EVP_PKEY_cmp returned "
++                       << cmp_result;
+         }
+         RSA_free(key);
+         if (verified) {
+-- 
+2.53.0
+

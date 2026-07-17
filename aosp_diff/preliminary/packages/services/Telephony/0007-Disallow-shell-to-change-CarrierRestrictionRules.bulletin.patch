@@ -1,0 +1,36 @@
+From c4f682d9aa9fc1083b5208fcb02008b1ab66d169 Mon Sep 17 00:00:00 2001
+From: Keith Mok <keithmok@google.com>
+Date: Tue, 27 Jan 2026 23:40:15 +0000
+Subject: [PATCH] Disallow shell to change CarrierRestrictionRules
+
+Shell had MODIFY_PHONE_STATE for CTS purpose, but carrier restriction
+rules should not be able to bypass by adb shell (even without root)
+
+Flag: EXEMPT BUGFIX
+Bug: 462214379
+Test: presubmits
+Change-Id: Id75dc427ebd502070d8eaf81016ab8c79940dc40
+Merged-In: Id75dc427ebd502070d8eaf81016ab8c79940dc40
+---
+ src/com/android/phone/PhoneInterfaceManager.java | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/com/android/phone/PhoneInterfaceManager.java b/src/com/android/phone/PhoneInterfaceManager.java
+index 9789165e0..341737a8d 100644
+--- a/src/com/android/phone/PhoneInterfaceManager.java
++++ b/src/com/android/phone/PhoneInterfaceManager.java
+@@ -9306,6 +9306,11 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
+     @Override
+     @TelephonyManager.SetCarrierRestrictionResult
+     public int setAllowedCarriers(CarrierRestrictionRules carrierRestrictionRules) {
++        // Shell has MODIFY_PHONE_STATE permission even without root
++        // But we don't want adb shell to disable carrier restrictions
++        if (TelephonyPermissions.isShell(Binder.getCallingUid())) {
++            throw new SecurityException("setAllowedCarriers cannot be invoked by shell");
++        }
+         enforceModifyPermission();
+ 
+         enforceTelephonyFeatureWithException(getCurrentPackageName(),
+-- 
+2.53.0
+

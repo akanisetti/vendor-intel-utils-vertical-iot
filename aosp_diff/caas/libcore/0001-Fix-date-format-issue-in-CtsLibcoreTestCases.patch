@@ -1,0 +1,61 @@
+From 396555d0aba111115451b5d439d99a5defddb87a Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Thu, 2 Jul 2026 05:40:00 +0000
+Subject: [PATCH] Fix date format issue in CtsLibcoreTestCases
+
+Fix two CtsLibcoreTestCases regressions in DateFormat behavior for
+serialization-compatible English locales covered by b/266731719.
+
+When there is no explicit 12/24-hour override
+(DateFormat.is24Hour == null), ensure SHORT and MEDIUM time patterns use
+12-hour formatting for the bug-compat locales (en, en-US, en-US-*).
+
+This restores expected parse/format behavior for:
+- libcore.java.text.DateFormatTest#testParse_lenient_en
+- libcore.java.text.DateFormatTest#testFormat_forBug266731719
+
+Tracked-On: NIACP3-1479
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ .../java/libcore/icu/SimpleDateFormatData.java  | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/luni/src/main/java/libcore/icu/SimpleDateFormatData.java b/luni/src/main/java/libcore/icu/SimpleDateFormatData.java
+index e379f641b2d..07cbc0108f1 100644
+--- a/luni/src/main/java/libcore/icu/SimpleDateFormatData.java
++++ b/luni/src/main/java/libcore/icu/SimpleDateFormatData.java
+@@ -155,18 +155,27 @@ public class SimpleDateFormatData {
+         // because most users do not enable this setting, hurts performance in critical path,
+         // e.g. b/161846393, and ICU.getBestDateTimePattern will cache it in  ICU.CACHED_PATTERNS
+         // on demand.
++        // Keep bug-266731719 locales stable when no explicit user 12/24-hour preference is set.
++        // For these locales, java.text serialization/parsing in the wild expects 12-hour forms.
++        final Boolean use24Hour = DateFormat.is24Hour;
++        final boolean force12HourPattern =
++                (use24Hour == null) && isBug266731719Locale(locale);
+         switch (style) {
+             case DateFormat.SHORT:
+-                if (DateFormat.is24Hour == null) {
++                if (force12HourPattern) {
++                    return getTimePattern(false, false);
++                } else if (use24Hour == null) {
+                     return shortTimeFormat;
+                 } else {
+-                    return getTimePattern(DateFormat.is24Hour, false);
++                    return getTimePattern(use24Hour, false);
+                 }
+             case DateFormat.MEDIUM:
+-                if (DateFormat.is24Hour == null) {
++                if (force12HourPattern) {
++                    return getTimePattern(false, true);
++                } else if (use24Hour == null) {
+                     return mediumTimeFormat;
+                 } else {
+-                    return getTimePattern(DateFormat.is24Hour, true);
++                    return getTimePattern(use24Hour, true);
+                 }
+             case DateFormat.LONG:
+                 // CLDR doesn't really have anything we can use to obey the 12-/24-hour preference.
+-- 
+2.34.1
+

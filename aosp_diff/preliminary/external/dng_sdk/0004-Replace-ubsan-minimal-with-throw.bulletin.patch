@@ -1,0 +1,108 @@
+From 1337d2e14a412ec81a4a32f6251063091922a9e9 Mon Sep 17 00:00:00 2001
+From: John Reck <jreck@google.com>
+Date: Fri, 9 Jan 2026 12:38:56 -0500
+Subject: [PATCH] Replace ubsan-minimal with throw
+
+C++ exceptions are enabled in this library and
+are a much, much better solution for ubsan errors
+than a hard abort is.
+
+Bug: 470966846
+Bug: 467994860
+Bug: 467994310
+Bug: 461790658
+Bug: 456471487
+Bug: 453649377
+Bug: 449728942
+Test: atest ImageDecoderTest#testInterestingDngs
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:81ded662eee07fcbb830e6b6c83d1a3d85227ceb
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:475c8cce973f56488cc9f37d00cf0a4069f0e4fe
+Merged-In: I7b8414e4b5c2f2ca44f572fb72e625d1907f7902
+Change-Id: I7b8414e4b5c2f2ca44f572fb72e625d1907f7902
+---
+ Android.bp                                   | 18 ++++++++++++-
+ OWNERS                                       |  7 +++--
+ ubsan-replacement/ubsan_throwing_runtime.cpp | 27 ++++++++++++++++++++
+ 3 files changed, 49 insertions(+), 3 deletions(-)
+ create mode 100644 ubsan-replacement/ubsan_throwing_runtime.cpp
+
+diff --git a/Android.bp b/Android.bp
+index 1978b39..3d95a7b 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -168,7 +168,23 @@ cc_library {
+     sdk_version: "current",
+     defaults: ["libdng_sdk-defaults"],
+ 
+-    cflags: ["-DqDNGValidate=0"],
++    sanitize: {
++        // For now we want to disable the ubsan_minimal runtime so that we can
++        // inject our own that converts ubsan errors into C++ exceptions.
++        // Soong doesn't have a flag for that specifically, but setting
++        // 'never' in combination with `-fsanitize=` cflags works for
++        never: true,
++    },
++
++    cflags: [
++        "-DqDNGValidate=0",
++        "-fsanitize=signed-integer-overflow,unsigned-integer-overflow",
++        "-fno-sanitize-link-runtime",
++    ],
++
++    srcs: [
++        "ubsan-replacement/ubsan_throwing_runtime.cpp"
++    ],
+ 
+     shared_libs: [
+         "libz",
+diff --git a/OWNERS b/OWNERS
+index 8442daf..b9315f6 100644
+--- a/OWNERS
++++ b/OWNERS
+@@ -1,2 +1,5 @@
+-adaubert@google.com # legacy, only for compliance reasons still in place.
+-nchusid@google.com
+\ No newline at end of file
++# Bug component: 1075130
++include platform/frameworks/base:/graphics/java/android/graphics/OWNERS
++
++adaubert@google.com #{LAST_RESORT_SUGGESTION}
++nchusid@google.com #{LAST_RESORT_SUGGESTION}
+\ No newline at end of file
+diff --git a/ubsan-replacement/ubsan_throwing_runtime.cpp b/ubsan-replacement/ubsan_throwing_runtime.cpp
+new file mode 100644
+index 0000000..aeaad0c
+--- /dev/null
++++ b/ubsan-replacement/ubsan_throwing_runtime.cpp
+@@ -0,0 +1,27 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ */
++
++#include <stdexcept>
++
++#define INTERFACE extern "C" __attribute__((visibility("hidden")))
++
++INTERFACE void __ubsan_handle_add_overflow() {
++    throw std::runtime_error("ubsan: add-overflow");
++}
++
++INTERFACE void __ubsan_handle_sub_overflow() {
++    throw std::runtime_error("ubsan: sub-overflow");
++}
++
++INTERFACE void __ubsan_handle_mul_overflow() {
++    throw std::runtime_error("ubsan: mul-overflow");
++}
++
++INTERFACE void __ubsan_handle_negate_overflow() {
++    throw std::runtime_error("ubsan: negate-overflow");
++}
++
++INTERFACE void __ubsan_handle_divrem_overflow() {
++    throw std::runtime_error("ubsan: divrem-overflow");
++}
+-- 
+2.54.0.545.g6539524ca2-goog
+

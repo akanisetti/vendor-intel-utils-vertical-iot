@@ -1,0 +1,55 @@
+From 9f4ee3fc00f686f0ec6ac89e8d1af58049116136 Mon Sep 17 00:00:00 2001
+From: h00013079 <huangdezhi@hihonor.com>
+Date: Mon, 12 Jan 2026 16:18:04 -0800
+Subject: [PATCH 20/38] Checking userId in
+ com.android.server.pm.ComputerEngine#resolveContentProvider
+
+In the resolveContentProvider function, the entry checks whether the input parameter userId exists,
+then the userId that may be carried in the uri is parsed,
+and the userId in the uri is not checked for its existence.
+As a result, in the queryProvider function,
+packageState.getUserStateOrDefault(userId) obtains PackageUserStateInternal.DEFAULT,
+thereby obtaining ApplicationInfo. If the userid in the uri is not created,
+this is not in line with expectations.
+
+In the resolveContentProvider function,
+this patch adjusts the order of the judgment conditions for checking userId,
+and checks whether it exists after obtaining the real userId.
+This allows the expected results to be met in the cross-user query scenario.
+
+FLAG: EXEMPT BUGFIX
+Bug:401188957
+Signed-off-by: huangdezhi@hihonor.com
+Cherrypick-From: https://android-review.googlesource.com/q/commit:54761a770c416333210087e59ed48389b80ce776
+Merged-In: I8509df5387dd0df604a4838e8fa1db8267d7e62d
+Change-Id: I8509df5387dd0df604a4838e8fa1db8267d7e62d
+(cherry picked from commit 57eaa465cabb9a74cc57cbb16657c36ad9fc2d58)
+---
+ .../core/java/com/android/server/pm/ComputerEngine.java     | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/services/core/java/com/android/server/pm/ComputerEngine.java b/services/core/java/com/android/server/pm/ComputerEngine.java
+index 38ac0473d1a3..10865cee2158 100644
+--- a/services/core/java/com/android/server/pm/ComputerEngine.java
++++ b/services/core/java/com/android/server/pm/ComputerEngine.java
+@@ -4787,14 +4787,14 @@ public class ComputerEngine implements Computer {
+     public ProviderInfo resolveContentProvider(@NonNull String name,
+             @PackageManager.ResolveInfoFlagsBits long flags, @UserIdInt int userId,
+             int callingUid) {
+-        if (!mUserManager.exists(userId)) return null;
+-        flags = updateFlagsForComponent(flags, userId);
+-
+         // Callers of this API may not always separate the userID and authority. Let's parse it
+         // before resolving
+         String authorityWithoutUserId = ContentProvider.getAuthorityWithoutUserId(name);
+         userId = ContentProvider.getUserIdFromAuthority(name, userId);
+ 
++        if (!mUserManager.exists(userId)) return null;
++        flags = updateFlagsForComponent(flags, userId);
++
+         final ProviderInfo providerInfo = mComponentResolver.queryProvider(this,
+                 authorityWithoutUserId, flags, userId);
+         boolean checkedGrants = false;
+-- 
+2.53.0
+

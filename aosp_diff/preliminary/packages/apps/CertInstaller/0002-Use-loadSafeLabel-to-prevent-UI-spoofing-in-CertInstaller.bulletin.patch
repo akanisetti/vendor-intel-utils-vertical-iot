@@ -1,0 +1,65 @@
+From 557260007e3034d733e1d98175d9221b99c22773 Mon Sep 17 00:00:00 2001
+From: Radu Macovei <radumacovei@google.com>
+Date: Fri, 13 Feb 2026 06:17:42 -0800
+Subject: [PATCH] Use loadSafeLabel to prevent UI spoofing in CertInstaller
+
+Change appInfo.loadLabel(pm) to appInfo.loadSafeLabel(pm) in
+getCallingAppLabel(). This ensures that the application label is
+properly sanitized by the system, stripping potentially harmful
+characters like newlines.
+
+This addresses a vulnerability where a malicious application could use a
+crafted label to push the CA certificate installation warning
+off-screen, potentially tricking users into installing untrusted CA
+certificates. Using loadSafeLabel is a more direct fix within the
+existing method.
+
+This change corrects an erroneous behavior and is considered a low-risk
+bug fix.
+
+Bug: 471127462
+Test: Manually tested by installing the PoC app from the bug report. Verified that the dialog now displays the calling app name correctly without pushing down the warning message.
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:0034ca47f9c3552e0f2d5e361f210eb92e6db805
+Merged-In: Ia6972034427fff0239f8b2e7d1c12370758ddf6d
+Change-Id: Ia6972034427fff0239f8b2e7d1c12370758ddf6d
+Use loadSafeLabel to prevent UI spoofing in CertInstaller
+
+Change appInfo.loadLabel(pm) to appInfo.loadSafeLabel(pm) in
+getCallingAppLabel(). This ensures that the application label is
+properly sanitized by the system, stripping potentially harmful
+characters like newlines.
+
+This addresses a vulnerability where a malicious application could use a
+crafted label to push the CA certificate installation warning
+off-screen, potentially tricking users into installing untrusted CA
+certificates. Using loadSafeLabel is a more direct fix within the
+existing method.
+
+This change corrects an erroneous behavior and is considered a low-risk
+bug fix.
+
+Bug: 471127462
+Test: Manually tested by installing the PoC app from the bug report. Verified that the dialog now displays the calling app name correctly without pushing down the warning message.
+Flag: EXEMPT BUGFIX
+Change-Id: I4b4613304fde8e3db5ba2d34422ce2cf3ec9a348
+---
+ src/com/android/certinstaller/CertInstaller.java | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/com/android/certinstaller/CertInstaller.java b/src/com/android/certinstaller/CertInstaller.java
+index 570c400..1c8efd7 100644
+--- a/src/com/android/certinstaller/CertInstaller.java
++++ b/src/com/android/certinstaller/CertInstaller.java
+@@ -393,7 +393,7 @@ public class CertInstaller extends Activity {
+             return null;
+         }
+ 
+-        return appInfo.loadLabel(pm);
++        return appInfo.loadSafeLabel(pm);
+     }
+ 
+     private Dialog createRedirectCaCertificateDialog() {
+-- 
+2.53.0
+

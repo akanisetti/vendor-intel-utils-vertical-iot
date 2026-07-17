@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Suresh, Prashanth <prashanth.suresh@intel.com>
+Date: Mon, 29 Jun 2026 16:50:00 +0000
+Subject: [PATCH] sepolicy: remove spurious vsock_socket allow rule from camera HAL domain
+
+The camera HAL (hal_camera_default) does not use AF_VSOCK. The
+'allow hal_camera_default self:{ socket vsock_socket } ...' rule was
+copied in erroneously and now causes a build-time neverallow violation
+with the 'neverallow { domain -unconstrained_vsock_violators }
+*:vsock_socket ...' rule in system/sepolicy/private/domain.te.
+
+Remove the rule from both camera-ext variants (ext-camera-only and ivi).
+No functional change — the camera HAL never opened vsock sockets.
+
+Tracked-On: NIACP3-1182
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ camera-ext/ext-camera-only/hal_camera_default.te | 1 -
+ camera-ext/ivi/hal_camera_default.te             | 1 -
+ 2 files changed, 2 deletions(-)
+diff --git a/camera-ext/ext-camera-only/hal_camera_default.te b/camera-ext/ext-camera-only/hal_camera_default.te
+index 67ca30f..fa5901a 100644
+--- a/camera-ext/ext-camera-only/hal_camera_default.te
++++ b/camera-ext/ext-camera-only/hal_camera_default.te
+@@ -8,7 +8,6 @@ allow hal_camera_default gpu_device:dir search;
+ allow hal_camera_default hal_graphics_allocator_default_tmpfs:file { map read write };
+ allow hal_camera_default hal_graphics_mapper_hwservice:hwservice_manager find;
+ allow hal_camera_default hal_graphics_composer_default:fd use;
+-allow hal_camera_default self:{ socket vsock_socket } { create read write listen accept bind };
+ allow hal_camera_default hal_graphics_mapper_service:service_manager find;
+ allow hal_camera_default hal_graphics_allocator_default:binder call;
+ set_prop(hal_camera_default, vendor_camera_default_prop)
+diff --git a/camera-ext/ivi/hal_camera_default.te b/camera-ext/ivi/hal_camera_default.te
+index c28c02c..d2afb4b 100644
+--- a/camera-ext/ivi/hal_camera_default.te
++++ b/camera-ext/ivi/hal_camera_default.te
+@@ -12,6 +12,5 @@ allow hal_camera_default hal_graphics_allocator_service:service_manager find;
+ allow hal_camera_default hal_graphics_allocator_default_tmpfs:file { map read write };
+ allow hal_camera_default hal_graphics_mapper_hwservice:hwservice_manager find;
+ allow hal_camera_default hal_graphics_composer_default:fd use;
+-allow hal_camera_default self:{ socket vsock_socket } { create read write listen accept bind };
+ set_prop(hal_camera_default, vendor_camera_default_prop)
+ hal_client_domain(hal_camera_default, hal_graphics_allocator)
+
+-- 
+2.34.1

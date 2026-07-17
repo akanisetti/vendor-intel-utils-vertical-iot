@@ -1,0 +1,83 @@
+From 057784d0aa3d7fb37d4124b23ba25eea825e11f8 Mon Sep 17 00:00:00 2001
+From: Sanjana Sunil <sanjanasunil@google.com>
+Date: Tue, 3 Mar 2026 17:27:54 +0000
+Subject: [PATCH 33/38] Compare period character as well during wildcard
+ matching
+
+Currently, during wildcard matching, specifying *.xyz.com will end up
+matching any domain ending in xyz.com (e.g. including abcxyz.com, which
+is completely different). Ensure that it only matches the following:
+1. xyz.com exactly
+2. Domains ending in .xyz.com i.e. check the period character as well
+
+Bug: 483142784
+Flag: EXEMPT BUGFIX
+Test: atest DomainVerificationPackageTest#testWildcardDomain
+
+Change-Id: Ib6c7d9b560c75dd8ce1be3e2e40c68f8f3238f14
+Merged-In: Ib6c7d9b560c75dd8ce1be3e2e40c68f8f3238f14
+(cherry picked from commit 919d0cb125b31e1512417a69251f1cbee54ab12e)
+---
+ .../domain/DomainVerificationService.java     |  9 ++++++-
+ .../domain/DomainVerificationPackageTest.kt   | 25 +++++++++++++++++++
+ 2 files changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/pm/verify/domain/DomainVerificationService.java b/services/core/java/com/android/server/pm/verify/domain/DomainVerificationService.java
+index 5c8215e4bfdb..86c7d432200c 100644
+--- a/services/core/java/com/android/server/pm/verify/domain/DomainVerificationService.java
++++ b/services/core/java/com/android/server/pm/verify/domain/DomainVerificationService.java
+@@ -2030,7 +2030,14 @@ public class DomainVerificationService extends SystemService
+                 }
+ 
+                 String domain = stateMap.keyAt(index);
+-                if (domain.startsWith("*.") && host.endsWith(domain.substring(2))) {
++                // Ensure that a wildcard domain (e.g. *.xyz.com) only matches the following:
++                // 1. The domain itself (in this case xyz.com exactly)
++                // 2. Subdomains ending in the domain (such as abc.xyz.com)
++                // This should not match every single domain ending in this string (xyz.com) e.g.
++                // *.xyz.com should not match abcxyz.com.
++                if (domain.startsWith("*.")
++                        && (host.endsWith(domain.substring(1))
++                            || host.equals(domain.substring(2)))) {
+                     if (debug) {
+                         debugApproval(packageName, debugObject, userId, true,
+                                 "host verified by wildcard");
+diff --git a/services/tests/PackageManagerServiceTests/unit/src/com/android/server/pm/test/verify/domain/DomainVerificationPackageTest.kt b/services/tests/PackageManagerServiceTests/unit/src/com/android/server/pm/test/verify/domain/DomainVerificationPackageTest.kt
+index e0407c1543b0..d1732672dde5 100644
+--- a/services/tests/PackageManagerServiceTests/unit/src/com/android/server/pm/test/verify/domain/DomainVerificationPackageTest.kt
++++ b/services/tests/PackageManagerServiceTests/unit/src/com/android/server/pm/test/verify/domain/DomainVerificationPackageTest.kt
+@@ -899,6 +899,31 @@ class DomainVerificationPackageTest {
+         }
+     }
+ 
++    @Test
++    fun testWildcardDomain() {
++        val wildcardDomain = "*.xyz.com"
++        val pkg = mockPkgState(
++            PKG_ONE, UUID_ONE, SIGNATURE_ONE,
++            autoVerifyDomains = listOf(wildcardDomain)
++        )
++
++        val service = makeService(pkg)
++        service.addPackage(pkg, null)
++        service.setStatus(pkg.domainSetId, setOf(wildcardDomain), STATE_SUCCESS)
++
++        // Only "xyz.com" exactly or subdomains should match. "abcxyz.com" should not match.
++        assertThat(
++            service.getOwnersForDomain("abcxyz.com", USER_ID))
++            .isEmpty()
++        assertThat(
++            service.getOwnersForDomain("abc.xyz.com", USER_ID))
++            .containsExactly(DomainOwner(PKG_ONE, false))
++        assertThat(
++            service.getOwnersForDomain("xyz.com", USER_ID))
++            .containsExactly(DomainOwner(PKG_ONE, false))
++    }
++
++
+     private fun verifiedUnapproved_unverifiedSelected_approvalCausesUnselect(
+             setStatusBlock: DomainVerificationService.(PackageStateInternal) -> Unit
+     ) {
+-- 
+2.53.0
+

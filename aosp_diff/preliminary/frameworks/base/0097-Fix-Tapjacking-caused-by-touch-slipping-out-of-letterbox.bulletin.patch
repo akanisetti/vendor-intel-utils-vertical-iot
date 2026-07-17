@@ -1,0 +1,39 @@
+From a5ba2f8dd0d78b983214cf73186f083776c6211b Mon Sep 17 00:00:00 2001
+From: Nan Wu <wnan@google.com>
+Date: Tue, 6 Jan 2026 06:12:34 -0800
+Subject: [PATCH 21/38] Fix Tapjacking caused by touch slipping out of
+ letterbox
+
+Touch can slip out of the black bar of a Letterbox (the box that surrounds a screen when an app's orientation changes). This allows user touch reaches bottom layer of other activities without seeing it (covered by the Letterbox). The Letterbox window is considered trusted system windows. That causes existing tapjacking prevention mechanism not working correctly. This fix is to let the Letterbox assume the identity of the app it is surrounding.
+
+Bug: 443272513
+Test: Manual
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:4329a2d9458dc3aa04f2bae0f296e0bbe122ecda
+Merged-In: I9d768b1db27f666643355c54ba80b0e72e358522
+Change-Id: I9d768b1db27f666643355c54ba80b0e72e358522
+---
+ services/core/java/com/android/server/wm/Letterbox.java | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/services/core/java/com/android/server/wm/Letterbox.java b/services/core/java/com/android/server/wm/Letterbox.java
+index 3a4d2ca8b9bd..d5c0b4b28926 100644
+--- a/services/core/java/com/android/server/wm/Letterbox.java
++++ b/services/core/java/com/android/server/wm/Letterbox.java
+@@ -300,8 +300,11 @@ public class Letterbox {
+                     ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                     : WindowManager.LayoutParams.TYPE_INPUT_CONSUMER;
+             mWindowHandle.dispatchingTimeoutMillis = DEFAULT_DISPATCHING_TIMEOUT_MILLIS;
+-            mWindowHandle.ownerPid = WindowManagerService.MY_PID;
+-            mWindowHandle.ownerUid = WindowManagerService.MY_UID;
++            // Set owner to the app's UID to prevent tapjacking. This ensures the letterbox is not
++            // treated as a trusted system window for input security checks, which could be used
++            // to bypass obscured touch logic.
++            mWindowHandle.ownerPid = win.mSession.mPid;
++            mWindowHandle.ownerUid = win.mSession.mUid;
+             mWindowHandle.scaleFactor = 1.0f;
+             mWindowHandle.inputConfig = InputConfig.NOT_FOCUSABLE
+                     | (Flags.scrollingFromLetterbox() ? InputConfig.SPY : InputConfig.SLIPPERY);
+-- 
+2.53.0
+

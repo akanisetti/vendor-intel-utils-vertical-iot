@@ -1,0 +1,86 @@
+From d523a92546b880bd1b7c5572806016a009c8f1ae Mon Sep 17 00:00:00 2001
+From: bchew <basil.chew@intel.com>
+Date: Thu, 2 Jul 2026 06:32:58 +0000
+Subject: [PATCH] Fix allowBackup=true for celadon packages
+
+Change:
+- disabled ADB backup for celadon RRO overlay packages
+
+Tracked-On: NIACP3-1460
+Signed-off-by: Basil Chew <basil.chew@intel.com>
+---
+ rro_overlays/CarServiceOverlay/AndroidManifest.xml              | 2 +-
+ rro_overlays/NetworkOverlay/AndroidManifest.xml                 | 2 +-
+ .../ServiceConnectivityResourcesOverlay/AndroidManifest.xml     | 2 +-
+ rro_overlays/TetheringOverlay/AndroidManifest.xml               | 2 +-
+ rro_overlays/TetheringOverlayGsi/AndroidManifest.xml            | 2 +-
+ 5 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/rro_overlays/CarServiceOverlay/AndroidManifest.xml b/rro_overlays/CarServiceOverlay/AndroidManifest.xml
+index ff4efcd..d11dfd5 100644
+--- a/rro_overlays/CarServiceOverlay/AndroidManifest.xml
++++ b/rro_overlays/CarServiceOverlay/AndroidManifest.xml
+@@ -16,7 +16,7 @@
+   -->
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+           package="com.android.car.resources.intel.rro">
+-    <application android:hasCode="false"/>
++    <application android:hasCode="false" android:allowBackup="false"/>
+     <overlay android:priority="1001"
+              android:targetPackage="com.android.car.updatable"
+ 	     android:targetName="CarServiceCustomization"
+diff --git a/rro_overlays/NetworkOverlay/AndroidManifest.xml b/rro_overlays/NetworkOverlay/AndroidManifest.xml
+index 26b8796..2f454f0 100644
+--- a/rro_overlays/NetworkOverlay/AndroidManifest.xml
++++ b/rro_overlays/NetworkOverlay/AndroidManifest.xml
+@@ -2,7 +2,7 @@
+     package="com.android.networkstack.celadon"
+     android:versionCode="1"
+     android:versionName="1.0">
+-    <application android:hasCode="false" />
++    <application android:hasCode="false" android:allowBackup="false" />
+     <overlay
+       android:targetPackage="com.android.networkstack"
+       android:isStatic="true"
+diff --git a/rro_overlays/ServiceConnectivityResourcesOverlay/AndroidManifest.xml b/rro_overlays/ServiceConnectivityResourcesOverlay/AndroidManifest.xml
+index 593f4ae..315d5ad 100644
+--- a/rro_overlays/ServiceConnectivityResourcesOverlay/AndroidManifest.xml
++++ b/rro_overlays/ServiceConnectivityResourcesOverlay/AndroidManifest.xml
+@@ -21,7 +21,7 @@
+           package="com.android.connectivity.resources.celadon"
+           android:versionCode="1"
+           android:versionName="1.0">
+-    <application android:hasCode="false" />
++    <application android:hasCode="false" android:allowBackup="false" />
+      <overlay
+       android:targetPackage="com.android.connectivity.resources"
+       android:targetName="ServiceConnectivityResourcesConfig"
+diff --git a/rro_overlays/TetheringOverlay/AndroidManifest.xml b/rro_overlays/TetheringOverlay/AndroidManifest.xml
+index 3496616..f5fac4c 100644
+--- a/rro_overlays/TetheringOverlay/AndroidManifest.xml
++++ b/rro_overlays/TetheringOverlay/AndroidManifest.xml
+@@ -2,7 +2,7 @@
+     package="com.google.android.networkstack.tethering.celadon"
+     android:versionCode="1"
+     android:versionName="1.0">
+-    <application android:hasCode="false" />
++    <application android:hasCode="false" android:allowBackup="false" />
+     <overlay
+       android:targetPackage="com.google.android.networkstack.tethering"
+       android:targetName="TetheringConfig"
+diff --git a/rro_overlays/TetheringOverlayGsi/AndroidManifest.xml b/rro_overlays/TetheringOverlayGsi/AndroidManifest.xml
+index 34119f3..3095639 100644
+--- a/rro_overlays/TetheringOverlayGsi/AndroidManifest.xml
++++ b/rro_overlays/TetheringOverlayGsi/AndroidManifest.xml
+@@ -2,7 +2,7 @@
+     package="com.android.networkstack.tethering.celadon"
+     android:versionCode="1"
+     android:versionName="1.0">
+-    <application android:hasCode="false" />
++    <application android:hasCode="false" android:allowBackup="false" />
+     <overlay
+       android:targetPackage="com.android.networkstack.tethering"
+       android:targetName="TetheringConfigGsi"
+-- 
+2.35.3
+

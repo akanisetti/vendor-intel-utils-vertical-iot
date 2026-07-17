@@ -1,0 +1,132 @@
+From b33ed0e8b2f7b43a2be3e67b2b05cd2723dfec33 Mon Sep 17 00:00:00 2001
+From: Jeff DeCew <jeffdq@google.com>
+Date: Wed, 25 Mar 2026 13:02:38 -0700
+Subject: [PATCH 35/38] Block adding toast windows to non-empty tokens.
+
+When adding a window of TYPE_TOAST, if addToastWindowRequiresToken is enabled, prevent the addition if the provided WindowToken is not empty. This enforces the constraint that a WindowToken for toasts should only contain a single toast window.
+
+Bug: 389950114
+Flag: EXEMPT BUGFIX
+Test: atest WindowManagerServiceTests
+Change-Id: I9f693bb0a28a08d53ad162c1e305e17170185680
+Merged-In: I9f693bb0a28a08d53ad162c1e305e17170185680
+---
+ .../server/wm/WindowManagerService.java       |  6 ++
+ .../server/wm/WindowManagerServiceTests.java  | 72 +++++++++++++++++++
+ 2 files changed, 78 insertions(+)
+
+diff --git a/services/core/java/com/android/server/wm/WindowManagerService.java b/services/core/java/com/android/server/wm/WindowManagerService.java
+index d25987028199..db400d34a02f 100644
+--- a/services/core/java/com/android/server/wm/WindowManagerService.java
++++ b/services/core/java/com/android/server/wm/WindowManagerService.java
+@@ -1783,6 +1783,12 @@ public class WindowManagerService extends IWindowManager.Stub
+                     ProtoLog.w(WM_ERROR, "Adding more than one toast window for UID at a time.");
+                     return WindowManagerGlobal.ADD_DUPLICATE_ADD;
+                 }
++                // Because a WindowToken of TYPE_TOAST only allows one toast window, block the
++                // addition of any other toast window to this token.
++                if (addToastWindowRequiresToken && !token.isEmpty()) {
++                    // ProtoLog.w(WM_ERROR, "Adding toast window with non-empty token.");
++                    return WindowManagerGlobal.ADD_BAD_APP_TOKEN;
++                }
+                 // Make sure this happens before we moved focus as one can make the
+                 // toast focusable to force it not being hidden after the timeout.
+                 // Focusable toasts are always timed out to prevent a focused app to
+diff --git a/services/tests/wmtests/src/com/android/server/wm/WindowManagerServiceTests.java b/services/tests/wmtests/src/com/android/server/wm/WindowManagerServiceTests.java
+index 9645e184d99c..4a2154f03960 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/WindowManagerServiceTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/WindowManagerServiceTests.java
+@@ -64,6 +64,7 @@ import static org.junit.Assert.assertTrue;
+ import static org.mockito.ArgumentMatchers.any;
+ import static org.mockito.ArgumentMatchers.anyBoolean;
+ import static org.mockito.ArgumentMatchers.anyInt;
++import static org.mockito.ArgumentMatchers.anyLong;
+ import static org.mockito.ArgumentMatchers.anyString;
+ import static org.mockito.ArgumentMatchers.argThat;
+ import static org.mockito.ArgumentMatchers.eq;
+@@ -79,6 +80,7 @@ import android.app.ActivityManager;
+ import android.app.ActivityThread;
+ import android.app.IApplicationThread;
+ import android.content.pm.ActivityInfo;
++import android.content.pm.ApplicationInfo;
+ import android.content.pm.PackageManager;
+ import android.graphics.Rect;
+ import android.os.Binder;
+@@ -1696,4 +1698,74 @@ public class WindowManagerServiceTests extends WindowTestsBase {
+         mWm.mAppCompatConfiguration.setLetterboxBackgroundTypeOverride(letterboxBackgroundType);
+         return mWm.isLetterboxBackgroundMultiColored();
+     }
++
++    @Test
++    public void testAddToastWindow_singleWindowPerToken() {
++        final IBinder token = new Binder();
++        mWm.addWindowToken(token, TYPE_TOAST, DEFAULT_DISPLAY, null /* options */);
++
++        final int uid1 = 1234;
++        final int pid1 = 1234;
++        final Session session1 = createTestSession(mAtm, pid1, uid1);
++        final WindowManager.LayoutParams params1 = new WindowManager.LayoutParams(TYPE_TOAST);
++        params1.token = token;
++        params1.packageName = "test1";
++
++        final ApplicationInfo appInfo1 = new ApplicationInfo();
++        appInfo1.targetSdkVersion = android.os.Build.VERSION_CODES.O;
++        doReturn(appInfo1)
++                .when(mWm.mPmInternal)
++                .getApplicationInfo(eq("test1"), anyLong(), anyInt(), anyInt());
++        doReturn(true).when(mWm.mPmInternal).isSameApp(eq("test1"), eq(uid1), anyInt());
++
++        final IWindow client1 = new TestIWindow();
++        final int res1 =
++                mWm.addWindow(
++                        session1,
++                        client1,
++                        params1,
++                        View.VISIBLE,
++                        DEFAULT_DISPLAY,
++                        0 /* requestUserId */,
++                        WindowInsets.Type.defaultVisible(),
++                        null,
++                        new InsetsState(),
++                        new InsetsSourceControl.Array(),
++                        new Rect(),
++                        new float[1]);
++        assertThat(res1).isAtLeast(WindowManagerGlobal.ADD_OKAY);
++
++        // Add second window with same token but different UID to bypass the canAddToastWindowForUid
++        // check
++        final int uid2 = 1235;
++        final int pid2 = 1235;
++        final Session session2 = createTestSession(mAtm, pid2, uid2);
++        final WindowManager.LayoutParams params2 = new WindowManager.LayoutParams(TYPE_TOAST);
++        params2.token = token;
++        params2.packageName = "test2";
++
++        final ApplicationInfo appInfo2 = new ApplicationInfo();
++        appInfo2.targetSdkVersion = android.os.Build.VERSION_CODES.O;
++        doReturn(appInfo2)
++                .when(mWm.mPmInternal)
++                .getApplicationInfo(eq("test2"), anyLong(), anyInt(), anyInt());
++        doReturn(true).when(mWm.mPmInternal).isSameApp(eq("test2"), eq(uid2), anyInt());
++
++        final IWindow client2 = new TestIWindow();
++        final int res2 =
++                mWm.addWindow(
++                        session2,
++                        client2,
++                        params2,
++                        View.VISIBLE,
++                        DEFAULT_DISPLAY,
++                        0 /* requestUserId */,
++                        WindowInsets.Type.defaultVisible(),
++                        null,
++                        new InsetsState(),
++                        new InsetsSourceControl.Array(),
++                        new Rect(),
++                        new float[1]);
++        assertThat(res2).isEqualTo(WindowManagerGlobal.ADD_BAD_APP_TOKEN);
++    }
+ }
+-- 
+2.53.0
+

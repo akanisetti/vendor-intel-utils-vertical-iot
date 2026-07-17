@@ -1,0 +1,144 @@
+From ca84a39ea8e3fb47ea5f29241ec0fb9e3bb151c7 Mon Sep 17 00:00:00 2001
+From: Mark Punzalan <markpun@google.com>
+Date: Thu, 29 Jan 2026 13:33:37 -0800
+Subject: [PATCH 25/38] Validate ResStringPool_header.styleCount
+
+This is to prevent potential out-of-bounds reads beyond the bounds of
+the string pool chunk.
+
+Bug: 462431486
+Flag: EXEMPT CVE_FIX
+Test: atest libandroidfw_tests
+Test: Manual: An APK with invalid styleCount failed to install
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:62cb59ae21e6b27e510ee3af58d0df8ad9bc70a7
+Merged-In: If846443caa357197cd393e85c1461119b8264eb4
+Change-Id: If846443caa357197cd393e85c1461119b8264eb4
+---
+ libs/androidfw/Android.bp                   |  1 +
+ libs/androidfw/ResourceTypes.cpp            | 14 ++++
+ libs/androidfw/tests/ResourceTypes_test.cpp | 76 +++++++++++++++++++++
+ 3 files changed, 91 insertions(+)
+ create mode 100644 libs/androidfw/tests/ResourceTypes_test.cpp
+
+diff --git a/libs/androidfw/Android.bp b/libs/androidfw/Android.bp
+index 3dc53c5051e9..2706226199d3 100644
+--- a/libs/androidfw/Android.bp
++++ b/libs/androidfw/Android.bp
+@@ -229,6 +229,7 @@ cc_test {
+         "tests/LocaleDataLookup_test.cpp",
+         "tests/NinePatch_test.cpp",
+         "tests/ResourceTimer_test.cpp",
++        "tests/ResourceTypes_test.cpp",
+         "tests/ResourceUtils_test.cpp",
+         "tests/ResTable_test.cpp",
+         "tests/Split_test.cpp",
+diff --git a/libs/androidfw/ResourceTypes.cpp b/libs/androidfw/ResourceTypes.cpp
+index 6ec605c2ced5..236f2c41f506 100644
+--- a/libs/androidfw/ResourceTypes.cpp
++++ b/libs/androidfw/ResourceTypes.cpp
+@@ -673,6 +673,20 @@ status_t ResStringPool::setTo(incfs::map_ptr<void> data, size_t size, bool copyD
+                     (int)mHeader->stylesStart, (int)mHeader->header.size);
+             return (mError=BAD_TYPE);
+         }
++
++        if (mHeader->styleCount >
++            std::numeric_limits<decltype(mHeader->styleCount)>::max() / sizeof(uint32_t)) {
++          ALOGW("Bad string block: potential integer overflow when finding style entries\n");
++          return (mError = BAD_TYPE);
++        }
++
++        const size_t styleOffsetsStart =
++            mEntryStyles.convert<uint8_t>() - mHeader.convert<uint8_t>();
++        if (mHeader->styleCount * sizeof(uint32_t) > (mHeader->stringsStart - styleOffsetsStart)) {
++          ALOGW("Bad string block: style offsets extend past style data start\n");
++          return (mError = BAD_TYPE);
++        }
++
+         mStylePoolSize =
+             (mHeader->header.size-mHeader->stylesStart)/sizeof(uint32_t);
+ 
+diff --git a/libs/androidfw/tests/ResourceTypes_test.cpp b/libs/androidfw/tests/ResourceTypes_test.cpp
+new file mode 100644
+index 000000000000..3d4a88eda247
+--- /dev/null
++++ b/libs/androidfw/tests/ResourceTypes_test.cpp
+@@ -0,0 +1,76 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "androidfw/ResourceTypes.h"
++
++#include "androidfw/StringPool.h"
++#include "androidfw/Util.h"
++#include "gmock/gmock.h"
++#include "gtest/gtest.h"
++
++using ::testing::Eq;
++
++namespace android {
++
++TEST(ResourceTypesTest, ResStringPool_PotentialOverflowFindingStyles) {
++  using namespace android;  // For NO_ERROR on Windows.
++
++  // Create proper ResStringPool with 1 style
++  StringPool pool;
++  pool.MakeRef(StyleString{{"foo"}, {Span{{"b"}, 0, 1}}});
++
++  NoOpDiagnostics diag;
++  BigBuffer buffer(1024);
++  StringPool::FlattenUtf8(&buffer, pool, &diag);
++
++  ResStringPool test;
++  std::unique_ptr<uint8_t[]> data = android::util::Copy(buffer);
++  ASSERT_THAT(test.setTo(data.get(), buffer.size()), Eq(NO_ERROR));
++
++  // Change style count to cause potential overflow when finding styles
++  ResStringPool_header* header =
++      const_cast<ResStringPool_header*>(test.data().convert<ResStringPool_header>().unsafe_ptr());
++  header->styleCount = util::HostToDevice32(UINT32_MAX);
++
++  ResStringPool modified;
++  ASSERT_THAT(modified.setTo(test.data(), test.bytes()), Eq(BAD_TYPE));
++}
++
++TEST(ResourceTypesTest, ResStringPool_HeaderStyleCountExceedsStyleOffsetCount) {
++  using namespace android;  // For NO_ERROR on Windows.
++
++  // Create proper ResStringPool with 1 style
++  StringPool pool;
++  pool.MakeRef(StyleString{{"foo"}, {Span{{"b"}, 0, 1}}});
++
++  NoOpDiagnostics diag;
++  BigBuffer buffer(1024);
++  StringPool::FlattenUtf8(&buffer, pool, &diag);
++
++  ResStringPool test;
++  std::unique_ptr<uint8_t[]> data = android::util::Copy(buffer);
++  ASSERT_THAT(test.setTo(data.get(), buffer.size()), Eq(NO_ERROR));
++
++  // Change style count to exceed the actual style count (which should be 1)
++  ResStringPool_header* header =
++      const_cast<ResStringPool_header*>(test.data().convert<ResStringPool_header>().unsafe_ptr());
++  header->styleCount = 2;
++
++  ResStringPool modified;
++  ASSERT_THAT(modified.setTo(test.data(), test.bytes()), Eq(BAD_TYPE));
++}
++
++}  // namespace android
+-- 
+2.53.0
+

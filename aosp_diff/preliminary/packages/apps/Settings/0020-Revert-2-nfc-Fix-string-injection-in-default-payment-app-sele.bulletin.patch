@@ -1,0 +1,138 @@
+From ae0dbfe9410fff194038ea9ee5f38e748ff44504 Mon Sep 17 00:00:00 2001
+From: James Eidson <jmes@google.com>
+Date: Thu, 19 Feb 2026 09:28:01 -0800
+Subject: [PATCH 6/9] Revert^2 "[nfc] Fix string injection in default payment
+ app selector"
+
+This reverts commit 786305ffd159b56108eb7450fcae7635df0cd12f.
+
+Reason for revert: reland
+
+Bug: 429417453
+Change-Id: I57174f0a659d639c7ae4350be25fa41a40324ef5
+---
+ .../settings/nfc/DefaultPaymentSettings.java  | 29 ++++++++++---------
+ .../android/settings/nfc/PaymentBackend.java  | 19 ++++++++++++
+ 2 files changed, 34 insertions(+), 14 deletions(-)
+
+diff --git a/src/com/android/settings/nfc/DefaultPaymentSettings.java b/src/com/android/settings/nfc/DefaultPaymentSettings.java
+index d75844bb0ff..b5057ed64f2 100644
+--- a/src/com/android/settings/nfc/DefaultPaymentSettings.java
++++ b/src/com/android/settings/nfc/DefaultPaymentSettings.java
+@@ -17,7 +17,6 @@
+ package com.android.settings.nfc;
+ 
+ import android.app.settings.SettingsEnums;
+-import android.content.ComponentName;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.graphics.drawable.Drawable;
+@@ -45,6 +44,9 @@ import java.util.ArrayList;
+ import java.util.Collections;
+ import java.util.Comparator;
+ import java.util.List;
++import java.util.Map;
++import java.util.function.Function;
++import java.util.stream.Collectors;
+ 
+ /**
+  * DefaultPaymentSettings handles the NFC default payment app selection.
+@@ -53,7 +55,7 @@ public class DefaultPaymentSettings extends DefaultAppPickerFragment {
+     public static final String TAG = "DefaultPaymentSettings";
+ 
+     private PaymentBackend mPaymentBackend;
+-    private List<PaymentAppInfo> mAppInfos;
++    private Map<String, PaymentAppInfo> mAppInfos;
+     private FooterPreference mFooterPreference;
+ 
+     @Override
+@@ -67,22 +69,19 @@ public class DefaultPaymentSettings extends DefaultAppPickerFragment {
+     }
+ 
+     @Override
++    @SuppressWarnings("NullAway")
+     protected String getDefaultKey() {
+         PaymentAppInfo defaultAppInfo = mPaymentBackend.getDefaultApp();
+-        if (defaultAppInfo != null) {
+-            return defaultAppInfo.componentName.flattenToString() + " "
+-                    + defaultAppInfo.userHandle.getIdentifier();
+-        }
+-        return null;
++        if (defaultAppInfo == null) return null;
++        return defaultAppInfo.getKey();
+     }
+ 
+     @Override
+     protected boolean setDefaultKey(String key) {
+-        String[] keys = key.split(" ");
+-        if (keys.length >= 2) {
+-            mPaymentBackend.setDefaultPaymentApp(ComponentName.unflattenFromString(keys[0]),
+-                    Integer.parseInt(keys[1]));
+-        }
++        PaymentAppInfo appInfo = mAppInfos.get(key);
++        if (appInfo == null) return true;
++        mPaymentBackend.setDefaultPaymentApp(
++                appInfo.componentName, appInfo.userHandle.getIdentifier());
+         return true;
+     }
+ 
+@@ -90,7 +89,9 @@ public class DefaultPaymentSettings extends DefaultAppPickerFragment {
+     public void onAttach(Context context) {
+         super.onAttach(context);
+         mPaymentBackend = new PaymentBackend(getActivity());
+-        mAppInfos = mPaymentBackend.getPaymentAppInfos();
++        mAppInfos = mPaymentBackend.getPaymentAppInfos()
++                .stream()
++                .collect(Collectors.toMap(PaymentAppInfo::getKey, Function.identity()));
+     }
+ 
+     @Override
+@@ -147,7 +148,7 @@ public class DefaultPaymentSettings extends DefaultAppPickerFragment {
+     @Override
+     protected List<? extends CandidateInfo> getCandidates() {
+         final List<NfcPaymentCandidateInfo> candidates = new ArrayList<>();
+-        for (PaymentAppInfo appInfo: mAppInfos) {
++        for (PaymentAppInfo appInfo: mAppInfos.values()) {
+             UserManager um = getContext().createContextAsUser(
+                     appInfo.userHandle, /*flags=*/0).getSystemService(UserManager.class);
+             boolean isManagedProfile = um.isManagedProfile(appInfo.userHandle.getIdentifier());
+diff --git a/src/com/android/settings/nfc/PaymentBackend.java b/src/com/android/settings/nfc/PaymentBackend.java
+index 021d673e152..de733081a1d 100644
+--- a/src/com/android/settings/nfc/PaymentBackend.java
++++ b/src/com/android/settings/nfc/PaymentBackend.java
+@@ -36,6 +36,7 @@ import com.android.internal.content.PackageMonitor;
+ 
+ import java.util.ArrayList;
+ import java.util.List;
++import java.util.Objects;
+ 
+ public class PaymentBackend {
+     public static final String TAG = "Settings.PaymentBackend";
+@@ -52,6 +53,24 @@ public class PaymentBackend {
+         public ComponentName settingsComponent;
+         public UserHandle userHandle;
+         public Drawable icon;
++
++        public String getKey() {
++            return Integer.toString(hashCode());
++        }
++
++        @Override
++        public int hashCode() {
++            return Objects.hash(componentName, userHandle);
++        }
++
++        @Override
++        public boolean equals(Object o) {
++            if (o == this) return true;
++            if (!(o instanceof PaymentAppInfo)) return false;
++            PaymentAppInfo appInfo = (PaymentAppInfo) o;
++            return componentName.equals(appInfo.componentName)
++                    && userHandle.equals(appInfo.userHandle);
++        }
+     }
+ 
+     /**
+-- 
+2.53.0
+

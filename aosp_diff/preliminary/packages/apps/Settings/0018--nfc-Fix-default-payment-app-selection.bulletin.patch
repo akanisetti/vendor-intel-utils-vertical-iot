@@ -1,0 +1,40 @@
+From c0125cef398992b56db16b1f4d292ddea5f4ac1e Mon Sep 17 00:00:00 2001
+From: James Eidson <jmes@google.com>
+Date: Thu, 20 Nov 2025 21:01:51 +0000
+Subject: [PATCH 4/9] Fix default payment app selection
+
+Bug: 462013908
+Test: Manually by changing default payment method
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:49dca5fdbe2900c3bca2ffad79b9c670a4c1da35
+Merged-In: I24efe01b532143b13b22f69603f201719080bd31
+Change-Id: I24efe01b532143b13b22f69603f201719080bd31
+---
+ src/com/android/settings/nfc/DefaultPaymentSettings.java | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/com/android/settings/nfc/DefaultPaymentSettings.java b/src/com/android/settings/nfc/DefaultPaymentSettings.java
+index 440f09e3d9b..b5057ed64f2 100644
+--- a/src/com/android/settings/nfc/DefaultPaymentSettings.java
++++ b/src/com/android/settings/nfc/DefaultPaymentSettings.java
+@@ -156,7 +156,7 @@ public class DefaultPaymentSettings extends DefaultAppPickerFragment {
+             CharSequence label;
+             label = appInfo.label;
+             candidates.add(new NfcPaymentCandidateInfo(
+-                    appInfo.componentName.flattenToString(),
++                    appInfo.getKey(),
+                     label,
+                     appInfo.icon,
+                     appInfo.userHandle.getIdentifier(),
+@@ -196,7 +196,7 @@ public class DefaultPaymentSettings extends DefaultAppPickerFragment {
+ 
+         @Override
+         public String getKey() {
+-            return mKey + " " + mUserId;
++            return mKey;
+         }
+ 
+         public boolean isManagedProfile() {
+-- 
+2.53.0
+

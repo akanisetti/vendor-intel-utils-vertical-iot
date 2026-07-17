@@ -1,0 +1,252 @@
+From ba7c541f0e93abc91c9974329229313b870c493a Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Mon, 13 Jul 2026 03:54:00 +0000
+Subject: [PATCH] Trusty IPC driver hardening
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Issue #1
+Centralises state->errno mapping, removes duplicated chains
+Null/empty name check; state gate under lock before connect; rollback
+state on failure
+
+Closes the attack surface exploited by malformed Trusty IPC syscall
+sequences. Syzkaller was triggering UAF / null-deref patterns via
+concurrent connect+close and connect+read on stale file descriptors.
+These guards return deterministic errors instead of crashing.
+
+Issue #2
+Removes unconditional rtnl_lock() in __igc_shutdown(). The reboot path
+can arrive holding the NVMe queue freeze lock (q->q_usage_counter(io))
+which chains through mmap_lock → rtnl_mutex, creating a circular
+dependency. rtnl_trylock() avoids deadlock; hardware is reset by PCI
+core regardless.
+
+Tracked-On: NIACP3-1334
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+---
+ drivers/net/ethernet/intel/igc/igc_main.c | 26 +++++--
+ drivers/trusty/trusty-ipc.c               | 89 ++++++++++++++++++++---
+ 2 files changed, 101 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/net/ethernet/intel/igc/igc_main.c b/drivers/net/ethernet/intel/igc/igc_main.c
+index 6fcf4fd7ee19..6bc684cc4e6d 100644
+--- a/drivers/net/ethernet/intel/igc/igc_main.c
++++ b/drivers/net/ethernet/intel/igc/igc_main.c
+@@ -7264,16 +7264,32 @@ static int __igc_shutdown(struct pci_dev *pdev, bool *enable_wake,
+ 	u32 ctrl, rctl, status;
+ 	bool wake;
+ 
+-	rtnl_lock();
+-	netif_device_detach(netdev);
++	/* Use rtnl_trylock to avoid a circular lock dependency during
++	 * device_shutdown(): the reboot path may already hold the NVMe queue
++	 * freeze lock which itself depends on mmap_lock -> rtnl_mutex, so an
++	 * unconditional rtnl_lock() here would deadlock (lockdep: rtnl_mutex
++	 * -> &mm->mmap_lock -> &q->q_usage_counter(io) chain).  If we cannot
++	 * obtain rtnl immediately during shutdown we skip the clean close path;
++	 * the hardware will be reset by PCI core regardless.
++	 */
++	bool rtnl_held = rtnl_trylock();
+ 
+-	if (netif_running(netdev))
+-		__igc_close(netdev, true);
++	if (rtnl_held) {
++		netif_device_detach(netdev);
++		if (netif_running(netdev))
++			__igc_close(netdev, true);
++	} else {
++		netdev_warn(netdev,
++			    "igc_shutdown: rtnl busy, skipping clean close (racing shutdown)\n");
++		netif_device_detach(netdev);
++	}
+ 
+ 	igc_ptp_suspend(adapter);
+ 
+ 	igc_clear_interrupt_scheme(adapter);
+-	rtnl_unlock();
++
++	if (rtnl_held)
++		rtnl_unlock();
+ 
+ 	status = rd32(IGC_STATUS);
+ 	if (status & IGC_STATUS_LU)
+diff --git a/drivers/trusty/trusty-ipc.c b/drivers/trusty/trusty-ipc.c
+index 6714a0874f63..48155632e32a 100644
+--- a/drivers/trusty/trusty-ipc.c
++++ b/drivers/trusty/trusty-ipc.c
+@@ -922,6 +922,18 @@ struct tipc_dn_chan {
+ 	struct list_head rx_msg_queue;
+ };
+ 
++static int dn_state_to_errno(int state)
++{
++	if (state == TIPC_CONNECTING)
++		return -ENOTCONN;
++	if (state == TIPC_DISCONNECTED)
++		return -ENOTCONN;
++	if (state == TIPC_STALE)
++		return -ESHUTDOWN;
++
++	return -EBADFD;
++}
++
+ static int dn_wait_for_reply(struct tipc_dn_chan *dn, int timeout)
+ {
+ 	int ret;
+@@ -1124,22 +1136,55 @@ static int tipc_open(struct inode *inode, struct file *filp)
+ static int dn_connect_ioctl(struct tipc_dn_chan *dn, char __user *usr_name)
+ {
+ 	int ret;
++	int state;
+ 	char name[MAX_SRV_NAME_LEN];
+ 
++	if (!usr_name)
++		return -EINVAL;
++
+ 	/* copy in service name from user space */
+ 	ret = strncpy_from_user(name, usr_name, sizeof(name));
+ 	if (ret < 0)
+ 		return ret;
++	if (!ret)
++		return -EINVAL;
+ 	if (ret == sizeof(name))
+ 		return -ENAMETOOLONG;
+ 
++	mutex_lock(&dn->lock);
++	state = dn->state;
++	if (state == TIPC_CONNECTED) {
++		ret = -EISCONN;
++		goto out_unlock;
++	}
++	if (state == TIPC_CONNECTING) {
++		ret = -EALREADY;
++		goto out_unlock;
++	}
++	if (state == TIPC_STALE) {
++		ret = -ESHUTDOWN;
++		goto out_unlock;
++	}
++	reinit_completion(&dn->reply_comp);
++	dn->state = TIPC_CONNECTING;
++	mutex_unlock(&dn->lock);
++
+ 	/* send connect request */
+ 	ret = tipc_chan_connect(dn->chan, name);
+-	if (ret)
++	if (ret) {
++		mutex_lock(&dn->lock);
++		if (dn->state == TIPC_CONNECTING)
++			dn->state = TIPC_DISCONNECTED;
++		mutex_unlock(&dn->lock);
+ 		return ret;
++	}
+ 
+ 	/* and wait for reply */
+ 	return dn_wait_for_reply(dn, REPLY_TIMEOUT);
++
++out_unlock:
++	mutex_unlock(&dn->lock);
++	return ret;
+ }
+ 
+ static int dn_share_fd(struct tipc_dn_chan *dn, int fd,
+@@ -1325,6 +1370,16 @@ static long filp_send_ioctl(struct file *filp,
+ 	long ret = 0;
+ 	ssize_t data_len = 0;
+ 	ssize_t shm_len = 0;
++	int state;
++
++	if (!arg)
++		return -EINVAL;
++
++	mutex_lock(&dn->lock);
++	state = dn->state;
++	mutex_unlock(&dn->lock);
++	if (state != TIPC_CONNECTED)
++		return dn_state_to_errno(state);
+ 
+ 	if (copy_from_user(&req, arg, sizeof(req)))
+ 		return -EFAULT;
+@@ -1440,6 +1495,9 @@ static long tipc_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+ {
+ 	struct tipc_dn_chan *dn = filp->private_data;
+ 
++	if (WARN_ON_ONCE(!dn || !dn->chan))
++		return -EBADFD;
++
+ 	switch (cmd) {
+ 	case TIPC_IOC_CONNECT:
+ 		return dn_connect_ioctl(dn, (char __user *)arg);
+@@ -1460,6 +1518,9 @@ static long tipc_compat_ioctl(struct file *filp,
+ {
+ 	struct tipc_dn_chan *dn = filp->private_data;
+ 
++	if (WARN_ON_ONCE(!dn || !dn->chan))
++		return -EBADFD;
++
+ 	switch (cmd) {
+ 	case TIPC_IOC32_CONNECT:
+ 		cmd = TIPC_IOC_CONNECT;
+@@ -1492,18 +1553,14 @@ static ssize_t tipc_read_iter(struct kiocb *iocb, struct iov_iter *iter)
+ 	struct file *filp = iocb->ki_filp;
+ 	struct tipc_dn_chan *dn = filp->private_data;
+ 
++	if (WARN_ON_ONCE(!dn || !dn->chan))
++		return -EBADFD;
++
+ 	mutex_lock(&dn->lock);
+ 
+ 	while (list_empty(&dn->rx_msg_queue)) {
+ 		if (dn->state != TIPC_CONNECTED) {
+-			if (dn->state == TIPC_CONNECTING)
+-				ret = -ENOTCONN;
+-			else if (dn->state == TIPC_DISCONNECTED)
+-				ret = -ENOTCONN;
+-			else if (dn->state == TIPC_STALE)
+-				ret = -ESHUTDOWN;
+-			else
+-				ret = -EBADFD;
++			ret = dn_state_to_errno(dn->state);
+ 			goto out;
+ 		}
+ 
+@@ -1548,6 +1605,16 @@ static ssize_t tipc_write_iter(struct kiocb *iocb, struct iov_iter *iter)
+ 	struct tipc_msg_buf *txbuf = NULL;
+ 	ssize_t ret = 0;
+ 	ssize_t len = 0;
++	int state;
++
++	if (WARN_ON_ONCE(!dn || !dn->chan))
++		return -EBADFD;
++
++	mutex_lock(&dn->lock);
++	state = dn->state;
++	mutex_unlock(&dn->lock);
++	if (state != TIPC_CONNECTED)
++		return dn_state_to_errno(state);
+ 
+ 	if (filp->f_flags & O_NONBLOCK)
+ 		timeout = 0;
+@@ -1600,6 +1667,9 @@ static int tipc_release(struct inode *inode, struct file *filp)
+ {
+ 	struct tipc_dn_chan *dn = filp->private_data;
+ 
++	if (!dn || !dn->chan)
++		return 0;
++
+ 	dn_shutdown(dn);
+ 
+ 	/* free all pending buffers */
+@@ -1610,6 +1680,7 @@ static int tipc_release(struct inode *inode, struct file *filp)
+ 
+ 	/* and destroy it */
+ 	tipc_chan_destroy(dn->chan);
++	filp->private_data = NULL;
+ 
+ 	return 0;
+ }
+-- 
+2.34.1
+

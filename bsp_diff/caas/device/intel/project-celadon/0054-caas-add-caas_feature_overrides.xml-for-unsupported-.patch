@@ -1,0 +1,34 @@
+From 4e3205a1ecd6fb640a57d374a2c0eb28988ee93a Mon Sep 17 00:00:00 2001
+From: preddycx <prashanthx.reddy.chintapally@intel.com>
+Date: Wed, 8 Jul 2026 16:47:19 +0000
+Subject: [PATCH] caas: add caas_feature_overrides.xml for unsupported features
+
+Add permissions/caas_feature_overrides.xml to suppress features that are
+declared in shared XMLs but not supported at runtime on this product.
+
+Suppresses android.hardware.location.network as NETWORK_PROVIDER is not
+available on caas, causing CTS testLocationFeatures to fail.
+
+Test: android.app.cts.SystemFeaturesTest#testLocationFeatures
+
+Tracked-On: NIACP3-1484
+Signed-off-by: preddycx <prashanthx.reddy.chintapally@intel.com>
+---
+ caas/permissions/caas_feature_overrides.xml | 5 +++++
+ 1 file changed, 5 insertions(+)
+ create mode 100644 caas/permissions/caas_feature_overrides.xml
+
+diff --git a/caas/permissions/caas_feature_overrides.xml b/caas/permissions/caas_feature_overrides.xml
+new file mode 100644
+index 00000000..b7e62b3b
+--- /dev/null
++++ b/caas/permissions/caas_feature_overrides.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Suppress features that are not supported on this product -->
++<permissions>
++    <unavailable-feature name="android.hardware.location.network" />
++</permissions>
+-- 
+2.34.1
+

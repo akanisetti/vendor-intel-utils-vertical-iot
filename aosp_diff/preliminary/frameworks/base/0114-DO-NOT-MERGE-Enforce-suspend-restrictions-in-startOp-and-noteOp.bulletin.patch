@@ -1,0 +1,172 @@
+From 7c49447fbce449a08b4634a90a572f7e1208eaa7 Mon Sep 17 00:00:00 2001
+From: Evan Severson <evanseverson@google.com>
+Date: Thu, 5 Feb 2026 18:16:55 -0800
+Subject: [PATCH 38/38] DO NOT MERGE: Enforce suspend restrictions in startOp
+ and noteOp paths
+
+Suspended apps could previously bypass AppOps restrictions by using the
+startOp and noteOp code paths, as these did not check the package
+suspended state. This change adds a check for isOpRestrictedDueToSuspend
+in noteOperationUnchecked, startOperationUnchecked, and
+startOperationDryRun.
+
+Refactored FrameworksServicesTests to verify these restrictions. The
+tests now independently check checkOp, noteOp, and startOp paths for
+three different operations: OP_RESERVED_FOR_TESTING, OP_VIBRATE, and
+OP_PLAY_AUDIO. This replaces the previous reliance on microphone and
+camera ops, which cannot be directly changed.
+
+Bug: 477935679
+Test: atest FrameworksServicesTests:SuspendPackagesTest \
+          CtsSuspendAppsTestCases:SuspendPackagesTest
+Flag: EXEMPT CVE_FIX
+Change-Id: Ifeac8cebdec2fb8d6129ecfdf18b4413303b62f4
+---
+ .../android/server/appop/AppOpsService.java   | 14 +++++++
+ .../server/pm/SuspendPackagesTest.java        | 40 +++++++++++++------
+ 2 files changed, 42 insertions(+), 12 deletions(-)
+
+diff --git a/services/core/java/com/android/server/appop/AppOpsService.java b/services/core/java/com/android/server/appop/AppOpsService.java
+index ff8de6024d2d..e471b4104c0f 100644
+--- a/services/core/java/com/android/server/appop/AppOpsService.java
++++ b/services/core/java/com/android/server/appop/AppOpsService.java
+@@ -45,6 +45,7 @@ import static android.app.AppOpsManager.OP_RECEIVE_AMBIENT_TRIGGER_AUDIO;
+ import static android.app.AppOpsManager.OP_RECORD_AUDIO;
+ import static android.app.AppOpsManager.OP_RECORD_AUDIO_HOTWORD;
+ import static android.app.AppOpsManager.OP_RECORD_AUDIO_SANDBOXED;
++import static android.app.AppOpsManager.OP_RESERVED_FOR_TESTING;
+ import static android.app.AppOpsManager.OP_VIBRATE;
+ import static android.app.AppOpsManager.OnOpStartedListener.START_TYPE_FAILED;
+ import static android.app.AppOpsManager.OnOpStartedListener.START_TYPE_STARTED;
+@@ -258,6 +259,7 @@ public class AppOpsService extends IAppOpsService.Stub {
+             OP_RECORD_AUDIO,
+             OP_CAMERA,
+             OP_VIBRATE,
++            OP_RESERVED_FOR_TESTING,
+     };
+ 
+     private static final int MAX_UNFORWARDED_OPS = 10;
+@@ -3421,6 +3423,10 @@ public class AppOpsService extends IAppOpsService.Stub {
+             return new SyncNotedAppOp(AppOpsManager.MODE_ERRORED, code, attributionTag,
+                     packageName);
+         }
++        if (isOpRestrictedDueToSuspend(code, packageName, uid)) {
++            return new SyncNotedAppOp(AppOpsManager.MODE_IGNORED, code, attributionTag,
++                    packageName);
++        }
+         if (proxyAttributionTag != null
+                 && !isAttributionTagDefined(packageName, proxyPackageName, proxyAttributionTag)) {
+             proxyAttributionTag = null;
+@@ -4079,6 +4085,10 @@ public class AppOpsService extends IAppOpsService.Stub {
+             return new SyncNotedAppOp(AppOpsManager.MODE_ERRORED, code, attributionTag,
+                     packageName);
+         }
++        if (isOpRestrictedDueToSuspend(code, packageName, uid)) {
++            return new SyncNotedAppOp(AppOpsManager.MODE_IGNORED, code, attributionTag,
++                    packageName);
++        }
+         if (proxyAttributionTag != null
+                 && !isAttributionTagDefined(packageName, proxyPackageName, proxyAttributionTag)) {
+             proxyAttributionTag = null;
+@@ -4217,6 +4227,10 @@ public class AppOpsService extends IAppOpsService.Stub {
+             return new SyncNotedAppOp(AppOpsManager.MODE_ERRORED, code, attributionTag,
+                     packageName);
+         }
++        if (isOpRestrictedDueToSuspend(code, packageName, uid)) {
++            return new SyncNotedAppOp(AppOpsManager.MODE_IGNORED, code, attributionTag,
++                    packageName);
++        }
+ 
+         boolean isRestricted = false;
+         synchronized (this) {
+diff --git a/services/tests/servicestests/src/com/android/server/pm/SuspendPackagesTest.java b/services/tests/servicestests/src/com/android/server/pm/SuspendPackagesTest.java
+index 2e5feffd8673..749f1fd55217 100644
+--- a/services/tests/servicestests/src/com/android/server/pm/SuspendPackagesTest.java
++++ b/services/tests/servicestests/src/com/android/server/pm/SuspendPackagesTest.java
+@@ -18,9 +18,9 @@ package com.android.server.pm;
+ 
+ import static android.app.AppOpsManager.MODE_ALLOWED;
+ import static android.app.AppOpsManager.MODE_IGNORED;
+-import static android.app.AppOpsManager.OP_CAMERA;
+ import static android.app.AppOpsManager.OP_PLAY_AUDIO;
+-import static android.app.AppOpsManager.OP_RECORD_AUDIO;
++import static android.app.AppOpsManager.OP_RESERVED_FOR_TESTING;
++import static android.app.AppOpsManager.OP_VIBRATE;
+ import static android.app.AppOpsManager.opToName;
+ 
+ import static org.junit.Assert.assertEquals;
+@@ -30,12 +30,14 @@ import static org.junit.Assert.assertTrue;
+ import static org.junit.Assert.fail;
+ 
+ import android.app.AppGlobals;
++import android.app.AppOpsManager;
+ import android.content.Context;
+ import android.content.pm.IPackageManager;
+ import android.content.pm.LauncherApps;
+ import android.content.pm.PackageManager;
+ import android.content.pm.SuspendDialogInfo;
+ import android.os.BaseBundle;
++import android.os.Binder;
+ import android.os.Bundle;
+ import android.os.Handler;
+ import android.os.Looper;
+@@ -253,18 +255,18 @@ public class SuspendPackagesTest {
+     }
+ 
+     @Test
+-    public void testCameraBlockedOnSuspend() throws Exception {
+-        assertOpBlockedOnSuspend(OP_CAMERA);
++    public void testReservedForTestingOpBlockedOnSuspend() throws Exception {
++        assertOpBlockedOnSuspend(OP_RESERVED_FOR_TESTING);
+     }
+ 
+     @Test
+-    public void testPlayAudioBlockedOnSuspend() throws Exception {
+-        assertOpBlockedOnSuspend(OP_PLAY_AUDIO);
++    public void testVibrateOpBlockedOnSuspend() throws Exception {
++        assertOpBlockedOnSuspend(OP_VIBRATE);
+     }
+ 
+     @Test
+-    public void testRecordAudioBlockedOnSuspend() throws Exception {
+-        assertOpBlockedOnSuspend(OP_RECORD_AUDIO);
++    public void testPlayAudioOpBlockedOnSuspend() throws Exception {
++        assertOpBlockedOnSuspend(OP_PLAY_AUDIO);
+     }
+ 
+     private void assertOpBlockedOnSuspend(int code) throws Exception {
+@@ -282,13 +284,27 @@ public class SuspendPackagesTest {
+         iAppOps.startWatchingMode(code, TEST_APP_PACKAGE_NAME, watcher);
+         final int testPackageUid = mPackageManager.getPackageUid(TEST_APP_PACKAGE_NAME, 0);
+         int opMode = iAppOps.checkOperation(code, testPackageUid, TEST_APP_PACKAGE_NAME);
+-        assertEquals("Op " + opToName(code) + " disallowed for unsuspended package", MODE_ALLOWED,
+-                opMode);
++        assertEquals("checkOperation: Op " + opToName(code) + " disallowed for unsuspended package",
++                MODE_ALLOWED, opMode);
+         suspendTestPackage(null, null, null);
+         assertTrue("AppOpsWatcher did not callback", latch.await(5, TimeUnit.SECONDS));
++
+         opMode = iAppOps.checkOperation(code, testPackageUid, TEST_APP_PACKAGE_NAME);
+-        assertEquals("Op " + opToName(code) + " allowed for suspended package", MODE_IGNORED,
+-                opMode);
++        assertEquals("checkOperation: Op " + opToName(code) + " allowed for suspended package",
++                MODE_IGNORED, opMode);
++
++        opMode = iAppOps.noteOperation(code, testPackageUid, TEST_APP_PACKAGE_NAME, null, false,
++                "test", false).getOpMode();
++        assertEquals("noteOperation: Op " + opToName(code) + " allowed for suspended package",
++                MODE_IGNORED, opMode);
++
++        opMode = iAppOps.startOperation(new Binder(), code, testPackageUid,
++                TEST_APP_PACKAGE_NAME, null, false, false, "test", false,
++                AppOpsManager.ATTRIBUTION_FLAGS_NONE, AppOpsManager.ATTRIBUTION_CHAIN_ID_NONE)
++                .getOpMode();
++        assertEquals("startOperation: Op " + opToName(code) + " allowed for suspended package",
++                MODE_IGNORED, opMode);
++
+         iAppOps.stopWatchingMode(watcher);
+     }
+ 
+-- 
+2.53.0
+

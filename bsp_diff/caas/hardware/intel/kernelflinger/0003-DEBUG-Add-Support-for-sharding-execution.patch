@@ -1,0 +1,121 @@
+From 9bc560a16f9e09837060bd674d0c2476e745cf5a Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Tue, 24 Feb 2026 15:47:11 +0000
+Subject: [PATCH] [DEBUG] Add Support for sharding execution
+
+Sharding requires the devices with different serial numbers
+Currently all devices are having same serial numbers
+Add debug code to generate serial numbers randomly to enable shard
+execution
+
+The code is guarded under flag and passed as argument during build
+creation
+
+Tracked-On: TEST
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/include/vars.h b/include/vars.h
+index 8022d59..d6aeeaa 100644
+--- a/include/vars.h
++++ b/include/vars.h
+@@ -180,4 +180,8 @@ EFI_STATUS get_efi_loaded_slot(UINT8 *slot);
+ EFI_STATUS set_efi_loaded_slot_failed(UINT8 slot, EFI_STATUS error);
+ EFI_STATUS get_efi_loaded_slot_failed(UINT8 slot, EFI_STATUS *error);
+ 
++#ifdef DEBUG_GENERATE_RANDOM_SERIAL_NUM
++char *generate_random_serial_number(void);
++#endif /* DEBUG_GENERATE_RANDOM_SERIAL_NUM */
++
+ #endif /* _VARS_H_ */
+diff --git a/libkernelflinger/Android.mk b/libkernelflinger/Android.mk
+index 584638e..0e365e5 100755
+--- a/libkernelflinger/Android.mk
++++ b/libkernelflinger/Android.mk
+@@ -96,6 +96,11 @@ ifeq ($(MULTI_USER_SUPPORT),true)
+     LOCAL_CFLAGS += -DMULTI_USER
+ endif
+ 
++ifeq ($(DEBUG_GENERATE_RANDOM_SERIAL_NUM), true)
++    LOCAL_CFLAGS += -DDEBUG_GENERATE_RANDOM_SERIAL_NUM
++endif
++
++
+ LOCAL_SRC_FILES := \
+ 	android.c \
+ 	efilinux.c \
+diff --git a/libkernelflinger/vars.c b/libkernelflinger/vars.c
+index 98bfcff..4ba52eb 100644
+--- a/libkernelflinger/vars.c
++++ b/libkernelflinger/vars.c
+@@ -32,6 +32,7 @@
+  */
+ #include <efi.h>
+ #include <efiapi.h>
++#include "timer.h"
+ 
+ #include "vars.h"
+ #include "ui.h"
+@@ -837,7 +838,11 @@ char *get_serial_number(void)
+ {
+ 	EFI_STATUS ret;
+ 	static char bios_serialno[SERIALNO_MAX_SIZE + 1];
++#ifndef DEBUG_GENERATE_RANDOM_SERIAL_NUM
+ 	static char serialno[SERIALNO_MAX_SIZE + 1];
++#else
++	char *serialno = generate_random_serial_number();
++#endif
+ 	char *pos;
+ 	unsigned int zeroes = 0;
+ 	UINTN len;
+@@ -1061,3 +1066,48 @@ EFI_STATUS get_efi_loaded_slot_failed(UINT8 slot, EFI_STATUS *error)
+ 	FreePool(data);
+ 	return EFI_SUCCESS;
+ }
++
++#ifdef DEBUG_GENERATE_RANDOM_SERIAL_NUM
++/**
++ * Generate a random serial number using hardware RNG
++ *
++ * @return Pointer to static buffer containing random serial number
++ *         Format: 20 hexadecimal characters (e.g., "a3f5c8d9e1b2047f6c81")
++ */
++char *generate_random_serial_number(void)
++{
++	static char random_serial[SERIALNO_MAX_SIZE + 1];
++	CHAR8 random_bytes[SERIALNO_MAX_SIZE / 2]; // 10 bytes -> 20 hex chars
++	EFI_STATUS ret;
++	UINTN i;
++	debug(L"BNK: Generated random serial: entry");
++
++	// Check if already generated
++	if (random_serial[0] != '\0')
++		return random_serial;
++
++	// Generate random bytes using RDRAND
++	debug(L"BNK: Generated random serial:using RDRAND");
++	ret = generate_random_numbers(random_bytes, sizeof(random_bytes));
++	if (EFI_ERROR(ret)) {
++		error(L"Failed to generate random serial: CPU doesn't support RDRAND");
++
++		// Fallback: Use timestamp-based pseudo-random
++		UINT64 timestamp = rdtsc();
++		efi_snprintf((CHAR8*)random_serial, sizeof(random_serial),
++		             (CHAR8*)"TS%018llx", timestamp);
++	        debug(L"BNK: Generated random serial: %a", random_serial);
++		return random_serial;
++	}
++
++	// Convert random bytes to hexadecimal string
++	for (i = 0; i < sizeof(random_bytes); i++) {
++		efi_snprintf((CHAR8*)&random_serial[i * 2], 3,
++		             (CHAR8*)"%02x", (unsigned char)random_bytes[i]);
++	}
++	random_serial[SERIALNO_MAX_SIZE] = '\0';
++
++	debug(L"BNK: Generated random serial: %a", random_serial);
++	return random_serial;
++}
++#endif /* DEBUG_GENERATE_RANDOM_SERIAL_NUM */
+-- 
+2.34.1
+

@@ -1,0 +1,89 @@
+From ee4760ddd61e34ff7b689493a95d1cbf1b0b0def Mon Sep 17 00:00:00 2001
+From: Tyler Gunn <tgunn@google.com>
+Date: Fri, 13 Feb 2026 04:37:18 +0000
+Subject: [PATCH] Fix issue initiating calls from the work profile.
+
+Telecom used to rely on DefaultDialerManager#getInstalledDialerApplications
+to see if the work profile had a default dialer application installed or
+not.  That method was written in 2015 before the invention of the
+RoleManager.  As such all it did was check if _something_ handled the
+ACTION_DIAL intent.  That in itself isn't the WORST assumption to check
+for a dialer.  However there appears to be a regression in
+PackageManager#queryIntentActivitiesAsUser where the package "android"
+(ie the system server) is reported as something that handles the ACTION_DIAL
+intent, even though there is NOTHING in the work profile that is handling
+that intent.
+
+A more reliable approach here is to just use our friend RoleManager to see
+if there actually IS a holder of the dialer role in the work profile.
+
+Test: Confirmed reproduction without any changes.
+Test: Added work profile with no dialer and verified that calls from the
+work profile trampoline over to the personal profile and dialer shows.
+Test: Added work profile and installed a dialer in it; verified that calls
+from the work profile launch the work profile dialer.
+Flag: EXEMPT BUGFIX
+Bug: 484037331
+Bug: 479515555
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:9a8e13690d874e7c3221407de1f5f774615ab154
+Merged-In: I1c10a6e0c370cb4deb9e985d5e7b9340d8bbd161
+Change-Id: I1c10a6e0c370cb4deb9e985d5e7b9340d8bbd161
+(cherry picked from commit 08564e5b3e2792fceba976e7cb7efdd7d13a5c80)
+---
+ .../server/telecom/CallIntentProcessor.java   | 26 +++++++++++++++++--
+ 1 file changed, 24 insertions(+), 2 deletions(-)
+
+diff --git a/src/com/android/server/telecom/CallIntentProcessor.java b/src/com/android/server/telecom/CallIntentProcessor.java
+index c77b9ff14..3df45c3a9 100644
+--- a/src/com/android/server/telecom/CallIntentProcessor.java
++++ b/src/com/android/server/telecom/CallIntentProcessor.java
+@@ -7,6 +7,7 @@ import com.android.server.telecom.components.ErrorDialogActivity;
+ import com.android.server.telecom.flags.FeatureFlags;
+ 
+ import android.content.ActivityNotFoundException;
++import android.app.role.RoleManager;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.content.pm.PackageManager;
+@@ -238,6 +239,20 @@ public class CallIntentProcessor {
+         });
+     }
+ 
++    /**
++     * Determines if the {@link RoleManager} for the specified user has a role holder for the dialer
++     * role.
++     * @param context the context.
++     * @param user the user to check.
++     * @return {@code true} if the dialer role is held by a valid apk that meets the requirements of
++     * being a dialer app, {@code false} otherwise.
++     */
++    private static boolean doesUserHaveDialerRoleHolder(Context context, UserHandle user) {
++        Context userContext = context.createContextAsUser(user, 0);
++        RoleManager roleManager = userContext.getSystemService(RoleManager.class);
++        return roleManager.getRoleHolders(RoleManager.ROLE_DIALER).size() > 0;
++    }
++
+     /**
+      * If the call is initiated from managed profile but there is no work dialer installed, treat
+      * the call is initiated from its parent user.
+@@ -248,8 +263,15 @@ public class CallIntentProcessor {
+             FeatureFlags featureFlags) {
+         final UserHandle initiatingUser = intent.getParcelableExtra(KEY_INITIATING_USER);
+         if (UserUtil.isManagedProfile(context, initiatingUser, featureFlags)) {
+-            boolean noDialerInstalled = DefaultDialerManager.getInstalledDialerApplications(context,
+-                    initiatingUser.getIdentifier()).size() == 0;
++            // Note: We used to just check DefaultDialerManager.getInstalledDialerApplications to
++            // see if some activity handles the ACTION_DIAL intent.  An OS bug was introduced
++            // where we were seeing that a work profile had something handling the ACTION_DIAL
++            // intent in the android package, despite none existing. (╯°□°)╯︵ ┻━┻
++            // That method was introduced in 2015 when there was no concept of a dialer role and
++            // RoleManager.  It is much more reliable to check if the RoleManager reports that
++            // there is a role holder for that user instead.  Just because you handle the dial
++            // intent it does not mean you are actually a dialer.
++            boolean noDialerInstalled = !doesUserHaveDialerRoleHolder(context, initiatingUser);
+             if (noDialerInstalled) {
+                 final UserManager userManager = context.getSystemService(UserManager.class);
+                 UserHandle parentUserHandle = featureFlags.telecomResolveHiddenDependencies()
+-- 
+2.53.0
+

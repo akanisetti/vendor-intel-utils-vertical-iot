@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Suresh, Prashanth <prashanth.suresh@intel.com>
+Date: Mon, 29 Jun 2026 16:40:00 +0000
+Subject: [PATCH] sepolicy: fix location HAL core/vendor data-separation neverallow
+
+Remove the allow rules that permitted system_server to write directly to
+location_vendor_data_file. Those rules violate the
+'neverallow { domain -vendor_domain ... } vendor_data_file:file write'
+neverallow in system/sepolicy/private/domain.te.
+
+LocationControlService now calls ILocationHal.setLocation() over binder;
+the HAL (hal_location_default) is the sole writer of vendor data files,
+which is already allowed by the existing rules in this file.
+
+Tracked-On: NIACP3-1182
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ staticlocation/hal_location_default.te | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+diff --git a/staticlocation/hal_location_default.te b/staticlocation/hal_location_default.te
+index 5224142..b4e6e8a 100644
+--- a/staticlocation/hal_location_default.te
++++ b/staticlocation/hal_location_default.te
+@@ -11,7 +11,7 @@ allow hal_location_default location_vendor_data_file:dir rw_dir_perms;
+ allow hal_location_default location_vendor_data_file:file create_file_perms;
+ allow hal_location_default location_vendor_data_file:file rw_file_perms;
+ 
+-# Allow system_server (LocationControlService) to write the config file
+-allow system_server location_vendor_data_file:dir rw_dir_perms;
+-allow system_server location_vendor_data_file:file create_file_perms;
+-allow system_server location_vendor_data_file:file rw_file_perms;
++# The vendor HAL owns the vendor data store and is the sole writer of the
++# location config. system_server (LocationControlService) updates the location
++# over the ILocationHal binder interface instead of touching vendor data files,
++# which keeps it compliant with the core/vendor data separation neverallow.
+
+-- 
+2.34.1

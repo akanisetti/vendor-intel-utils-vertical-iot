@@ -1,0 +1,214 @@
+From 0e4366622093b7302bdf779a6317075906e855d2 Mon Sep 17 00:00:00 2001
+From: Tyler Saunders <tylersaunders@google.com>
+Date: Fri, 2 May 2025 10:08:06 +0000
+Subject: [PATCH 3/3] feat(selection): Add size method to Selection interface
+
+Adds a new `size()` method to the `Selection` interface and provides
+implementations in `SelectionImpl` and `GrantsAwareSelectionImpl`.
+This allows consumers to easily query the current number of selected items.
+
+Additionally, optimizes the `add` method in both implementations to
+avoid unnecessary `updateFlow` calls if the item being added is already
+present in the selection.
+
+Includes corresponding unit tests for the new `size()` method.
+
+Bug: b/353659535
+Test: atest PhotopickerTests
+Flag: EXEMPT no existing usage changed
+Change-Id: Ia610c5586b7647a0b87ccbba9bf7e00fba5ccd44
+(cherry picked from commit 37726a74bb1fd83f26661755253649bdfc395862)
+---
+ .../selection/GrantsAwareSelectionImpl.kt     | 23 +++++++++++-----
+ .../photopicker/core/selection/Selection.kt   | 14 +++++++---
+ .../core/selection/SelectionImpl.kt           | 23 +++++++++++-----
+ .../selection/GrantsAwareSelectionTest.kt     | 27 +++++++++++++++++++
+ 4 files changed, 69 insertions(+), 18 deletions(-)
+
+diff --git a/photopicker/src/com/android/photopicker/core/selection/GrantsAwareSelectionImpl.kt b/photopicker/src/com/android/photopicker/core/selection/GrantsAwareSelectionImpl.kt
+index 008ad840e..c1fae211d 100644
+--- a/photopicker/src/com/android/photopicker/core/selection/GrantsAwareSelectionImpl.kt
++++ b/photopicker/src/com/android/photopicker/core/selection/GrantsAwareSelectionImpl.kt
+@@ -96,12 +96,7 @@ class GrantsAwareSelectionImpl<T : Grantable>(
+             _selection.addAll(initialSelection)
+         }
+         _flow = MutableStateFlow(createLatestSelectionSet())
+-        flow =
+-            _flow.stateIn(
+-                scope,
+-                SharingStarted.WhileSubscribed(),
+-                initialValue = _flow.value,
+-            )
++        flow = _flow.stateIn(scope, SharingStarted.WhileSubscribed(), initialValue = _flow.value)
+     }
+ 
+     /**
+@@ -131,6 +126,10 @@ class GrantsAwareSelectionImpl<T : Grantable>(
+     @GuardedBy("mutex")
+     override suspend fun add(item: T): SelectionModifiedResult {
+         mutex.withLock {
++            // If the item is already part of the set, just return success
++            // This saves an unnecessary call to updateFlow for items that are already part of the
++            // set.
++            if (_selection.contains(item)) return SUCCESS
+             if (isPreGranted(item)) {
+                 _deSelection.remove(item)
+                 updateFlow()
+@@ -289,6 +288,16 @@ class GrantsAwareSelectionImpl<T : Grantable>(
+         }
+     }
+ 
++    /**
++     * Returns the number of elements in this collection.
++     *
++     * @return The number of elements.
++     */
++    @GuardedBy("mutex")
++    override suspend fun size(): Int {
++        return mutex.withLock { _selection.size }
++    }
++
+     /**
+      * Toggles the requested item in the selection.
+      *
+@@ -409,7 +418,7 @@ class GrantsAwareSelectionImpl<T : Grantable>(
+             return GrantsAwareSet(
+                 _selection.toSet(),
+                 _deSelection.toSet(),
+-                preGrantedItemsCount.value ?: 0
++                preGrantedItemsCount.value ?: 0,
+             )
+         }
+     }
+diff --git a/photopicker/src/com/android/photopicker/core/selection/Selection.kt b/photopicker/src/com/android/photopicker/core/selection/Selection.kt
+index 6d554827b..90e4dcf38 100644
+--- a/photopicker/src/com/android/photopicker/core/selection/Selection.kt
++++ b/photopicker/src/com/android/photopicker/core/selection/Selection.kt
+@@ -65,6 +65,7 @@ interface Selection<T> {
+     /**
+      * Removes the requested item from the selection. If the item is not in the selection, this has
+      * no effect. Afterwards, will emit the new selection into the exposed flow.
++     *
+      * @return [SelectionModifiedResult] of the outcome of the removal.
+      */
+     suspend fun remove(item: T): SelectionModifiedResult
+@@ -84,6 +85,13 @@ interface Selection<T> {
+      */
+     suspend fun snapshot(): Set<T>
+ 
++    /**
++     * Returns the number of elements in this collection.
++     *
++     * @return The number of elements.
++     */
++    suspend fun size(): Int
++
+     /**
+      * Toggles the requested item in the selection.
+      *
+@@ -107,8 +115,6 @@ interface Selection<T> {
+      */
+     suspend fun toggleAll(items: Collection<T>): SelectionModifiedResult
+ 
+-    /**
+-     * @return a ReadOnly object contains items which were preGranted but de-selected.
+-     */
++    /** @return a ReadOnly object contains items which were preGranted but de-selected. */
+     suspend fun getDeselection(): Collection<T>
+-}
+\ No newline at end of file
++}
+diff --git a/photopicker/src/com/android/photopicker/core/selection/SelectionImpl.kt b/photopicker/src/com/android/photopicker/core/selection/SelectionImpl.kt
+index f1796251c..7cb1270ac 100644
+--- a/photopicker/src/com/android/photopicker/core/selection/SelectionImpl.kt
++++ b/photopicker/src/com/android/photopicker/core/selection/SelectionImpl.kt
+@@ -60,7 +60,7 @@ class SelectionImpl<T>(
+     val scope: CoroutineScope,
+     val initialSelection: Collection<T>? = null,
+     private val configuration: StateFlow<PhotopickerConfiguration>,
+-    private val preSelectedMedia: StateFlow<List<T>?>
++    private val preSelectedMedia: StateFlow<List<T>?>,
+ ) : Selection<T> {
+ 
+     private val TAG = "SelectionImpl"
+@@ -88,12 +88,7 @@ class SelectionImpl<T>(
+         }
+ 
+         _flow = MutableStateFlow(_selection.toSet())
+-        flow =
+-            _flow.stateIn(
+-                scope,
+-                SharingStarted.WhileSubscribed(),
+-                initialValue = _flow.value,
+-            )
++        flow = _flow.stateIn(scope, SharingStarted.WhileSubscribed(), initialValue = _flow.value)
+     }
+ 
+     /**
+@@ -109,6 +104,10 @@ class SelectionImpl<T>(
+     @GuardedBy("mutex")
+     override suspend fun add(item: T): SelectionModifiedResult {
+         mutex.withLock {
++            // If the item is already part of the set, just return success
++            // This saves an unnecessary call to updateFlow for items that are already part of the
++            // set.
++            if (_selection.contains(item)) return SUCCESS
+             val itemCanFit = ensureSelectionLimitLocked(/* size= */ 1)
+             if (itemCanFit) {
+                 _selection.add(item)
+@@ -219,6 +218,16 @@ class SelectionImpl<T>(
+         return mutex.withLock { _selection.toSet() }
+     }
+ 
++    /**
++     * Returns the number of elements in this collection.
++     *
++     * @return The number of elements.
++     */
++    @GuardedBy("mutex")
++    override suspend fun size(): Int {
++        return mutex.withLock { _selection.size }
++    }
++
+     /**
+      * Toggles the requested item in the selection.
+      *
+diff --git a/photopicker/tests/src/com/android/photopicker/core/selection/GrantsAwareSelectionTest.kt b/photopicker/tests/src/com/android/photopicker/core/selection/GrantsAwareSelectionTest.kt
+index 7d0233696..9a3cbae6c 100644
+--- a/photopicker/tests/src/com/android/photopicker/core/selection/GrantsAwareSelectionTest.kt
++++ b/photopicker/tests/src/com/android/photopicker/core/selection/GrantsAwareSelectionTest.kt
+@@ -691,4 +691,31 @@ class GrantsAwareSelectionTest {
+             .that(selection.isDeSelectAllEnabled)
+             .isTrue()
+     }
++
++    @Test
++    fun testSelectionGetSize() = runTest {
++        val selection: Selection<SelectionData> =
++            GrantsAwareSelectionImpl(
++                scope = backgroundScope,
++                configuration =
++                    provideTestConfigurationFlow(
++                        scope = backgroundScope,
++                        defaultConfiguration =
++                            TestPhotopickerConfiguration.build {
++                                action("")
++                                selectionLimit(50)
++                            },
++                    ),
++                initialSelection = INITIAL_SELECTION,
++                preGrantedItemsCount = TestDataServiceImpl().preGrantedMediaCount,
++            )
++
++        assertWithMessage("Expected size did not match")
++            .that(selection.size())
++            .isEqualTo(INITIAL_SELECTION.size)
++
++        selection.clear()
++
++        assertWithMessage("Expected empty size did not match").that(selection.size()).isEqualTo(0)
++    }
+ }
+-- 
+2.53.0
+

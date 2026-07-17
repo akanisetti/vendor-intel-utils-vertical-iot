@@ -1,0 +1,87 @@
+From b466dd4b622d4f11a7a0ecf55b647891516a498e Mon Sep 17 00:00:00 2001
+From: Jack Yu <jackcwyu@google.com>
+Date: Thu, 11 Dec 2025 09:11:44 +0000
+Subject: [PATCH 1/2] Add onNullBinding and onBindingDied implemention to
+ HostApduService
+
+Bug: 385917501
+Test: atest NfcNciUnitTests
+Flag: EXEMPT BUGFIX
+Change-Id: I1cf77ed4c3e979f02f25ccd36187a5177866238a
+Merged-In: I1cf77ed4c3e979f02f25ccd36187a5177866238a
+(cherry picked from commit cfbd02ac1630e339535cea673c3c4fa155fa668e)
+---
+ NfcNci/proto/event.proto                      |  1 +
+ .../cardemulation/HostEmulationManager.java   | 37 +++++++++++++++++++
+ 2 files changed, 38 insertions(+)
+
+diff --git a/NfcNci/proto/event.proto b/NfcNci/proto/event.proto
+index e79819c89..53c4fa405 100644
+--- a/NfcNci/proto/event.proto
++++ b/NfcNci/proto/event.proto
+@@ -158,6 +158,7 @@ enum BindState {
+   SERVICE_CONNECTED = 0;
+   SERVICE_DISCONNECTED = 1;
+   SERVICE_BINDING_DIED = 2;
++  SERVICE_NULL_BINDING = 3;
+ }
+ 
+ message NfcPaymentServiceBindState {
+diff --git a/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java b/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java
+index 25c55fd00..633f9dab7 100644
+--- a/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java
++++ b/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java
+@@ -1619,6 +1619,29 @@ public class HostEmulationManager {
+                                     .build())
+                             .build());
+         }
++
++        @Override
++        public void onNullBinding(ComponentName name) {
++            Log.i(TAG, "onNullBinding: " + name);
++            synchronized (mLock) {
++                mContext.unbindService(this);
++            }
++
++            NfcInjector.getInstance().getNfcEventLog().logEvent(
++                    NfcEventProto.EventType.newBuilder()
++                            .setPaymentServiceBindState(
++                                NfcEventProto.NfcPaymentServiceBindState.newBuilder()
++                                    .setBindState(NfcEventProto.BindState.SERVICE_NULL_BINDING)
++                                    .setComponentInfo(
++                                        NfcEventProto.NfcComponentInfo.newBuilder()
++                                            .setPackageName(
++                                                name.getPackageName())
++                                            .setClassName(
++                                                name.getClassName())
++                                            .build())
++                                    .build())
++                            .build());
++        }
+     };
+ 
+     class HostEmulationServiceConnection implements ServiceConnection {
+@@ -1709,6 +1732,20 @@ public class HostEmulationManager {
+                 }
+             }
+         }
++
++        @Override
++        public void onBindingDied(ComponentName name) {
++            Log.i(TAG, "onBindingDied: " + name);
++            unbindServiceIfNeededLocked();
++        }
++
++        @Override
++        public void onNullBinding(ComponentName name) {
++            Log.i(TAG, "onNullBinding: " + name);
++            synchronized (mLock) {
++                mContext.unbindService(this);
++            }
++        }
+     };
+ 
+     private ServiceConnection mConnection =
+-- 
+2.53.0
+

@@ -1,0 +1,32 @@
+From a8a64df880972d0008ddbab40e9db9af53378622 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Thu, 2 Jul 2026 09:01:16 +0000
+Subject: [PATCH] kernel: Enable CONFIG_BPF_UNPRIV_DEFAULT_OFF
+
+Enable CONFIG_BPF_UNPRIV_DEFAULT_OFF=y to restrict unprivileged BPF access. This aligns with
+industry best practices for production Android systems. Unprivileged BPF is not required as all
+system networking and profiling components operate with appropriate privileges.
+
+Tracked-On: NIACP3-1427
+Co-authored-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ .../config-lts/linux-intel-lts2024/x86_64_defconfig    | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig b/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig
+index ddf3d040..da7d88ba 100644
+--- a/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig
++++ b/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig
+@@ -120,7 +120,7 @@ CONFIG_BPF_SYSCALL=y
+ CONFIG_BPF_JIT=y
+ CONFIG_BPF_JIT_ALWAYS_ON=y
+ CONFIG_BPF_JIT_DEFAULT_ON=y
+-# CONFIG_BPF_UNPRIV_DEFAULT_OFF is not set
++CONFIG_BPF_UNPRIV_DEFAULT_OFF=y
+ # CONFIG_BPF_PRELOAD is not set
+ # CONFIG_BPF_LSM is not set
+ # end of BPF subsystem
+--
+2.34.1
+

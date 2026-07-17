@@ -1,0 +1,45 @@
+From bd1abec1b4df3054970b71213b3d0b9a65711ed6 Mon Sep 17 00:00:00 2001
+From: Anagha Sasikumar <anaghask@google.com>
+Date: Wed, 29 Oct 2025 17:02:50 +0000
+Subject: [PATCH 27/38] Add StorageManager.convert() check earlier in the stack
+ so the command fails early instead of crashing system later.
+
+Bug: 393614518
+BUG: 460779368
+Flag: EXEMPT BUGFIX
+Test: PackageInstallerServiceTest
+Test: new error Exception occurred while executing 'install':
+java.lang.IllegalArgumentException: Invalid volumeUuid value in session params: ../../../data
+	at com.android.server.am.ActiveServices$$ExternalSyntheticThrowBlockOutline3.m(R8$$SyntheticClass:0)
+	at com.android.server.pm.PackageInstallerService.createSessionInternal(PackageInstallerService.java:1045)
+        ...
+
+Change-Id: Ifbd9c37565eae47d85ab3198b7bf76fe15a20b4f
+(cherry picked from commit fe2d4eb0555ab2f1ea812d2b12e0a1548edea2e7)
+Merged-In: Ifbd9c37565eae47d85ab3198b7bf76fe15a20b4f
+---
+ .../com/android/server/pm/PackageInstallerService.java    | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/services/core/java/com/android/server/pm/PackageInstallerService.java b/services/core/java/com/android/server/pm/PackageInstallerService.java
+index 2d0bb258e89f..588371fd5272 100644
+--- a/services/core/java/com/android/server/pm/PackageInstallerService.java
++++ b/services/core/java/com/android/server/pm/PackageInstallerService.java
+@@ -956,6 +956,14 @@ public class PackageInstallerService extends IPackageInstaller.Stub implements
+                 // For now, installs to adopted media are treated as internal from
+                 // an install flag point-of-view.
+                 params.installFlags |= PackageManager.INSTALL_INTERNAL;
++                // Check if volumeUuid value is valid, else fail.
++                try {
++                    StorageManager.convert(params.volumeUuid);
++                } catch (IllegalArgumentException e) {
++                    throw new IllegalArgumentException("Invalid volumeUuid value in session "
++                            + "params: "
++                            + params.volumeUuid);
++                }
+             } else {
+                 params.installFlags |= PackageManager.INSTALL_INTERNAL;
+ 
+-- 
+2.53.0
+

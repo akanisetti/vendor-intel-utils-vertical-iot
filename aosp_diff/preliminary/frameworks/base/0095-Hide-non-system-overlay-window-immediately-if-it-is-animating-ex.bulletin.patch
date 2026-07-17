@@ -1,0 +1,45 @@
+From d906bea3c8e233bfb5afd6ae259631d2e34838f1 Mon Sep 17 00:00:00 2001
+From: Riddle Hsu <riddlehsu@google.com>
+Date: Wed, 7 Jan 2026 12:38:26 +0800
+Subject: [PATCH 19/38] Hide non system overlay window immediately if it is
+ animating exit
+
+Otherwise, WSA#applyAnimationLocked skips the hide animation and
+the hide operation will wait for the previous exit animation to be
+finished, which could be a long duration.
+
+Bug: 463364410
+Flag: EXEMPT BUGFIX
+Test: Remove a window with a long exit duration animation.
+      Launch an activity with using hide-overlay flag.
+      The removing window should be hidden immediately.
+Merged-In: I218fcb6eabe0033646f8a99e75a05409ed12c19f
+Change-Id: I218fcb6eabe0033646f8a99e75a05409ed12c19f
+---
+ .../core/java/com/android/server/wm/WindowState.java   | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/services/core/java/com/android/server/wm/WindowState.java b/services/core/java/com/android/server/wm/WindowState.java
+index d8c63284d150..b8ad2f5f6b31 100644
+--- a/services/core/java/com/android/server/wm/WindowState.java
++++ b/services/core/java/com/android/server/wm/WindowState.java
+@@ -2964,6 +2964,16 @@ class WindowState extends WindowContainer<WindowState> implements WindowManagerP
+             if (!mToken.okToAnimate()) {
+                 doAnimation = false;
+             }
++            if (mForceHideNonSystemOverlayWindow || mHiddenWhileSuspended
++                    || !mAppOpVisibility || mPermanentlyHidden) {
++                if (isAnimating()) {
++                    if (mAnimatingExit) {
++                        // Hide immediately if the window is playing an exit animation.
++                        doAnimation = false;
++                    }
++                    cancelAnimation();
++                }
++            }
+         }
+         boolean current =
+                 doAnimation ? mLegacyPolicyVisibilityAfterAnim : isLegacyPolicyVisibility();
+-- 
+2.53.0
+

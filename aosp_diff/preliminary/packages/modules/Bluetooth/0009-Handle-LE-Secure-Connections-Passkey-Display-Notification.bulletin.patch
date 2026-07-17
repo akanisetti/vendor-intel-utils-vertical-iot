@@ -1,0 +1,169 @@
+From 69f08e477f2350e7d76481f4c811fe245096d83e Mon Sep 17 00:00:00 2001
+From: Brian Delwiche <delwiche@google.com>
+Date: Tue, 17 Mar 2026 10:36:01 -0700
+Subject: [PATCH 4/5] Handle LE Secure Connections Passkey Display/Notification
+
+This change improves the handling of LE Secure Connections when using
+Passkey Display or Key Notification models. It introduces state tracking
+for user approval and remote confirmation of the passkey. The SMP layer
+now waits for both user approval via SMP_SecurityGrant and remote
+confirmation before proceeding with key generation. Additionally, LE
+pairing is now cancelled if authentication times out. Default LE pairing
+flags are also initialized in btif_dm.cc.
+
+This is a combined backport of the following CLs on main: ag/35861798
+ag/35914708 ag/35861802
+
+Test: mmm packages/modules/Bluetooth
+Flag: com.android.bluetooth.flags.passkey_entry_pairing_approval
+Bug: 446268763
+Bug: 446114623
+Merged-In: I51a13be1b91900ceba59fc06317c53c84cc70dc7
+Merged-In: Ibe772d7b775a3b1534c3ec6b1ffa72f2090dff7c
+Merged-In: I67746a8952e1a8c24cc3085b29be8abad81820dd
+Change-Id: I7f8d0ffea6e6017b338d316cc5cfa31363305f6b
+---
+ system/btif/src/btif_dm.cc   |  3 +++
+ system/stack/btm/btm_sec.cc  |  6 +++++-
+ system/stack/smp/smp_api.cc  | 29 +++++++++++++++++++++++++++--
+ system/stack/smp/smp_int.h   |  5 +++++
+ system/stack/smp/smp_keys.cc | 18 ++++++++++++------
+ 5 files changed, 52 insertions(+), 9 deletions(-)
+
+diff --git a/system/btif/src/btif_dm.cc b/system/btif/src/btif_dm.cc
+index e10606b9dd..d9583908c3 100644
+--- a/system/btif/src/btif_dm.cc
++++ b/system/btif/src/btif_dm.cc
+@@ -3308,6 +3308,9 @@ static void btif_dm_ble_passkey_notif_evt(tBTA_DM_SP_KEY_NOTIF* p_ssp_key_notif)
+     pairing_cb.bond_type = BOND_TYPE_PERSISTENT;
+   }
+ 
++  pairing_cb.is_le_only = true;
++  pairing_cb.is_le_nc = false;
++
+   BTM_LogHistory(kBtmLogTagCallback, bd_addr, "Ssp request",
+                  std::format("passkey:{}", p_ssp_key_notif->passkey));
+ 
+diff --git a/system/stack/btm/btm_sec.cc b/system/stack/btm/btm_sec.cc
+index 9b25e962a1..0523cbbbe3 100644
+--- a/system/stack/btm/btm_sec.cc
++++ b/system/stack/btm/btm_sec.cc
+@@ -4225,7 +4225,7 @@ static void btm_sec_pairing_timeout(void* /* data */) {
+ 
+   p_dev_rec = btm_find_dev(p_cb->pairing_bda);
+ 
+-  log::verbose("State: {}   Flags: {}", tBTM_SEC_CB::btm_pair_state_descr(p_cb->pairing_state),
++  log::warn("State: {}   Flags: {}", tBTM_SEC_CB::btm_pair_state_descr(p_cb->pairing_state),
+                p_cb->pairing_flags);
+ 
+   switch (p_cb->pairing_state) {
+@@ -4289,6 +4289,10 @@ static void btm_sec_pairing_timeout(void* /* data */) {
+       break;
+ 
+     case BTM_PAIR_STATE_WAIT_AUTH_COMPLETE:
++      if (btm_sec_cb.pairing_flags & BTM_PAIR_FLAGS_LE_ACTIVE) {
++        SMP_PairCancel(p_cb->pairing_bda);
++      }
++      FALLTHROUGH_INTENDED;
+     case BTM_PAIR_STATE_GET_REM_NAME:
+       /* We need to notify the UI that timeout has happened while waiting for
+        * authentication*/
+diff --git a/system/stack/smp/smp_api.cc b/system/stack/smp/smp_api.cc
+index a46f113aec..6bdfec8a96 100644
+--- a/system/stack/smp/smp_api.cc
++++ b/system/stack/smp/smp_api.cc
+@@ -182,7 +182,7 @@ bool SMP_PairCancel(const RawAddress& bd_addr) {
+   return false;
+ }
+ /*******************************************************************************
+- *
++*
+  * Function         SMP_SecurityGrant
+  *
+  * Description      This function is called to grant security process.
+@@ -196,7 +196,32 @@ bool SMP_PairCancel(const RawAddress& bd_addr) {
+  *
+  ******************************************************************************/
+ void SMP_SecurityGrant(const RawAddress& bd_addr, tSMP_STATUS res) {
+-  log::verbose("addr:{}", bd_addr);
++  log::verbose("bd_addr:{} res:{} br_state:{} cb_evt:{} pairing_bda:{} assoc_model:{}", bd_addr,
++               res, smp_cb.br_state, smp_cb.cb_evt, smp_cb.pairing_bda,
++               smp_cb.selected_association_model);
++
++  if (smp_cb.pairing_bda == bd_addr &&
++      (smp_cb.selected_association_model == SMP_MODEL_SEC_CONN_PASSKEY_DISP ||
++       smp_cb.selected_association_model == SMP_MODEL_KEY_NOTIF)) {
++    if (res == SMP_SUCCESS) {
++      // Passkey/Entry pairing approved
++      smp_cb.passkey_display_state.approved = true;
++      if (smp_cb.passkey_display_state.confirmed) {
++        log::verbose("Passkey/Display pairing approved {}", smp_cb.pairing_bda);
++        tSMP_INT_DATA smp_int_data;
++        smp_int_data.key = {.key_type = SMP_KEY_TYPE_TK, .p_data = smp_cb.tk.data()};
++        smp_sm_event(&smp_cb, SMP_KEY_READY_EVT, &smp_int_data);
++      } else {
++        log::verbose("Waiting for {} to enter passkey", smp_cb.pairing_bda);
++      }
++    } else {
++      // Passkey/Entry pairing rejected
++      tSMP_INT_DATA smp_int_data;
++      smp_int_data.status = SMP_PAIR_AUTH_FAIL;
++      smp_sm_event(&smp_cb, SMP_AUTH_CMPL_EVT, &smp_int_data);
++    }
++    return;
++  }
+ 
+   // If just showing consent dialog, send response
+   if (smp_cb.cb_evt == SMP_CONSENT_REQ_EVT) {
+diff --git a/system/stack/smp/smp_int.h b/system/stack/smp/smp_int.h
+index 438fe1e8eb..336f40c02a 100644
+--- a/system/stack/smp/smp_int.h
++++ b/system/stack/smp/smp_int.h
+@@ -354,6 +354,11 @@ public:
+   tSMP_STATUS cert_failure; /*failure case for certification */
+   alarm_t* delayed_auth_timer_ent;
+   tBLE_BD_ADDR pairing_ble_bd_addr;
++
++  struct {
++    bool approved;   // User has approved the pairing
++    bool confirmed;  // Remote device has confirmed the passkey
++  } passkey_display_state;
+ };
+ 
+ /* Server Action functions are of this type */
+diff --git a/system/stack/smp/smp_keys.cc b/system/stack/smp/smp_keys.cc
+index f0fb8b9ba1..028c652c3a 100644
+--- a/system/stack/smp/smp_keys.cc
++++ b/system/stack/smp/smp_keys.cc
+@@ -442,16 +442,22 @@ void smp_generate_compare(tSMP_CB* p_cb, tSMP_INT_DATA* /* p_data */) {
+ /** This function is called when STK is generated proceed to send the encrypt
+  * the link using STK. */
+ static void smp_process_stk(tSMP_CB* p_cb, Octet16* p) {
+-  tSMP_KEY key;
++  smp_mask_enc_key(p_cb->loc_enc_size, p);
++
++    if (p_cb->selected_association_model == SMP_MODEL_SEC_CONN_PASSKEY_DISP ||
++       p_cb->selected_association_model == SMP_MODEL_KEY_NOTIF) {
++    p_cb->passkey_display_state.confirmed = true;
++    p_cb->tk = *p;
++    if (!p_cb->passkey_display_state.approved) {
++      log::info("Waiting for user to approve pairing {}", p_cb->pairing_bda);
++      return;
++    }
++  }
+ 
+   log::verbose("addr:{}", p_cb->pairing_bda);
+-  smp_mask_enc_key(p_cb->loc_enc_size, p);
+ 
+-  key.key_type = SMP_KEY_TYPE_STK;
+-  key.p_data = p->data();
++  tSMP_INT_DATA smp_int_data = {.key = {.key_type = SMP_KEY_TYPE_STK, .p_data = p->data()}};
+ 
+-  tSMP_INT_DATA smp_int_data;
+-  smp_int_data.key = key;
+   smp_sm_event(p_cb, SMP_KEY_READY_EVT, &smp_int_data);
+ }
+ 
+-- 
+2.53.0
+

@@ -1,0 +1,78 @@
+From b1cd865585d6c3b4c3a5278cd6474303b8347e05 Mon Sep 17 00:00:00 2001
+From: Radu Macovei <radumacovei@google.com>
+Date: Wed, 11 Mar 2026 02:36:18 -0700
+Subject: [PATCH] Sanitize app label in KeyChainActivity to prevent UI
+ injection.
+
+A malicious application could craft a package label containing newlines
+or other control characters. When KeyChainActivity displays this label
+in the certificate selection prompt, it could be used to manipulate the
+text layout and potentially trick the user into approving a malicious
+certificate request.
+
+This change sanitizes the application label by removing newline
+characters and extra whitespace before displaying it to the user. This
+mitigates the UI injection vulnerability.
+
+This is a variant of the vulnerability described in CVE-2017-13295.
+
+Bug: 471173239
+Test: Manually verified that an app label with newlines is correctly sanitized in the certificate selection prompt.
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:63b405131fb57386e4157218c124813952267bc6
+Merged-In: I49e70b048c11f0173c680caa2ac7f528d0eea216
+Change-Id: I49e70b048c11f0173c680caa2ac7f528d0eea216
+---
+ .../android/keychain/KeyChainActivity.java    | 20 ++++++++++++++++---
+ 1 file changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/src/com/android/keychain/KeyChainActivity.java b/src/com/android/keychain/KeyChainActivity.java
+index 5732be4..bbec317 100644
+--- a/src/com/android/keychain/KeyChainActivity.java
++++ b/src/com/android/keychain/KeyChainActivity.java
+@@ -27,6 +27,7 @@ import android.app.admin.IDevicePolicyManager;
+ import android.content.Context;
+ import android.content.DialogInterface;
+ import android.content.Intent;
++import android.content.pm.PackageItemInfo;
+ import android.content.pm.PackageManager;
+ import android.content.pm.UserInfo;
+ import android.content.res.Resources;
+@@ -42,6 +43,7 @@ import android.os.UserManager;
+ import android.security.IKeyChainAliasCallback;
+ import android.security.KeyChain;
+ import android.stats.devicepolicy.DevicePolicyEnums;
++import android.text.TextUtils;
+ import android.util.Log;
+ import android.view.LayoutInflater;
+ import android.view.View;
+@@ -576,11 +578,23 @@ public class KeyChainActivity extends AppCompatActivity {
+ 
+     private String getApplicationLabel() {
+         PackageManager pm = getPackageManager();
++        String label;
+         try {
+-            return pm.getApplicationLabel(pm.getApplicationInfo(mSenderPackageName, 0)).toString();
++            label = pm.getApplicationLabel(pm.getApplicationInfo(mSenderPackageName, 0)).toString();
+         } catch (PackageManager.NameNotFoundException e) {
+-            return mSenderPackageName;
+-        }
++            label = mSenderPackageName;
++        }
++        // Sanitize newlines, tabs, and other vertical space characters, replacing them with a
++        // single space. Also consolidate any multiple spaces into a single space and trim.
++        if (label != null) {
++            label = TextUtils.makeSafeForPresentation(
++                    label,
++                    PackageItemInfo.MAX_SAFE_LABEL_LENGTH,
++                    PackageItemInfo.DEFAULT_MAX_LABEL_SIZE_PX,
++                    TextUtils.SAFE_STRING_FLAG_TRIM | TextUtils.SAFE_STRING_FLAG_FIRST_LINE)
++                        .toString();
++        }
++        return label;
+     }
+ 
+     @VisibleForTesting
+-- 
+2.53.0
+

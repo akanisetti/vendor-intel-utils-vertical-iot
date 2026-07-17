@@ -1,0 +1,44 @@
+From de132c69edd0a0c1af12e52ffc44ea3af1b3c443 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Mon, 13 Jul 2026 03:57:34 +0000
+Subject: [PATCH] Shutdown unmount EBUSY fix
+
+When /data umount returns EBUSY (stale fd holder from a crashed
+process), falls back to MNT_DETACH (lazy unmount) to let shutdown
+proceed rather than looping until timeout.
+
+Tracked-On: NIACP3-1334
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/init/reboot.cpp b/init/reboot.cpp
+index a26149f77e..37e2e137a5 100644
+--- a/init/reboot.cpp
++++ b/init/reboot.cpp
+@@ -131,6 +131,24 @@ class MountEntry {
+         if (r == 0) {
+             LOG(INFO) << "Umounted " << mnt_fsname_ << ":" << mnt_dir_ << " opts " << mnt_opts_;
+             return true;
++        } else if (errno == EBUSY) {
++            // A process is still holding the mount open.  Try MNT_DETACH
++            // (lazy unmount) so the mountpoint is hidden from new opens
++            // immediately while existing fd references drain naturally.
++            // This avoids the repeated EBUSY loop seen in shutdown that
++            // delays reboot when /data has a stale open file descriptor.
++            LOG(WARNING) << "Cannot umount (EBUSY) " << mnt_fsname_ << ":"
++                         << mnt_dir_ << " opts " << mnt_opts_
++                         << "; attempting lazy detach (MNT_DETACH)";
++            r = umount2(mnt_dir_.c_str(), MNT_DETACH);
++            if (r == 0) {
++                LOG(INFO) << "Lazy-detached " << mnt_fsname_ << ":"
++                          << mnt_dir_ << " opts " << mnt_opts_;
++                return true;
++            }
++            PLOG(WARNING) << "Lazy detach also failed for " << mnt_fsname_
++                          << ":" << mnt_dir_;
++            return false;
+         } else {
+             PLOG(WARNING) << "Cannot umount " << mnt_fsname_ << ":" << mnt_dir_ << " opts "
+                           << mnt_opts_;
+-- 
+2.34.1
+

@@ -1,0 +1,85 @@
+From 651ecc301039176b7e681c7357792492c28fb50c Mon Sep 17 00:00:00 2001
+From: Kyunglyul Hyun <klhyun@google.com>
+Date: Fri, 21 Mar 2025 17:31:20 +0000
+Subject: [PATCH 2/5] Revoke permissions on rebond attempt
+
+When a device with the same address
+as a previously bonded device attempts
+to bond again, the adapter service may not
+receive a BOND_NONE state change message,
+even if the new device is different.
+
+This can prevent the user from being prompted
+to grant consent for the new device.
+
+This commit ensures that permissions are revoked
+when a rebond atempt is made with the same address,
+ensuring the user is prompted for consent with
+the new device.
+
+Bug: 405333875
+Bug: 290364858
+Flag: com.android.bluetooth.flags.reboke_permission_on_unbond
+Test: atest AdapterServiceTest
+Change-Id: Id63a61908fb22c426c49d0979bba0c6a8b9dba03
+(cherry picked from commit 921aaec06df0b5974d0fbbb40443935b15019270)
+---
+ .../bluetooth/btservice/AdapterService.java       |  3 ++-
+ .../bluetooth/btservice/AdapterServiceTest.java   | 15 +++++++++++++++
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/android/app/src/com/android/bluetooth/btservice/AdapterService.java b/android/app/src/com/android/bluetooth/btservice/AdapterService.java
+index 182e75cceb..67cc7201af 100644
+--- a/android/app/src/com/android/bluetooth/btservice/AdapterService.java
++++ b/android/app/src/com/android/bluetooth/btservice/AdapterService.java
+@@ -25,6 +25,7 @@ import static android.bluetooth.BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERA
+ import static android.bluetooth.BluetoothAdapter.SCAN_MODE_NONE;
+ import static android.bluetooth.BluetoothAdapter.nameForState;
+ import static android.bluetooth.BluetoothDevice.BATTERY_LEVEL_UNKNOWN;
++import static android.bluetooth.BluetoothDevice.BOND_BONDED;
+ import static android.bluetooth.BluetoothDevice.BOND_NONE;
+ import static android.bluetooth.BluetoothProfile.CONNECTION_POLICY_ALLOWED;
+ import static android.bluetooth.BluetoothProfile.CONNECTION_POLICY_FORBIDDEN;
+@@ -4226,7 +4227,7 @@ public class AdapterService extends Service {
+         }
+         mDatabaseManager.handleBondStateChanged(device, fromState, toState);
+ 
+-        if (toState == BOND_NONE) {
++        if (toState == BOND_NONE || fromState == BOND_BONDED) {
+             // Remove the permissions for unbonded devices
+             setMessageAccessPermission(device, BluetoothDevice.ACCESS_UNKNOWN);
+             setPhonebookAccessPermission(device, BluetoothDevice.ACCESS_UNKNOWN);
+diff --git a/android/app/tests/unit/src/com/android/bluetooth/btservice/AdapterServiceTest.java b/android/app/tests/unit/src/com/android/bluetooth/btservice/AdapterServiceTest.java
+index 6c7b1ed44e..3993688d8e 100644
+--- a/android/app/tests/unit/src/com/android/bluetooth/btservice/AdapterServiceTest.java
++++ b/android/app/tests/unit/src/com/android/bluetooth/btservice/AdapterServiceTest.java
+@@ -48,6 +48,7 @@ import android.bluetooth.BluetoothProfile;
+ import android.bluetooth.IBluetoothCallback;
+ import android.companion.CompanionDeviceManager;
+ import android.content.Context;
++import android.content.SharedPreferences;
+ import android.content.pm.ApplicationInfo;
+ import android.content.pm.PackageManager;
+ import android.content.pm.PermissionInfo;
+@@ -1346,4 +1347,18 @@ public class AdapterServiceTest {
+         orderNative.verify(mNativeInterface, never()).disconnectAcl(any(), anyInt());
+         assertThat(mAdapterService.mLeGattClientsControllingAutoActiveMode).isEmpty();
+     }
++
++    @Test
++    public void testRemovePermissionBondedToBonding() {
++        SharedPreferences mockPreferences = mock(SharedPreferences.class);
++        SharedPreferences.Editor mockEditor = mock(SharedPreferences.Editor.class);
++
++        when(mMockContext.getSharedPreferences(anyString(), anyInt())).thenReturn(mockPreferences);
++        when(mockPreferences.edit()).thenReturn(mockEditor);
++
++        mAdapterService.handleBondStateChanged(
++                mDevice, BluetoothDevice.BOND_BONDED, BluetoothDevice.BOND_BONDING);
++
++        verify(mockEditor, times(3)).remove(anyString());
++    }
+ }
+-- 
+2.53.0
+

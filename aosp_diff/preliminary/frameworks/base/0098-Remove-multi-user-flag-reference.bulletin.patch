@@ -1,0 +1,55 @@
+From 90340dfbd5a5815e5f306f3c4f6928706910230a Mon Sep 17 00:00:00 2001
+From: reema7 <reemabajwa@google.com>
+Date: Sat, 17 Jan 2026 00:44:12 +0000
+Subject: [PATCH 22/38] Remove multi user flag reference
+
+Test: Unit tests
+Bug: 460933604
+Flag: android.credentials.flags.multi_user_fix_enabled
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:2c3d19d1573b47565ff3f05943d6e6ed5deedb1c
+Merged-In: Ia5541f3e9969267441ab3de8f27df301a5d6e2a9
+Change-Id: Ia5541f3e9969267441ab3de8f27df301a5d6e2a9
+---
+ .../server/credentials/CredentialManagerServiceTest.java   | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/services/tests/servicestests/src/com/android/server/credentials/CredentialManagerServiceTest.java b/services/tests/servicestests/src/com/android/server/credentials/CredentialManagerServiceTest.java
+index 694cf84970bf..9338170ee18f 100644
+--- a/services/tests/servicestests/src/com/android/server/credentials/CredentialManagerServiceTest.java
++++ b/services/tests/servicestests/src/com/android/server/credentials/CredentialManagerServiceTest.java
+@@ -19,9 +19,7 @@ import static com.google.common.truth.Truth.assertThat;
+ 
+ import android.content.ComponentName;
+ import android.content.Context;
+-import android.credentials.flags.Flags;
+ import android.os.UserHandle;
+-import android.platform.test.flag.junit.SetFlagsRule;
+ import android.provider.Settings;
+ 
+ import androidx.annotation.NonNull;
+@@ -31,7 +29,6 @@ import androidx.test.runner.AndroidJUnit4;
+ 
+ import org.junit.Assert;
+ import org.junit.Before;
+-import org.junit.Rule;
+ import org.junit.Test;
+ import org.junit.runner.RunWith;
+ 
+@@ -67,14 +64,10 @@ public final class CredentialManagerServiceTest {
+     private Context mContext = null;
+     private MockSettingsWrapper mSettingsWrapper = null;
+ 
+-    @Rule
+-    public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
+-
+     @Before
+     public void setUp() throws CertificateException {
+         mContext = ApplicationProvider.getApplicationContext();
+         mSettingsWrapper = new MockSettingsWrapper(mContext);
+-        mSetFlagsRule.enableFlags(Flags.FLAG_MULTI_USER_FIX_ENABLED);
+     }
+ 
+     @Test
+-- 
+2.53.0
+

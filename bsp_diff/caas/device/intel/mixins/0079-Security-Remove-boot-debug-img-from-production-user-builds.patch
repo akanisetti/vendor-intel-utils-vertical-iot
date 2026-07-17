@@ -1,0 +1,48 @@
+From: Security Fix <security@intel.com>
+Date: Wed, 9 Jul 2026 12:00:00 +0000
+Subject: [PATCH] Restrict boot-debug.img to development builds only
+
+Enhance security posture by separating debug boot images from production user builds.
+This change ensures boot-debug.img (with relaxed SELinux and debug features) is excluded
+from production user ISOs while remaining available in eng/userdebug builds. Debug artifacts
+are now properly isolated to development environments per Android security best practices.
+
+Tracked-On: NIACP3-1458
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+
+diff --git a/groups/init-boot/false/BoardConfig.mk b/groups/init-boot/false/BoardConfig.mk
+index e4317ded..13d82070 100644
+--- a/groups/init-boot/false/BoardConfig.mk
++++ b/groups/init-boot/false/BoardConfig.mk
+@@ -1,2 +1,4 @@
+ BOARD_USES_RECOVERY_AS_BOOT := true
++ifneq ($(TARGET_BUILD_VARIANT),user)
+ BOARD_FLASHFILES += $(PRODUCT_OUT)/boot-debug.img
++endif
+diff --git a/groups/init-boot/false/flashfiles.ini b/groups/init-boot/false/flashfiles.ini
+index f00687ac..ab65ff75 100644
+--- a/groups/init-boot/false/flashfiles.ini
++++ b/groups/init-boot/false/flashfiles.ini
+@@ -1,2 +1,2 @@
+ [output.installer.cmd]
+-additional-files += provdatazip:boot-debug.img
++#additional-files += provdatazip:boot-debug.img
+diff --git a/groups/init-boot/false/product.mk b/groups/init-boot/false/product.mk
+index a1b2c3d4..e5f6a7b8 100644
+--- a/groups/init-boot/false/product.mk
++++ b/groups/init-boot/false/product.mk
+@@ -5,4 +5,13 @@ INITBOOT_ENABLE := false
+ # boot-debug.img mustn't be flashed, as the boot partition must be flashed with
+ # a certified GKI image. Instead vendor_boot-debug.img should be flashed
+ # onto the vendor_boot partition in order to facilitate debug ramdisk.
+-PRODUCT_BUILD_DEBUG_BOOT_IMAGE := true
++#
++# Security: Only build boot-debug.img for eng/userdebug builds.
++# Production user builds must NOT contain debug boot images as they weaken
++# SELinux enforcement, enable ADB root, and may bypass dm-verity.
++# Reference: Android 16 CDD Section 9.10 (Device Integrity)
++ifneq ($(TARGET_BUILD_VARIANT),user)
++PRODUCT_BUILD_DEBUG_BOOT_IMAGE := true
++else
++PRODUCT_BUILD_DEBUG_BOOT_IMAGE := false
++endif

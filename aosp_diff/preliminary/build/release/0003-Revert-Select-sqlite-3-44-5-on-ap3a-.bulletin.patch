@@ -1,0 +1,31 @@
+From de3c8c58d0d686a6f05a6905917bd9e06917b6d3 Mon Sep 17 00:00:00 2001
+From: Lee Shombert <shombert@google.com>
+Date: Fri, 12 Dec 2025 13:54:28 -0800
+Subject: [PATCH 2/2] Revert "Select sqlite 3.44.5 on ap3a"
+
+Revert submission 35129096-25Q2-sqlite-3.44.5
+
+Reason for revert: This set of CLs incurred a performance regression.
+
+Reverted changes: /q/submissionid:35129096-25Q2-sqlite-3.44.5
+
+Bug: 430889718
+Bug: 281064726
+Change-Id: I2f197e9018584933802b88e4cddb1b30d5ea3de7
+---
+ flag_values/ap3a/RELEASE_PACKAGE_LIBSQLITE3.textproto | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/flag_values/ap3a/RELEASE_PACKAGE_LIBSQLITE3.textproto b/flag_values/ap3a/RELEASE_PACKAGE_LIBSQLITE3.textproto
+index f189f6429..bb903b8dd 100644
+--- a/flag_values/ap3a/RELEASE_PACKAGE_LIBSQLITE3.textproto
++++ b/flag_values/ap3a/RELEASE_PACKAGE_LIBSQLITE3.textproto
+@@ -1,4 +1,4 @@
+ name: "RELEASE_PACKAGE_LIBSQLITE3"
+ value: {
+-  string_value: "3440500"
++  string_value: "3440300"
+ }
+-- 
+2.53.0
+

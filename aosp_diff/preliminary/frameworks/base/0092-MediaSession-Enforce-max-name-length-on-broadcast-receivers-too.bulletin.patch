@@ -1,0 +1,73 @@
+From a7a975ca37db46e5f9ef82b4910b80046cca9811 Mon Sep 17 00:00:00 2001
+From: Ian Baker <ibaker@google.com>
+Date: Tue, 16 Dec 2025 03:16:24 -0800
+Subject: [PATCH 16/38] MediaSession: Enforce max name length on broadcast
+ receivers too
+
+The previous change in ag/35590474 only checked the length of component names set via MediaSession.setMediaButtonReceiver(PendingIntent) [1] and
+not via
+MediaSession.setMediaButtonBroadcastReceiver(android.content.ComponentName) [2] as highlighted in b/433250316#comment72.
+
+[1] https://developer.android.com/reference/android/media/session/MediaSession#setMediaButtonBroadcastReceiver(android.content.ComponentName)
+
+[2] https://developer.android.com/reference/android/media/session/MediaSession#setMediaButtonBroadcastReceiver(android.content.ComponentName)
+
+Bug: 433250316
+Test: Presubmit
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:d09400d72573c2e6124ae28dd9bb68139c9598a5
+Merged-In: I7ef6bb0015f2501559793129ca62881911e7b9eb
+Change-Id: I7ef6bb0015f2501559793129ca62881911e7b9eb
+---
+ .../media/MediaButtonReceiverHolder.java       | 18 ++++++++++++++----
+ 1 file changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/services/core/java/com/android/server/media/MediaButtonReceiverHolder.java b/services/core/java/com/android/server/media/MediaButtonReceiverHolder.java
+index 858409542ab1..ab295b3d6f50 100644
+--- a/services/core/java/com/android/server/media/MediaButtonReceiverHolder.java
++++ b/services/core/java/com/android/server/media/MediaButtonReceiverHolder.java
+@@ -135,6 +135,9 @@ final class MediaButtonReceiverHolder {
+     }
+ 
+     public static MediaButtonReceiverHolder create(int userId, ComponentName broadcastReceiver) {
++        if (componentNameTooLong(broadcastReceiver)) {
++            throw new IllegalArgumentException("receiver name too long");
++        }
+         return new MediaButtonReceiverHolder(userId, null, broadcastReceiver,
+                 COMPONENT_TYPE_BROADCAST);
+     }
+@@ -349,20 +352,27 @@ final class MediaButtonReceiverHolder {
+             if (componentInfo != null && TextUtils.equals(componentInfo.packageName,
+                     pendingIntent.getCreatorPackage())
+                     && componentInfo.packageName != null && componentInfo.name != null) {
+-                int componentNameLength =
+-                        componentInfo.packageName.length() + componentInfo.name.length() + 1;
+-                if (componentNameLength > MAX_COMPONENT_NAME_LENGTH) {
++                ComponentName componentName =
++                    new ComponentName(componentInfo.packageName, componentInfo.name);
++                if (componentNameTooLong(componentName)) {
+                     Log.w(TAG, "detected and ignored component name with overly long package"
+                             + " or name, pi=" + pendingIntent);
+                     continue;
+                 }
+-                return new ComponentName(componentInfo.packageName, componentInfo.name);
++                return componentName;
+             }
+         }
+ 
+         return null;
+     }
+ 
++    private static boolean componentNameTooLong(ComponentName componentName) {
++        return componentName.getPackageName().length()
++                + componentName.getClassName().length()
++                + 1
++            > MAX_COMPONENT_NAME_LENGTH;
++    }
++
+     /**
+      * Retrieves the {@link ComponentInfo} from a {@link ResolveInfo} instance. Similar to {@link
+      * ResolveInfo#getComponentInfo()}, but returns {@code null} if this {@link ResolveInfo} points
+-- 
+2.53.0
+

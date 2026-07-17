@@ -1,0 +1,78 @@
+From 3a9c9f256fa0581f7a65820ed96f79d5c197412d Mon Sep 17 00:00:00 2001
+From: Gabriel-Radu Ilca <irgabriel@google.com>
+Date: Mon, 26 Jan 2026 01:26:05 -0800
+Subject: [PATCH 31/38] Validate max proxy string length for proxySpec and
+ exclusionList using PolicySizeVerifier.
+
+Bug: 445418705
+Test: atest FrameworksServicesTests:com.android.server.devicepolicy.DevicePolicyManagerTest#testSetGlobalProxy_tooLongStrings()
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:64a559cbc04fc61777989cff0b189f423323cfb5
+Merged-In: I97a26767ac42d87750bb98306c5d8b00ef39770e
+Change-Id: I97a26767ac42d87750bb98306c5d8b00ef39770e
+---
+ .../DevicePolicyManagerService.java           |  5 ++++-
+ .../res/xml/device_admin_sample.xml           |  1 +
+ .../devicepolicy/DevicePolicyManagerTest.java | 19 +++++++++++++++++++
+ 3 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java b/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java
+index a1cb0c0edd81..633cf9e773f8 100644
+--- a/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java
++++ b/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java
+@@ -8619,7 +8619,10 @@ public class DevicePolicyManagerService extends IDevicePolicyManager.Stub {
+                 admin.globalProxySpec = null;
+                 admin.globalProxyExclusionList = null;
+             } else {
+-
++                PolicySizeVerifier.enforceMaxStringLength(proxySpec, "proxySpec");
++                if (exclusionList != null) {
++                    PolicySizeVerifier.enforceMaxStringLength(exclusionList, "exclusionList");
++                }
+                 admin.specifiesGlobalProxy = true;
+                 admin.globalProxySpec = proxySpec;
+                 admin.globalProxyExclusionList = exclusionList;
+diff --git a/services/tests/servicestests/res/xml/device_admin_sample.xml b/services/tests/servicestests/res/xml/device_admin_sample.xml
+index 032debbb92b1..663d2612c22c 100644
+--- a/services/tests/servicestests/res/xml/device_admin_sample.xml
++++ b/services/tests/servicestests/res/xml/device_admin_sample.xml
+@@ -25,5 +25,6 @@
+         <encrypted-storage />
+         <disable-camera />
+         <disable-keyguard-features />
++        <set-global-proxy />
+     </uses-policies>
+ </device-admin>
+diff --git a/services/tests/servicestests/src/com/android/server/devicepolicy/DevicePolicyManagerTest.java b/services/tests/servicestests/src/com/android/server/devicepolicy/DevicePolicyManagerTest.java
+index a1f73170e549..e5a4af590ffa 100644
+--- a/services/tests/servicestests/src/com/android/server/devicepolicy/DevicePolicyManagerTest.java
++++ b/services/tests/servicestests/src/com/android/server/devicepolicy/DevicePolicyManagerTest.java
+@@ -8398,6 +8398,25 @@ public class DevicePolicyManagerTest extends DpmTestBase {
+         assertThrows(SecurityException.class, () -> dpm.setRecommendedGlobalProxy(admin1, null));
+     }
+ 
++    @Test
++    public void testSetGlobalProxy_tooLongStrings() throws Exception {
++        setDeviceOwner();
++        // PolicySizeVerifier uses ModifiedUtf8.countBytes() to check the length of strings
++        // which is max 65535 UTF bytes.
++        final String tooLong = new String(new char[65536]).replace('\0', 'A');
++
++        // Test long proxy spec
++        Proxy proxy = new Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(tooLong, 8080));
++        assertThrows(IllegalArgumentException.class,
++                () -> dpm.setGlobalProxy(admin1, proxy, Collections.emptyList()));
++
++        // Test long exclusion list
++        Proxy validProxy = new Proxy(Proxy.Type.HTTP,
++                InetSocketAddress.createUnresolved("example.com", 8080));
++        assertThrows(IllegalArgumentException.class,
++                () -> dpm.setGlobalProxy(admin1, validProxy, Collections.singletonList(tooLong)));
++    }
++
+     @Test
+     public void testSetAlwaysOnVpnPackage_clearsAdminVpn() throws Exception {
+         setDeviceOwner();
+-- 
+2.53.0
+

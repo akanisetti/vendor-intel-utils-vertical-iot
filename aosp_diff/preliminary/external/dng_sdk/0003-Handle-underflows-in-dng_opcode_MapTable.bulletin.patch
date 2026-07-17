@@ -1,0 +1,53 @@
+From c40bd5325d326d5cc4f6a5944e0047542361dd58 Mon Sep 17 00:00:00 2001
+From: John Reck <jreck@google.com>
+Date: Thu, 13 Nov 2025 16:02:23 -0500
+Subject: [PATCH] Handle underflows in dng_opcode_MapTable
+
+Bug: 456471290
+Test: sample image in bug && atest ImageDecoderTest
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:90c04eb8818273d4df0773ec38cafceba504b151
+Merged-In: Icf182db2288952f189e8f6a6baf9cfb0eff4a5e9
+Change-Id: Icf182db2288952f189e8f6a6baf9cfb0eff4a5e9
+---
+ source/dng_misc_opcodes.cpp | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/source/dng_misc_opcodes.cpp b/source/dng_misc_opcodes.cpp
+index 56e1fd0..ec965a1 100644
+--- a/source/dng_misc_opcodes.cpp
++++ b/source/dng_misc_opcodes.cpp
+@@ -254,6 +254,7 @@ dng_rect dng_area_spec::Overlap (const dng_rect &tile) const
+ 
+ /*****************************************************************************/
+ 
++DNG_ATTRIB_NO_SANITIZE("unsigned-integer-overflow")
+ dng_rect dng_area_spec::ScaledOverlap (const dng_rect &tile) const
+ 	{
+ 	
+@@ -560,12 +561,17 @@ void dng_opcode_MapTable::ProcessArea (dng_negative & /* negative */,
+   
+ 		const uint16 *table = fBlackAdjustedTable.Get () ? fBlackAdjustedTable->Buffer_uint16 ()
+ 														 : fTable			  ->Buffer_uint16 ();
+-		
+-		for (uint32 plane = fAreaSpec.Plane ();
+-			 plane < fAreaSpec.Plane () + fAreaSpec.Planes () &&
+-			 plane < buffer.Planes ();
+-			 plane++)
++// BEGIN GOOGLE MODIFICATION
++		const uint32 planeStart = fAreaSpec.Plane ();
++		const uint32 planeCount = fAreaSpec.Planes ();
++		const uint32 bufferPlanes = buffer.Planes ();
++
++		for (uint32 plane = planeStart;
++			 plane < bufferPlanes &&
++			 plane - planeStart < planeCount;
++			 ++plane)
+ 			{
++// END GOOGLE MODIFICATION
+ 			
+ 			DoMapArea16 (buffer.DirtyPixel_uint16 (overlap.t, overlap.l, plane),
+ 						 1,
+-- 
+2.53.0.335.g19a08e0c02-goog
+

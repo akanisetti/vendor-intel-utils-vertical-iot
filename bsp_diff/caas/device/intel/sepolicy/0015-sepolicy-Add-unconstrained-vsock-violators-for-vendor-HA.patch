@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Suresh, Prashanth <prashanth.suresh@intel.com>
+Date: Mon, 29 Jun 2026 16:45:00 +0000
+Subject: [PATCH] sepolicy: add unconstrained_vsock_violators typeattribute to vendor HALs using AF_VSOCK
+
+Three vendor HALs open AF_VSOCK sockets to communicate with host-side
+utilities. The existing 'allow ... self:vsock_socket ...' rules trigger
+the 'neverallow { domain -unconstrained_vsock_violators }
+*:vsock_socket ...' neverallow added in system/sepolicy/private/domain.te.
+
+Mark each domain with the typeattribute so the neverallow exemption
+covers it:
+- hal_health_default  : host battery utility (port 14196)
+- hal_sensors_default : host IIO sensor daemon (port 30431)
+- hal_thermal_intel   : host thermal utility  (port 14096)
+
+The 'allow ... self:vsock_socket ...' rules are retained unchanged; this
+patch only adds the required typeattribute declaration.
+
+Tracked-On: NIACP3-1182
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ health_hal/hal_health2_0_default.te         | 3 +++
+ sensors/mediation/sensor_hal_default.te     | 3 +++
+ thermal/thermal-daemon/hal_thermal_intel.te | 3 +++
+ 3 files changed, 9 insertions(+)
+diff --git a/health_hal/hal_health2_0_default.te b/health_hal/hal_health2_0_default.te
+index 3a0deb9..1269c94 100644
+--- a/health_hal/hal_health2_0_default.te
++++ b/health_hal/hal_health2_0_default.te
+@@ -5,5 +5,8 @@ allow hal_health_default sysfs_health2_0_management:file rw_file_perms;
+ allow hal_health_default sysfs_health2_0_management:lnk_file r_file_perms;
+ allow unlabeled unlabeled:filesystem associate;
+ # For vsock communication with host battery utility
++# Exempt from the *:vsock_socket neverallow (system/sepolicy domain.te);
++# this HAL connects to the host battery utility over AF_VSOCK (port 14196).
++typeattribute hal_health_default unconstrained_vsock_violators;
+ allow hal_health_default self:{ socket vsock_socket } { create read write listen accept bind connect };
+ allow hal_health_default unlabeled:{ socket vsock_socket } { getopt read write shutdown };
+diff --git a/sensors/mediation/sensor_hal_default.te b/sensors/mediation/sensor_hal_default.te
+index a85a7e7..2cb1d6c 100644
+--- a/sensors/mediation/sensor_hal_default.te
++++ b/sensors/mediation/sensor_hal_default.te
+@@ -4,5 +4,8 @@ allow hal_sensors_default self:socket create_socket_perms;
+ allowxperm hal_sensors_default self:socket ioctl unpriv_sock_ioctls;
+ allow hal_sensors_default serial_device:chr_file rw_file_perms;
+ 
++# Exempt from the *:vsock_socket neverallow (system/sepolicy domain.te);
++# this HAL connects to the host IIO sensor daemon over AF_VSOCK (port 30431).
++typeattribute hal_sensors_default unconstrained_vsock_violators;
+ allow hal_sensors_default self:vsock_socket { create read write connect getopt setopt };
+ allow hal_sensors_default hal_graphics_allocator_default_tmpfs:file { read write };
+diff --git a/thermal/thermal-daemon/hal_thermal_intel.te b/thermal/thermal-daemon/hal_thermal_intel.te
+index 6711694..fc504b6 100644
+--- a/thermal/thermal-daemon/hal_thermal_intel.te
++++ b/thermal/thermal-daemon/hal_thermal_intel.te
+@@ -23,5 +23,8 @@ allowxperm hal_thermal_intel self:can_socket ioctl {
+ };
+ 
+ #For vsock communication with host thermal utility
++# Exempt from the *:vsock_socket neverallow (system/sepolicy domain.te);
++# this HAL connects to the host thermal utility over AF_VSOCK (port 14096).
++typeattribute hal_thermal_intel unconstrained_vsock_violators;
+ allow hal_thermal_intel self:{ socket vsock_socket } { create read write listen accept bind connect };
+ allow hal_thermal_intel unlabeled:{ socket vsock_socket } { getopt read write shutdown };
+
+-- 
+2.34.1

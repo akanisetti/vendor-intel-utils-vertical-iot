@@ -1,0 +1,197 @@
+From 4fd130d84ac9e23eba9273bc57cf659369f2134d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Mat=C3=ADas=20Hern=C3=A1ndez?= <matiashe@google.com>
+Date: Fri, 27 Mar 2026 18:02:04 +0100
+Subject: [PATCH 36/38] Skip serialization of huge vibration effects in
+ NotificationChannel
+
+Instead of trying to do this approximately on unparceling, we do it more lightly there, and then exactly on serialization.
+
+(Doing it exactly on unparceling is technically feasible, and actually used to be the case previously, but has too much of an impact on performance).
+
+Bug: 481967442
+Test: atest NotificationChannelTest
+Flag: EXEMPT BUGFIX
+Change-Id: I7afe6e5c3d4bd8507d9a0cb90603ee3668806c6f
+Merged-In: I7afe6e5c3d4bd8507d9a0cb90603ee3668806c6f
+---
+ .../java/android/app/NotificationChannel.java | 38 ++++++--------
+ .../android/app/NotificationChannelTest.java  | 49 ++++++++++++++++---
+ 2 files changed, 55 insertions(+), 32 deletions(-)
+
+diff --git a/core/java/android/app/NotificationChannel.java b/core/java/android/app/NotificationChannel.java
+index c1d80c93cfd6..2bb567e726b8 100644
+--- a/core/java/android/app/NotificationChannel.java
++++ b/core/java/android/app/NotificationChannel.java
+@@ -402,34 +402,20 @@ public final class NotificationChannel implements Parcelable {
+         mDeletedTime = in.readLong();
+         mImportanceLockedDefaultApp = in.readBoolean();
+ 
+-        // Add new fields above this line and not after vibration effect! When
+-        // notif_channel_estimate_effect_size is true, we use parcel size to detect whether the
+-        // vibration effect might be too large to handle, so this must remain at the end lest any
+-        // following fields cause the data to get incorrectly dropped.
+         mVibrationPattern = in.createLongArray();
+         if (mVibrationPattern != null && mVibrationPattern.length > MAX_VIBRATION_LENGTH) {
+             mVibrationPattern = Arrays.copyOf(mVibrationPattern, MAX_VIBRATION_LENGTH);
+         }
+-        boolean largeEffect = false;
+-        if (Flags.notifChannelEstimateEffectSize()) {
+-            // Note that we must check the length of remaining data in the parcel before reading in
+-            // the data.
+-            largeEffect = (in.dataAvail() > MAX_SERIALIZED_VIBRATION_LENGTH);
+-        }
+         if (Flags.notificationChannelVibrationEffectApi()) {
+             mVibrationEffect =
+                     in.readInt() != 0 ? VibrationEffect.CREATOR.createFromParcel(in) : null;
++            // As an optimization, preemptively trim too-long effects. But if trimming is not
++            // possible, keep it as-is (for now) and we'll check again when serializing (checking
++            // the serialized value right now, for every unparceling, is too expensive).
+             if (Flags.notifChannelCropVibrationEffects() && mVibrationEffect != null) {
+-                if (Flags.notifChannelEstimateEffectSize()) {
+-                    // Try trimming the effect if the remaining parcel size is large. If trimming is
+-                    // not applicable for the effect, rather than serializing to XML (expensive) to
+-                    // check the exact serialized length, we just reject the effect.
+-                    if (largeEffect) {
+-                        mVibrationEffect = mVibrationEffect.cropToLengthOrNull(
+-                                MAX_VIBRATION_LENGTH);
+-                    }
+-                } else {
+-                    mVibrationEffect = getTrimmedVibrationEffect(mVibrationEffect);
++                VibrationEffect trimmed = mVibrationEffect.cropToLengthOrNull(MAX_VIBRATION_LENGTH);
++                if (trimmed != null) {
++                    mVibrationEffect = trimmed;
+                 }
+             }
+         }
+@@ -493,7 +479,6 @@ public final class NotificationChannel implements Parcelable {
+         dest.writeLong(mDeletedTime);
+         dest.writeBoolean(mImportanceLockedDefaultApp);
+ 
+-        // Add new fields above this line; vibration effect must remain the last entry.
+         dest.writeLongArray(mVibrationPattern);
+         if (Flags.notificationChannelVibrationEffectApi()) {
+             if (mVibrationEffect != null) {
+@@ -1462,9 +1447,13 @@ public final class NotificationChannel implements Parcelable {
+         }
+         if (getVibrationEffect() != null) {
+             if (!Flags.notifChannelCropVibrationEffects() || getVibrationPattern() == null) {
+-                // When notif_channel_crop_vibration_effects is on, only serialize the vibration
+-                // effect if we do not already have an equivalent vibration pattern.
+-                out.attribute(null, ATT_VIBRATION_EFFECT, vibrationToString(getVibrationEffect()));
++                // Only serialize the vibration effect if we do not already have an equivalent
++                // vibration pattern AND if it's not "too long". Note that "too long" should be
++                // fairly rare here since setVibrationEffect() fixes most cases.
++                String serializedVibrationEffect = vibrationToString(getVibrationEffect());
++                if (serializedVibrationEffect.length() <= MAX_SERIALIZED_VIBRATION_LENGTH) {
++                    out.attribute(null, ATT_VIBRATION_EFFECT, serializedVibrationEffect);
++                }
+             }
+         }
+         if (getUserLockedFields() != 0) {
+@@ -1577,6 +1566,7 @@ public final class NotificationChannel implements Parcelable {
+         return val == null ? null : Uri.parse(val);
+     }
+ 
++    @NonNull
+     private static String vibrationToString(VibrationEffect effect) {
+         StringWriter writer = new StringWriter();
+         try {
+diff --git a/core/tests/coretests/src/android/app/NotificationChannelTest.java b/core/tests/coretests/src/android/app/NotificationChannelTest.java
+index b1d995a2eb9d..89bcdca75f8c 100644
+--- a/core/tests/coretests/src/android/app/NotificationChannelTest.java
++++ b/core/tests/coretests/src/android/app/NotificationChannelTest.java
+@@ -284,9 +284,8 @@ public class NotificationChannelTest {
+ 
+     @Test
+     @EnableFlags({Flags.FLAG_NOTIFICATION_CHANNEL_VIBRATION_EFFECT_API,
+-            Flags.FLAG_NOTIF_CHANNEL_CROP_VIBRATION_EFFECTS,
+-            Flags.FLAG_NOTIF_CHANNEL_ESTIMATE_EFFECT_SIZE})
+-    public void testVibrationEffect_droppedIfTooLargeAndNotTrimmable() {
++            Flags.FLAG_NOTIF_CHANNEL_CROP_VIBRATION_EFFECTS})
++    public void setVibrationEffect_droppedIfTooLargeAndNotTrimmable() {
+         NotificationChannel channel = new NotificationChannel("id", "name", 3);
+         // populate pattern with contents
+         long[] pattern = new long[65550 / 2];
+@@ -297,15 +296,16 @@ public class NotificationChannelTest {
+         VibrationEffect effect = VibrationEffect.createWaveform(pattern, 1);
+         channel.setVibrationEffect(effect);
+ 
++        assertThat(channel.getVibrationEffect()).isNull();
++
+         NotificationChannel result = writeToAndReadFromParcel(channel);
+         assertThat(result.getVibrationEffect()).isNull();
+     }
+ 
+     @Test
+     @EnableFlags({Flags.FLAG_NOTIFICATION_CHANNEL_VIBRATION_EFFECT_API,
+-            Flags.FLAG_NOTIF_CHANNEL_CROP_VIBRATION_EFFECTS,
+-            Flags.FLAG_NOTIF_CHANNEL_ESTIMATE_EFFECT_SIZE})
+-    public void testVibrationEffect_trimmedIfLargeAndTrimmable() {
++            Flags.FLAG_NOTIF_CHANNEL_CROP_VIBRATION_EFFECTS})
++    public void setVibrationEffect_andThenParceled_trimmedIfLargeAndTrimmable() {
+         NotificationChannel channel = new NotificationChannel("id", "name", 3);
+         // populate pattern with contents
+         long[] pattern = new long[65550 / 2];
+@@ -316,6 +316,10 @@ public class NotificationChannelTest {
+         VibrationEffect effect = VibrationEffect.createWaveform(pattern, -1);
+         channel.setVibrationEffect(effect);
+ 
++        assertThat(channel.getVibrationEffect()).isNotNull();
++        assertThat(channel.getVibrationEffect().computeCreateWaveformOffOnTimingsOrNull())
++                .hasLength(pattern.length);
++
+         NotificationChannel result = writeToAndReadFromParcel(channel);
+         assertThat(result.getVibrationEffect()).isNotNull();
+         assertThat(result.getVibrationEffect().computeCreateWaveformOffOnTimingsOrNull()).hasLength(
+@@ -324,17 +328,46 @@ public class NotificationChannelTest {
+ 
+     @Test
+     @EnableFlags({Flags.FLAG_NOTIFICATION_CHANNEL_VIBRATION_EFFECT_API,
+-            Flags.FLAG_NOTIF_CHANNEL_CROP_VIBRATION_EFFECTS,
+-            Flags.FLAG_NOTIF_CHANNEL_ESTIMATE_EFFECT_SIZE})
++            Flags.FLAG_NOTIF_CHANNEL_CROP_VIBRATION_EFFECTS})
+     public void testVibrationEffect_keptIfSmall() {
+         NotificationChannel channel = new NotificationChannel("id", "name", 3);
+         VibrationEffect effect = VibrationEffect.createOneShot(1, 100);
++
+         channel.setVibrationEffect(effect);
+ 
++        assertThat(channel.getVibrationEffect()).isEqualTo(effect);
++
+         NotificationChannel result = writeToAndReadFromParcel(channel);
+         assertThat(result.getVibrationEffect()).isEqualTo(effect);
+     }
+ 
++    @Test
++    @EnableFlags({Flags.FLAG_NOTIFICATION_CHANNEL_VIBRATION_EFFECT_API,
++            Flags.FLAG_NOTIF_CHANNEL_CROP_VIBRATION_EFFECTS})
++    public void testVibrationEffect_tooLongForSerialization_droppedWhenWritingXml()
++            throws Exception {
++        NotificationChannel channel = new NotificationChannel("id", "name", 3);
++
++        long[] timings = new long[65550 / 2];
++        for (int i = 0; i < timings.length; i++) {
++            timings[i] = 100;
++        }
++        // A repeating effect cannot be trimmed
++        VibrationEffect effect = VibrationEffect.createWaveform(timings, 1);
++
++        // Use reflection to sneakily skip the enforcement in setVibrationEffect.
++        Field mVibrationEffect = Class.forName(CLASS).getDeclaredField("mVibrationEffect");
++        mVibrationEffect.setAccessible(true);
++        mVibrationEffect.set(channel, effect);
++
++        NotificationChannel unparceled = writeToAndReadFromParcel(channel);
++        assertThat(unparceled.getVibrationEffect()).isNotNull();
++        assertThat(unparceled.getVibrationEffect()).isEqualTo(effect); // Still here!
++
++        NotificationChannel restoredFromXml = backUpAndRestore(unparceled);
++        assertThat(restoredFromXml.getVibrationEffect()).isNull(); // But not actually written
++    }
++
+     @Test
+     public void testRestoreSoundUri_customLookup() throws Exception {
+         Uri uriToBeRestoredUncanonicalized = Uri.parse("content://media/1");
+-- 
+2.53.0
+

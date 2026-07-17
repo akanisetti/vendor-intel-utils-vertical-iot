@@ -1,0 +1,38 @@
+From a4abe17dd37c791981102b210328223147db2383 Mon Sep 17 00:00:00 2001
+From: Kyle Hsiao <kylehsiao@google.com>
+Date: Wed, 1 Apr 2026 03:23:24 -0700
+Subject: [PATCH 2/2] Fix permanent BAL grant via onServiceConnected race
+
+Bug: 496735702
+Test: atest CtsNfcTestCases
+Test: atest NfcNciUnitTests
+Test: atest CtsNfcHceMultiDeviceTestCase
+Flag: EXEMPT BUGFIX
+Change-Id: Idc9a780162c4d4dacbbba5c78e438c49da0a50e5
+Merged-In: Idc9a780162c4d4dacbbba5c78e438c49da0a50e5
+(cherry picked from commit 6564c573280aad995b6e71536a1b8c190c63afea)
+---
+ .../android/nfc/cardemulation/HostEmulationManager.java    | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java b/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java
+index 633f9dab7..611d2ac83 100644
+--- a/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java
++++ b/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java
+@@ -1660,6 +1660,13 @@ public class HostEmulationManager {
+                                 preferredUserAndService.getComponentName();
+                 /* Service is already deactivated and not preferred, don't bind */
+                 if (mState == STATE_IDLE && !name.equals(preferredServiceName)) {
++                    try {
++                        mContext.unbindService(this);
++                    } catch (IllegalArgumentException e) {
++                        Log.w(TAG, "Failed to unbind " + name, e);
++                    }
++                    mComponentNameToConnectionsMap.remove(
++                            new ComponentNameAndUser(mUserId, name));
+                     return;
+                 }
+                 Messenger messenger = new Messenger(service);
+-- 
+2.53.0
+

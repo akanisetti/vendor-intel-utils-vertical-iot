@@ -1,0 +1,90 @@
+From 037591cf3150e89ef07f37fe6710c72dfd348f60 Mon Sep 17 00:00:00 2001
+From: Yurii Zubrytskyi <zyy@google.com>
+Date: Fri, 20 Feb 2026 15:24:35 -0800
+Subject: [PATCH 29/38] Make sure we properly validate the XML attr size
+
+The old code used to only validate the total size as a product
+of a single element size and the number of elements, but that
+didn't actually guarantee that there will be that many elements,
+as there's a hard limit on a single element size. Setting the
+size < min size would pass the product check, but make the
+accessing code read beyond the end of memory as it uses min
+sizes instead of the specified size
+
+Bug: 470115162
+Flag: EXEMPT BUGFIX
+Test: atest libandroidfw_tests
+Change-Id: Iaaaca9bb4c196e7acde0895d64da919c52448a44
+(cherry picked from commit 4d869cd4de74f1dccf30e729bd9caabc3b397e7a)
+---
+ libs/androidfw/ResourceTypes.cpp            |  5 +++
+ libs/androidfw/tests/ResourceTypes_test.cpp | 39 +++++++++++++++++++++
+ 2 files changed, 44 insertions(+)
+
+diff --git a/libs/androidfw/ResourceTypes.cpp b/libs/androidfw/ResourceTypes.cpp
+index 236f2c41f506..df864d362265 100644
+--- a/libs/androidfw/ResourceTypes.cpp
++++ b/libs/androidfw/ResourceTypes.cpp
+@@ -1989,6 +1989,11 @@ status_t ResXMLTree::validateNode(const ResXMLTree_node* node) const
+         // check for sensical values pulled out of the stream so far...
+         if ((size >= headerSize + sizeof(ResXMLTree_attrExt))
+                 && ((void*)attrExt > (void*)node)) {
++            if (dtohs(attrExt->attributeSize) < sizeof(ResXMLTree_attribute)) {
++                ALOGW("Bad XML block: attribute size %d is smaller than min expected %d\n",
++                      int(dtohs(attrExt->attributeSize)), int(sizeof(ResXMLTree_attribute)));
++                return BAD_TYPE;
++            }
+             const size_t attrSize = ((size_t)dtohs(attrExt->attributeSize))
+                 * dtohs(attrExt->attributeCount);
+             if ((dtohs(attrExt->attributeStart)+attrSize) <= (size-headerSize)) {
+diff --git a/libs/androidfw/tests/ResourceTypes_test.cpp b/libs/androidfw/tests/ResourceTypes_test.cpp
+index 3d4a88eda247..8ef1d0be0a3f 100644
+--- a/libs/androidfw/tests/ResourceTypes_test.cpp
++++ b/libs/androidfw/tests/ResourceTypes_test.cpp
+@@ -73,4 +73,43 @@ TEST(ResourceTypesTest, ResStringPool_HeaderStyleCountExceedsStyleOffsetCount) {
+   ASSERT_THAT(modified.setTo(test.data(), test.bytes()), Eq(BAD_TYPE));
+ }
+ 
++TEST(ResourceTypesTest, ResXMLTree_ValidateNode_SmallAttributeSize) {
++  struct MockResXMLTree {
++    ResXMLTree_header header;
++    ResStringPool_header pool_header;
++    ResXMLTree_node node;
++    ResXMLTree_attrExt attr_ext;
++    char padding[32];
++  };
++
++  MockResXMLTree mock;
++  memset(&mock, 0, sizeof(mock));
++
++  // XML Tree Header
++  mock.header.header.type = util::HostToDevice16(RES_XML_TYPE);
++  mock.header.header.headerSize = util::HostToDevice16(sizeof(ResXMLTree_header));
++  mock.header.header.size = util::HostToDevice32(sizeof(mock));
++
++  // String Pool Header (empty)
++  mock.pool_header.header.type = util::HostToDevice16(RES_STRING_POOL_TYPE);
++  mock.pool_header.header.headerSize = util::HostToDevice16(sizeof(ResStringPool_header));
++  mock.pool_header.header.size = util::HostToDevice32(sizeof(ResStringPool_header));
++
++  // XML Node
++  mock.node.header.type = util::HostToDevice16(RES_XML_START_ELEMENT_TYPE);
++  mock.node.header.headerSize = util::HostToDevice16(sizeof(ResXMLTree_node));
++  // Set size large enough to pass the existing bounds check even with an invalid attribute size.
++  mock.node.header.size = util::HostToDevice32(
++      sizeof(ResXMLTree_node) + sizeof(ResXMLTree_attrExt) + 20);
++
++  // Attr Ext
++  mock.attr_ext.attributeStart = util::HostToDevice16(sizeof(ResXMLTree_attrExt));
++  mock.attr_ext.attributeSize =
++      util::HostToDevice16(sizeof(ResXMLTree_attribute) - 1); // Too small
++  mock.attr_ext.attributeCount = util::HostToDevice16(1);
++
++  ResXMLTree tree;
++  ASSERT_THAT(tree.setTo(&mock, sizeof(mock)), Eq(BAD_TYPE));
++}
++
+ }  // namespace android
+-- 
+2.53.0
+

@@ -1,0 +1,49 @@
+From be87224a731fcc0d194573d7d9f5935e65e05d12 Mon Sep 17 00:00:00 2001
+From: Achim Thesmann <achim@google.com>
+Date: Thu, 30 Oct 2025 16:09:37 -0700
+Subject: [PATCH 08/38] Revert "Fix build failure in release branch"
+
+This reverts commit b1c9647eabe1a13c8d43a2519ae1e2117133fd43.
+
+Reason for revert: fails build after revert original fix
+
+Bug: 406880479
+Change-Id: If98dd07eb6dfeeef4fd226d7d72ae22e225d552b
+---
+ .../server/wm/BackgroundLaunchProcessControllerTests.java   | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java b/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java
+index a439178600ba..6e87c8af027c 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java
+@@ -145,7 +145,7 @@ public class BackgroundLaunchProcessControllerTests {
+                 BackgroundStartPrivileges.ALLOW_BAL);
+         BalVerdict balVerdict = mController.areBackgroundActivityStartsAllowed(
+                 mPid, mUid, mPackageName,
+-                mAppSwitchState, mBalCheckConfiguration, mInPinnedWindoMode,
++                mAppSwitchState, mBalCheckConfiguration,
+                 mHasActivityInVisibleTask, mHasBackgroundActivityStartPrivileges,
+                 mLastStopAppSwitchesTime, mLastActivityLaunchTime,
+                 mLastActivityFinishTime);
+@@ -180,7 +180,7 @@ public class BackgroundLaunchProcessControllerTests {
+                 BackgroundStartPrivileges.ALLOW_BAL);
+         BalVerdict balVerdict = mController.areBackgroundActivityStartsAllowed(
+                 mPid, mUid, mPackageName,
+-                mAppSwitchState, mBalCheckConfiguration, mInPinnedWindoMode,
++                mAppSwitchState, mBalCheckConfiguration,
+                 mHasActivityInVisibleTask, mHasBackgroundActivityStartPrivileges,
+                 mLastStopAppSwitchesTime, mLastActivityLaunchTime,
+                 mLastActivityFinishTime);
+@@ -212,7 +212,7 @@ public class BackgroundLaunchProcessControllerTests {
+         mHasActiveVisibleWindow.add(999);
+         BalVerdict balVerdict = mController.areBackgroundActivityStartsAllowed(
+                 mPid, mUid, mPackageName,
+-                mAppSwitchState, mBalCheckConfiguration, mInPinnedWindoMode,
++                mAppSwitchState, mBalCheckConfiguration,
+                 mHasActivityInVisibleTask, mHasBackgroundActivityStartPrivileges,
+                 mLastStopAppSwitchesTime, mLastActivityLaunchTime,
+                 mLastActivityFinishTime);
+-- 
+2.53.0
+

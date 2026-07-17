@@ -1,0 +1,394 @@
+From d94fedb3f402a2f5768a70a68c8f5136400a23ef Mon Sep 17 00:00:00 2001
+From: John Reck <jreck@google.com>
+Date: Thu, 5 Mar 2026 16:28:00 -0500
+Subject: [PATCH] Update dng_sdk to 1.7.1 2471
+
+Bug: 483697751
+Bug: 483693973
+Test: make
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:831d3991198533c26e8fd2bf963e494e99bc6593
+Merged-In: I25ad017a3b1bdf00bf4b773ba508a43aab470a33
+Change-Id: I25ad017a3b1bdf00bf4b773ba508a43aab470a33
+---
+ source/dng_flags.h               |   4 +-
+ source/dng_gain_map.cpp          |   2 +-
+ source/dng_jxl.cpp               | 122 ++++++++++++++++++++++---------
+ source/dng_misc_opcodes.cpp      |   4 +-
+ source/dng_ref_counted_block.cpp |  13 +++-
+ source/dng_reference.cpp         |   4 +-
+ source/dng_safe_arithmetic.cpp   |   4 +
+ source/dng_safe_arithmetic.h     |  15 ++--
+ source/dng_tag_codes.h           |   1 +
+ 9 files changed, 117 insertions(+), 52 deletions(-)
+
+diff --git a/source/dng_flags.h b/source/dng_flags.h
+index bc764e2..a632829 100644
+--- a/source/dng_flags.h
++++ b/source/dng_flags.h
+@@ -27,8 +27,8 @@
+ 
+ #define kDNGSDK_VersionString "1.7.1"
+ 
+-#define kDNGSDK_BuildVersion 2410
+-#define kDNGSDK_BuildString  "2410"
++#define kDNGSDK_BuildVersion 2471
++#define kDNGSDK_BuildString  "2471"
+ 
+ #define kDNGSDK_GetInfoVersion	"1.7.1 (" kDNGSDK_BuildString ")"
+ 
+diff --git a/source/dng_gain_map.cpp b/source/dng_gain_map.cpp
+index 6295584..799ba02 100644
+--- a/source/dng_gain_map.cpp
++++ b/source/dng_gain_map.cpp
+@@ -1323,7 +1323,7 @@ void dng_opcode_GainMap::ProcessArea (dng_negative &negative,
+ 			
+ 			blackOffset2 = ((real32) blackLevel) / 65535.0f;
+ 			blackScale2	 = 1.0f - blackOffset2;
+-			blackScale1	 = 1.0f / blackScale2;
++			blackScale1	 = (blackScale2 != 0.0) ? 1.0f / blackScale2 : 0.0;
+ 			blackOffset1 = 1.0f - blackScale1;
+ 			
+ 			}
+diff --git a/source/dng_jxl.cpp b/source/dng_jxl.cpp
+index eabd114..07ebb13 100644
+--- a/source/dng_jxl.cpp
++++ b/source/dng_jxl.cpp
+@@ -78,7 +78,23 @@ class jxl_memory_block
+ 
+ 				// See dng_memory_block::PhysicalSize.
+ 
+-				fPhysicalBuffer = allocator.Malloc (160u + bytesNeeded);
++				size_t mallocSize = (size_t) (160u + bytesNeeded);
++
++				if (mallocSize <= bytesNeeded)
++					{
++
++					ThrowOverflow ();
++
++					}
++
++				fPhysicalBuffer = allocator.Malloc (mallocSize);
++
++				if (!fPhysicalBuffer)
++					{
++
++					ThrowMemoryFull ();
++
++					}
+ 
+ 				fLogicalBuffer = (void *) DNG_ALIGN_SIMD (fPhysicalBuffer);
+ 
+@@ -905,29 +921,42 @@ class jxl_image_chunk_reader
+ 
+ 			#if qLogStreamIntput
+ 
+-			printf ("input: get_color_channel_data_at (x=%d, y=%d, w=%d, h=%d)\n",
+-					int (xpos),
+-					int (ypos),
+-					int (xsize),
+-					int (ysize));
++			printf ("input: get_color_channel_data_at (x=%zu, y=%zu, w=%zu, h=%zu)\n",
++					xpos,
++					ypos,
++					xsize,
++					ysize);
+ 
+ 			#endif
+-			
++
++			if (xpos  > 0x7fffffff ||
++				ypos  > 0x7fffffff ||
++				xsize > 0x7fffffff ||
++				ysize > 0x7fffffff)
++				{
++
++				ThrowOverflow ("coordinate too large");
++
++				}
++
+ 			dng_pixel_buffer buffer;
+ 
+ 			buffer.fArea.t = int32 (ypos);
+ 			buffer.fArea.l = int32 (xpos);
+-			buffer.fArea.b = int32 (ypos + ysize);
+-			buffer.fArea.r = int32 (xpos + xsize);
++			buffer.fArea.b = SafeInt32Add (int32 (ypos), int32 (ysize));
++			buffer.fArea.r = SafeInt32Add (int32 (xpos), int32 (xsize));
+ 
+ 			buffer.fPlanes = fImage.Planes ();
+ 
+ 			// Assume row-col-plane interleaved.
+-			
++
++			DNG_REQUIRE (buffer.fPlanes    <= 0x7fffffff, "planes too large");
++			DNG_REQUIRE (buffer.fArea.W () <= 0x7fffffff, "buffer too wide");
++
+ 			buffer.fPlaneStep = 1;
+ 			buffer.fColStep	  = buffer.fPlanes;
+-			buffer.fRowStep	  = SafeUint32Mult (buffer.fPlanes,
+-												buffer.fArea.W ());
++			buffer.fRowStep	  = SafeInt32Mult (buffer.fPlanes,
++											   buffer.fArea.W ());
+ 
+ 			buffer.fPixelType = fImage.PixelType ();
+ 			buffer.fPixelSize = TagTypeSize (buffer.fPixelType);
+@@ -1092,27 +1121,40 @@ class jxl_buffer_chunk_reader
+ 
+ 			#if qLogStreamIntput
+ 
+-			printf ("input: get_color_channel_data_at (x=%d, y=%d, w=%d, h=%d)\n",
+-					int (xpos),
+-					int (ypos),
+-					int (xsize),
+-					int (ysize));
++			printf ("input: get_color_channel_data_at (x=%zu, y=%zu, w=%zu, h=%zu)\n",
++					xpos,
++					ypos,
++					xsize,
++					ysize);
+ 
+ 			#endif
++
++			if (xpos  > 0x7fffffff ||
++				ypos  > 0x7fffffff ||
++				xsize > 0x7fffffff ||
++				ysize > 0x7fffffff)
++				{
++
++				ThrowOverflow ("coordinate too large");
++
++				}
+ 			
+ 			dng_pixel_buffer buffer = fBuffer;
+ 
+-			buffer.fArea.t = int32 (ypos) + fBuffer.fArea.t;
+-			buffer.fArea.l = int32 (xpos) + fBuffer.fArea.l;
+-			buffer.fArea.b = buffer.fArea.t + int32 (ysize);
+-			buffer.fArea.r = buffer.fArea.l + int32 (xsize);
++			buffer.fArea.t = SafeInt32Add (int32 (ypos),   fBuffer.fArea.t);
++			buffer.fArea.l = SafeInt32Add (int32 (xpos),   fBuffer.fArea.l);
++			buffer.fArea.b = SafeInt32Add (buffer.fArea.t, int32 (ysize));
++			buffer.fArea.r = SafeInt32Add (buffer.fArea.l, int32 (xsize));
+ 
+ 			// Assume row-col-plane interleaved.
+-			
++
++			DNG_REQUIRE (buffer.fPlanes    <= 0x7fffffff, "planes too large");
++			DNG_REQUIRE (buffer.fArea.W () <= 0x7fffffff, "buffer too wide");
++
+ 			buffer.fPlaneStep = 1;
+ 			buffer.fColStep	  = buffer.fPlanes;
+-			buffer.fRowStep	  = SafeUint32Mult (buffer.fPlanes,
+-												buffer.fArea.W ());
++			buffer.fRowStep	  = SafeInt32Mult (buffer.fPlanes,
++											   buffer.fArea.W ());
+ 
+ 			const uint32 bytesNeeded = SafeUint32Mult (buffer.fRowStep,
+ 													   buffer.fArea.H (),
+@@ -1955,16 +1997,20 @@ static JxlEncoderPtr EncodeJXL_Common (dng_host &host,
+ 
+ 	previewPixelBuffer.fPlanes = planes;
+ 
++	DNG_REQUIRE (previewPixelBuffer.fArea.W () <= 0x7fffffff,
++				 "fArea.W too large");
++
+ 	previewPixelBuffer.fPlaneStep = 1;
+ 	previewPixelBuffer.fColStep   = (int32) planes;
+-	previewPixelBuffer.fRowStep   = (int32) planes * (int32) previewPixelBuffer.fArea.W ();
++	previewPixelBuffer.fRowStep   = SafeInt32Mult ((int32) planes,
++												   (int32) previewPixelBuffer.fArea.W ());
+ 
+ 	previewPixelBuffer.fPixelType = srcPixelType;
+ 	previewPixelBuffer.fPixelSize = TagTypeSize (previewPixelBuffer.fPixelType);
+ 
+-	uint32 previewBytesNeeded = (previewPixelBuffer.fRowStep *
+-								 previewPixelBuffer.fArea.H () *
+-								 previewPixelBuffer.fPixelSize); 
++	uint32 previewBytesNeeded = SafeUint32Mult (previewPixelBuffer.fRowStep,
++												previewPixelBuffer.fArea.H (),
++												previewPixelBuffer.fPixelSize);
+ 
+ 	AutoPtr<dng_memory_block> previewBlock (host.Allocate (previewBytesNeeded));
+ 
+@@ -3288,6 +3334,10 @@ void dng_jxl_decoder::Decode (dng_host &host,
+ 
+ 			dng_point size;
+ 
++			DNG_REQUIRE (basicInfo.xsize <= 0x7fffffff &&
++						 basicInfo.ysize <= 0x7fffffff,
++						 "Image size exceeds supported size.");
++
+ 			size.h = basicInfo.xsize;
+ 			size.v = basicInfo.ysize;
+ 
+@@ -3301,7 +3351,8 @@ void dng_jxl_decoder::Decode (dng_host &host,
+ 			  
+ 			buffer.fPlaneStep = 1;
+ 			buffer.fColStep	  = totalPlanes;
+-			buffer.fRowStep	  = buffer.fColStep * size.h;
++			buffer.fRowStep	  = SafeInt32Mult (buffer.fColStep,
++											   size.h);
+ 
+ 			buffer.fPixelType = pixelType;
+ 			buffer.fPixelSize = TagTypeSize (buffer.fPixelType);
+@@ -3340,11 +3391,13 @@ void dng_jxl_decoder::Decode (dng_host &host,
+ 
+ 			wholeBuffer.fColStep   = 1;
+ 			wholeBuffer.fPlaneStep = size.h;
+-			wholeBuffer.fRowStep   = wholeBuffer.fPlaneStep * totalPlanes;
++			wholeBuffer.fRowStep   = SafeInt32Mult (wholeBuffer.fPlaneStep,
++													totalPlanes);
+ 
+-			const uint64 bytesNeeded = (uint64 (wholeBuffer.fRowStep) *
+-										uint64 (wholeBuffer.fArea.H ()) *
+-										uint64 (wholeBuffer.fPixelSize));
++			const uint64 bytesNeeded =
++				(uint64) SafeInt64Mult (int64 (wholeBuffer.fRowStep),
++										int64 (wholeBuffer.fArea.H ()),
++										int64 (wholeBuffer.fPixelSize));
+ 
+ 			cbData.fBlock.Reset (new jxl_memory_block (host.Allocator (),
+ 													   bytesNeeded));
+@@ -3374,6 +3427,9 @@ void dng_jxl_decoder::Decode (dng_host &host,
+ 						 "JxlDecoderImageOutBufferSize",
+ 						 &parallelData);
+ 
++			DNG_REQUIRE (size <= 0xffffffff,
++						 "JxlDecoderImageOutBufferSize too large");
++
+ 			block.Reset (host.Allocate ((uint32) size));
+ 
+ 			CheckResult (JxlDecoderSetImageOutBuffer (dec,
+diff --git a/source/dng_misc_opcodes.cpp b/source/dng_misc_opcodes.cpp
+index 49e63a8..5e52388 100644
+--- a/source/dng_misc_opcodes.cpp
++++ b/source/dng_misc_opcodes.cpp
+@@ -441,7 +441,7 @@ void dng_opcode_MapTable::ReplicateLastEntry ()
+ 	
+ 	uint16 *table = fTable->Buffer_uint16 ();
+ 		
+-	uint16 lastEntry = table [fCount];
++	uint16 lastEntry = table [fCount - 1];
+ 	
+ 	for (uint32 index = fCount; index < 0x10000; index++)
+ 		{
+@@ -512,7 +512,7 @@ void dng_opcode_MapTable::Prepare (dng_negative &negative,
+ 		
+ 		uint16 *dstTable = fBlackAdjustedTable->Buffer_uint16 ();
+ 		
+-		real64 srcScale = 65535.0 / (65535.0 - blackLevel);
++		real64 srcScale = (blackLevel < 65535) ? 65535.0 / (65535.0 - blackLevel) : 0.0;
+ 		
+ 		real64 dstScale = (65535.0 - blackLevel) / 65535.0;
+ 		
+diff --git a/source/dng_ref_counted_block.cpp b/source/dng_ref_counted_block.cpp
+index 951a6ee..32be356 100644
+--- a/source/dng_ref_counted_block.cpp
++++ b/source/dng_ref_counted_block.cpp
+@@ -52,8 +52,17 @@ void dng_ref_counted_block::Allocate (uint32 size)
+ 	
+ 	if (size)
+ 		{
+-		
+-		fBuffer = malloc (size + sizeof (header));
++
++		size_t mallocSize = size + sizeof (header);
++
++		if (mallocSize <= size)
++			{
++
++			ThrowOverflow ();
++
++			}
++
++		fBuffer = malloc (mallocSize);
+ 		
+ 		if (!fBuffer)
+ 			{
+diff --git a/source/dng_reference.cpp b/source/dng_reference.cpp
+index 95a6087..d71cf4b 100644
+--- a/source/dng_reference.cpp
++++ b/source/dng_reference.cpp
+@@ -2593,7 +2593,7 @@ void RefVignette32 (real32 *sPtr,
+ 		
+ 		blackOffset2 = ((real32) blackLevel) / 65535.0f;
+ 		blackScale2	 = 1.0f - blackOffset2;
+-		blackScale1	 = 1.0f / blackScale2;
++		blackScale1	 = (blackScale2 != 0.0) ? 1.0f / blackScale2 : 0.0;
+ 		blackOffset1 = 1.0f - blackScale1;
+  
+ 		for (uint32 plane = 0; plane < planes; plane++)
+@@ -3011,7 +3011,7 @@ void RefBaselineMapPoly32 (real32 *dPtr,
+ 		
+ 		blackOffset2 = ((real32) blackLevel) / 65535.0f;
+ 		blackScale2	 = 1.0f - blackOffset2;
+-		blackScale1	 = 1.0f / blackScale2;
++		blackScale1	 = (blackScale2 != 0.0) ? 1.0f / blackScale2 : 0.0;
+ 		blackOffset1 = 1.0f - blackScale1;
+ 		
+ 		}
+diff --git a/source/dng_safe_arithmetic.cpp b/source/dng_safe_arithmetic.cpp
+index 6f50aaf..b253742 100644
+--- a/source/dng_safe_arithmetic.cpp
++++ b/source/dng_safe_arithmetic.cpp
+@@ -245,6 +245,10 @@ int64 SafeInt64MultSlow(int64 arg1, int64 arg2) {
+ 
+ }  // namespace dng_internal
+ 
++int64 SafeInt64Mult(int64 arg1, int64 arg2, int64 arg3) {
++	return SafeInt64Mult (SafeInt64Mult (arg1, arg2), arg3);
++}
++
+ uint32 SafeUint32DivideUp(uint32 arg1, uint32 arg2) {
+ 	// It might seem more intuitive to implement this function simply as
+ 	//
+diff --git a/source/dng_safe_arithmetic.h b/source/dng_safe_arithmetic.h
+index 9e4ad1b..064c767 100644
+--- a/source/dng_safe_arithmetic.h
++++ b/source/dng_safe_arithmetic.h
+@@ -120,17 +120,7 @@ int64 SafeInt64MultSlow(int64 arg1, int64 arg2);
+ 
+ #if !qWinOS
+ #ifdef __clang__
+-#ifdef __ANDROID__
+-// While clang says it supports __builtin_smull_overflow, the Android NDK
+-// doesn't use the right runtime library per https://bugs.llvm.org/show_bug.cgi?id=28629
+-// Disable the __builtin_smull_overflow for now until we verify that it works fine for android.
+-// Currently we use it on other platforms like macOS, iOS and Linux so we should be good. We will
+-// revisit this when LrM android team has bandwidth to test it.
+-// krishnas - 11/9/2025
+-#define __USE_BUILTIN_SMULL_OVERFLOW (0 && __has_builtin(__builtin_smull_overflow))
+-#else
+ #define __USE_BUILTIN_SMULL_OVERFLOW __has_builtin(__builtin_smull_overflow)
+-#endif // __ANDROID__
+ #endif // __clang__
+ #endif // !qWinOS
+ 
+@@ -204,6 +194,11 @@ inline int64 SafeInt64Mult(int64 arg1, int64 arg2) {
+ #endif
+ }
+ 
++// Returns the result of multiplying arg1, ..., argn if it will fit in a
++// int64_t (without wraparound). Otherwise, throws a dng_exception with error
++// code dng_error_unknown.
++int64 SafeInt64Mult(int64 arg1, int64 arg2, int64 arg3);
++
+ // Returns the result of dividing arg1 by arg2; if the result is not an integer,
+ // rounds up to the next integer. If arg2 is zero, throws a dng_exception with
+ // error code dng_error_unknown.
+diff --git a/source/dng_tag_codes.h b/source/dng_tag_codes.h
+index 095f089..a231409 100644
+--- a/source/dng_tag_codes.h
++++ b/source/dng_tag_codes.h
+@@ -453,6 +453,7 @@ enum
+ 	tcCanonCR3,
+ 	tcJXL,
+ 	tcAVIF,
++	tcWebP,
+ 	
+ 	};
+ 
+-- 
+2.54.0.545.g6539524ca2-goog
+

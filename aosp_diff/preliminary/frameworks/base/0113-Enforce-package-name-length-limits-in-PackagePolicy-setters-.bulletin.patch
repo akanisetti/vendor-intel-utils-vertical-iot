@@ -1,0 +1,73 @@
+From dd2a975e137a1604a42285a877e014c2dadb6fa0 Mon Sep 17 00:00:00 2001
+From: Pavel Grafov <pgrafov@google.com>
+Date: Wed, 25 Feb 2026 08:36:15 -0800
+Subject: [PATCH 37/38] Enforce package name length limits in PackagePolicy
+ setters.
+
+Add checks to enforce maximum package name length for packages within `PackagePolicy` objects when setting policies like managed profile contacts access and credential manager policy.
+
+Bug: 475228205
+Flag: EXEMPT BUGFIX
+Test: atest android.devicepolicy.ctsManagedProfileCallerIdAccessTest
+Test: atest android.devicepolicy.cts.ManagedProfileContactsAccessTest
+Test: atest android.credentials.cts.CtsDevicePolicyTest
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:4914d6e98bd25e620867650e0e431df3ad23a886
+Merged-In: I34d6c9f8a48aae185e12e4351da52582d285618e
+Change-Id: I34d6c9f8a48aae185e12e4351da52582d285618e
+---
+ .../DevicePolicyManagerService.java            | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java b/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java
+index 633cf9e773f8..0c66e3ce98ee 100644
+--- a/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java
++++ b/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyManagerService.java
+@@ -14405,6 +14405,9 @@ public class DevicePolicyManagerService extends IDevicePolicyManager.Stub {
+         if (!mHasFeature) {
+             return;
+         }
++        if (policy != null) {
++            enforcePackagePolicyPackageNamesLength(policy);
++        }
+         final CallerIdentity caller = getCallerIdentity();
+         Preconditions.checkCallAuthorization((isProfileOwner(caller)
+                 && isManagedProfile(caller.getUserId())));
+@@ -14455,6 +14458,9 @@ public class DevicePolicyManagerService extends IDevicePolicyManager.Stub {
+         if (!mHasFeature) {
+             return;
+         }
++        if (policy != null) {
++            enforcePackagePolicyPackageNamesLength(policy);
++        }
+         final CallerIdentity caller = getCallerIdentity();
+         Preconditions.checkCallAuthorization((isProfileOwner(caller)
+                 && isManagedProfile(caller.getUserId())));
+@@ -16522,6 +16528,9 @@ public class DevicePolicyManagerService extends IDevicePolicyManager.Stub {
+         if (!mHasFeature) {
+             return;
+         }
++        if (policy != null) {
++            enforcePackagePolicyPackageNamesLength(policy);
++        }
+         final CallerIdentity caller = getCallerIdentity();
+         Preconditions.checkCallAuthorization(canWriteCredentialManagerPolicy(caller));
+ 
+@@ -16542,6 +16551,15 @@ public class DevicePolicyManagerService extends IDevicePolicyManager.Stub {
+                         || hasCallingOrSelfPermission(MANAGE_PROFILE_AND_DEVICE_OWNERS);
+     }
+ 
++    private void enforcePackagePolicyPackageNamesLength(@NonNull PackagePolicy policy) {
++        for (String pkg : policy.getPackageNames()) {
++            if (pkg == null) {
++                continue;
++            }
++            PolicySizeVerifier.enforceMaxPackageNameLength(pkg);
++        }
++    }
++
+     @Override
+     public PackagePolicy getCredentialManagerPolicy(int userId) {
+         if (!mHasFeature) {
+-- 
+2.53.0
+

@@ -1,0 +1,713 @@
+From 6596c8fa5421390f7ae2f1cc4add87310400d002 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 29 May 2026 13:16:47 +0000
+Subject: [PATCH] Fix OTA flow in updater_sample application
+
+Make SystemUpdaterSample stable on production images by staging local
+OTAs to /data/ota_package for update_engine access, tightening
+manifest/UI handling, and adding missing config/error handling.
+
+Tracked-On: NIACP3-1352
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ updater_sample/Android.bp                     |   1 +
+ updater_sample/AndroidManifest.xml            |  14 +-
+ updater_sample/res/values/strings.xml         |   1 +
+ .../services/PrepareUpdateService.java        | 158 +++++++++++++++---
+ .../systemupdatersample/ui/MainActivity.java  | 108 ++++++++++--
+ .../util/UpdateConfigs.java                   |  26 ++-
+ .../util/UpdateEngineErrorCodes.java          |   2 +
+ 7 files changed, 270 insertions(+), 40 deletions(-)
+
+diff --git a/updater_sample/Android.bp b/updater_sample/Android.bp
+index 9222d063..5cd6d33a 100644
+--- a/updater_sample/Android.bp
++++ b/updater_sample/Android.bp
+@@ -23,6 +23,7 @@ package {
+ 
+ android_app {
+     name: "SystemUpdaterSample",
++    privileged: true,
+     sdk_version: "system_current",
+ 
+     srcs: ["src/**/*.java"],
+diff --git a/updater_sample/AndroidManifest.xml b/updater_sample/AndroidManifest.xml
+index 981cd8eb..9ba0f04c 100644
+--- a/updater_sample/AndroidManifest.xml
++++ b/updater_sample/AndroidManifest.xml
+@@ -17,24 +17,28 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+           package="com.example.android.systemupdatersample">
+ 
+-    <uses-sdk android:minSdkVersion="27" android:targetSdkVersion="27" />
+-
+     <uses-permission android:name="android.permission.ACCESS_CACHE_FILESYSTEM" />
+     <uses-permission android:name="android.permission.INTERNET"/>
++    <uses-permission android:name="android.permission.RECOVERY" />
++    <uses-permission android:name="android.permission.UPDATE_PACKAGES" />
+ 
+     <application
+         android:icon="@mipmap/ic_launcher"
+         android:label="@string/app_name"
+-        android:roundIcon="@mipmap/ic_launcher_round">
++        android:roundIcon="@mipmap/ic_launcher_round"
++        android:usesCleartextTraffic="true">
+         <activity
+             android:name=".ui.MainActivity"
+-            android:label="@string/app_name" >
++            android:label="@string/app_name"
++            android:exported="true" >
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+                 <category android:name="android.intent.category.LAUNCHER" />
+             </intent-filter>
+         </activity>
+-        <service android:name=".services.PrepareUpdateService"/>
++        <service
++            android:name=".services.PrepareUpdateService"
++            android:exported="false"/>
+     </application>
+ 
+ </manifest>
+diff --git a/updater_sample/res/values/strings.xml b/updater_sample/res/values/strings.xml
+index db4a5dc6..478d0edf 100644
+--- a/updater_sample/res/values/strings.xml
++++ b/updater_sample/res/values/strings.xml
+@@ -17,6 +17,7 @@
+     <string name="app_name">SystemUpdaterSample</string>
+     <string name="action_reload">Reload</string>
+     <string name="unknown">Unknown</string>
++     <string name="no_configs_available">No update configs available</string>
+     <string name="close">CLOSE</string>
+     <string name="switch_slot">Switch Slot</string>
+     <string name="finish_update_info">To finish the update press the button below</string>
+diff --git a/updater_sample/src/com/example/android/systemupdatersample/services/PrepareUpdateService.java b/updater_sample/src/com/example/android/systemupdatersample/services/PrepareUpdateService.java
+index 29eb13da..143abd4d 100644
+--- a/updater_sample/src/com/example/android/systemupdatersample/services/PrepareUpdateService.java
++++ b/updater_sample/src/com/example/android/systemupdatersample/services/PrepareUpdateService.java
+@@ -17,15 +17,16 @@
+ package com.example.android.systemupdatersample.services;
+ 
+ import static com.example.android.systemupdatersample.util.PackageFiles.COMPATIBILITY_ZIP_FILE_NAME;
+-import static com.example.android.systemupdatersample.util.PackageFiles.OTA_PACKAGE_DIR;
+ import static com.example.android.systemupdatersample.util.PackageFiles.PAYLOAD_BINARY_FILE_NAME;
+ import static com.example.android.systemupdatersample.util.PackageFiles.PAYLOAD_PROPERTIES_FILE_NAME;
+ 
+ import android.app.IntentService;
+ import android.content.Context;
+ import android.content.Intent;
++import android.os.Build;
+ import android.os.Bundle;
+ import android.os.Handler;
++import android.os.Parcelable;
+ import android.os.RecoverySystem;
+ import android.os.ResultReceiver;
+ import android.os.UpdateEngine;
+@@ -44,7 +45,11 @@ import java.io.IOException;
+ import java.nio.file.Files;
+ import java.nio.file.Path;
+ import java.nio.file.Paths;
++import java.nio.file.StandardCopyOption;
++import java.nio.file.attribute.PosixFilePermission;
++import java.nio.file.attribute.PosixFilePermissions;
+ import java.util.Arrays;
++import java.util.Set;
+ import java.util.Optional;
+ 
+ /**
+@@ -125,8 +130,17 @@ public class PrepareUpdateService extends IntentService {
+     @Override
+     protected void onHandleIntent(Intent intent) {
+         Log.d(TAG, "On handle intent is called");
+-        UpdateConfig config = intent.getParcelableExtra(EXTRA_PARAM_CONFIG);
+-        ResultReceiver resultReceiver = intent.getParcelableExtra(EXTRA_PARAM_RESULT_RECEIVER);
++        UpdateConfig config = getParcelableExtra(intent, EXTRA_PARAM_CONFIG, UpdateConfig.class);
++        ResultReceiver resultReceiver =
++                getParcelableExtra(intent, EXTRA_PARAM_RESULT_RECEIVER, ResultReceiver.class);
++
++        if (config == null || resultReceiver == null) {
++            Log.e(TAG, "Missing required extras in PrepareUpdateService intent");
++            if (resultReceiver != null) {
++                resultReceiver.send(RESULT_CODE_ERROR, null);
++            }
++            return;
++        }
+ 
+         try {
+             PayloadSpec spec = execute(config);
+@@ -137,6 +151,15 @@ public class PrepareUpdateService extends IntentService {
+         }
+     }
+ 
++    @SuppressWarnings("deprecation")
++    private static <T extends Parcelable> T getParcelableExtra(
++            Intent intent, String key, Class<T> clazz) {
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++            return intent.getParcelableExtra(key, clazz);
++        }
++        return intent.getParcelableExtra(key);
++    }
++
+     /**
+      * 1. Downloads files for streaming updates.
+      * 2. Makes sure required files are present.
+@@ -145,19 +168,22 @@ public class PrepareUpdateService extends IntentService {
+      */
+     private PayloadSpec execute(UpdateConfig config)
+             throws IOException, PreparationFailedException {
++        Path stagingDir = getStagingDirectory();
++        String updateUrl = prepareUpdateUrl(config.getUrl());
+ 
+         if (config.getAbConfig().getVerifyPayloadMetadata()) {
+             Log.i(TAG, "Verifying payload metadata with UpdateEngine.");
+-            if (!verifyPayloadMetadata(config)) {
++            if (!verifyPayloadMetadata(config, updateUrl)) {
+                 throw new PreparationFailedException("Payload metadata is not compatible");
+             }
+         }
+ 
+         if (config.getInstallType() == UpdateConfig.AB_INSTALL_TYPE_NON_STREAMING) {
+-            return mPayloadSpecs.forNonStreaming(config.getUpdatePackageFile());
++            return mPayloadSpecs.forNonStreaming(fileForUrl(updateUrl));
+         }
+ 
+-        downloadPreStreamingFiles(config, OTA_PACKAGE_DIR);
++        ensureDirectory(stagingDir);
++        downloadPreStreamingFiles(config, updateUrl, stagingDir);
+ 
+         Optional<UpdateConfig.PackageFile> payloadBinary =
+                 UpdateConfigs.getPropertyFile(PAYLOAD_BINARY_FILE_NAME, config);
+@@ -168,11 +194,11 @@ public class PrepareUpdateService extends IntentService {
+         }
+ 
+         if (!UpdateConfigs.getPropertyFile(PAYLOAD_PROPERTIES_FILE_NAME, config).isPresent()
+-                || !Paths.get(OTA_PACKAGE_DIR, PAYLOAD_PROPERTIES_FILE_NAME).toFile().exists()) {
++                || !stagingDir.resolve(PAYLOAD_PROPERTIES_FILE_NAME).toFile().exists()) {
+             throw new IOException(PAYLOAD_PROPERTIES_FILE_NAME + " not found");
+         }
+ 
+-        File compatibilityFile = Paths.get(OTA_PACKAGE_DIR, COMPATIBILITY_ZIP_FILE_NAME).toFile();
++        File compatibilityFile = stagingDir.resolve(COMPATIBILITY_ZIP_FILE_NAME).toFile();
+         if (compatibilityFile.isFile()) {
+             Log.i(TAG, "Verifying OTA package for compatibility with the device");
+             if (!verifyPackageCompatibility(compatibilityFile)) {
+@@ -181,10 +207,78 @@ public class PrepareUpdateService extends IntentService {
+             }
+         }
+ 
+-        return mPayloadSpecs.forStreaming(config.getUrl(),
++        return mPayloadSpecs.forStreaming(updateUrl,
+                 payloadBinary.get().getOffset(),
+                 payloadBinary.get().getSize(),
+-                Paths.get(OTA_PACKAGE_DIR, PAYLOAD_PROPERTIES_FILE_NAME).toFile());
++            stagingDir.resolve(PAYLOAD_PROPERTIES_FILE_NAME).toFile());
++    }
++
++    /**
++     * update_engine cannot access shell_data_file paths like /data/local/tmp on user builds.
++     * For local file OTA sources, copy the package to /data/ota_package and use that URL.
++     */
++    private String prepareUpdateUrl(String originalUrl) throws IOException {
++        if (!originalUrl.startsWith("file://")) {
++            return originalUrl;
++        }
++
++        File source = fileForUrl(originalUrl);
++        Path sourcePath = source.toPath();
++        Path otaPackageDir = Paths.get(PackageFiles.OTA_PACKAGE_DIR);
++        ensureDirectory(otaPackageDir);
++        ensureDirectoryReadableByUpdateEngine(otaPackageDir);
++        Path targetPath = otaPackageDir.resolve(sourcePath.getFileName());
++
++        if (!sourcePath.equals(targetPath)) {
++            Log.i(TAG, "Copying OTA package to " + targetPath + " for update_engine access");
++            Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
++        }
++
++        ensureFileReadableByUpdateEngine(targetPath);
++
++        return "file://" + targetPath;
++    }
++
++    private void ensureDirectoryReadableByUpdateEngine(Path dirPath) {
++        try {
++            Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rwxr-xr-x");
++            Files.setPosixFilePermissions(dirPath, permissions);
++        } catch (Exception e) {
++            Log.w(TAG, "Failed to set POSIX permissions on directory " + dirPath, e);
++            File dir = dirPath.toFile();
++            if (!dir.setReadable(true, false)) {
++                Log.w(TAG, "Failed to set directory readable for all: " + dirPath);
++            }
++            if (!dir.setExecutable(true, false)) {
++                Log.w(TAG, "Failed to set directory searchable for all: " + dirPath);
++            }
++            if (!dir.setWritable(true, true)) {
++                Log.w(TAG, "Failed to set directory writable for owner: " + dirPath);
++            }
++        }
++    }
++
++    private void ensureFileReadableByUpdateEngine(Path filePath) {
++        try {
++            Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rw-r--r--");
++            Files.setPosixFilePermissions(filePath, permissions);
++        } catch (Exception e) {
++            Log.w(TAG, "Failed to set POSIX permissions on file " + filePath, e);
++            File file = filePath.toFile();
++            if (!file.setReadable(true, false)) {
++                Log.w(TAG, "Failed to set file readable for all: " + filePath);
++            }
++            if (!file.setWritable(true, true)) {
++                Log.w(TAG, "Failed to set file writable for owner: " + filePath);
++            }
++        }
++    }
++
++    private File fileForUrl(String url) {
++        if (!url.startsWith("file://")) {
++            throw new IllegalArgumentException("Expected file:// URL, got " + url);
++        }
++        return new File(url.substring("file://".length()));
+     }
+ 
+     /**
+@@ -195,7 +289,7 @@ public class PrepareUpdateService extends IntentService {
+      * By downloading only small portion of the package, it allows to verify if UpdateEngine
+      * will install the update.
+      */
+-    private boolean verifyPayloadMetadata(UpdateConfig config) {
++        private boolean verifyPayloadMetadata(UpdateConfig config, String updateUrl) {
+         Optional<UpdateConfig.PackageFile> metadataPackageFile =
+                 Arrays.stream(config.getAbConfig().getPropertyFiles())
+                         .filter(p -> p.getFilename().equals(
+@@ -206,11 +300,13 @@ public class PrepareUpdateService extends IntentService {
+                     PackageFiles.PAYLOAD_METADATA_FILE_NAME));
+             return true;
+         }
+-        Path metadataPath = Paths.get(OTA_PACKAGE_DIR, PackageFiles.PAYLOAD_METADATA_FILE_NAME);
++        Path stagingDir = getStagingDirectory();
++        Path metadataPath = stagingDir.resolve(PackageFiles.PAYLOAD_METADATA_FILE_NAME);
+         try {
++            ensureDirectory(stagingDir);
+             Files.deleteIfExists(metadataPath);
+             FileDownloader d = new FileDownloader(
+-                    config.getUrl(),
++                    updateUrl,
+                     metadataPackageFile.get().getOffset(),
+                     metadataPackageFile.get().getSize(),
+                     metadataPath.toFile());
+@@ -218,7 +314,7 @@ public class PrepareUpdateService extends IntentService {
+         } catch (IOException e) {
+             Log.w(TAG, String.format("Downloading %s from %s failed",
+                     PackageFiles.PAYLOAD_METADATA_FILE_NAME,
+-                    config.getUrl()), e);
++                    updateUrl), e);
+             return true;
+         }
+         try {
+@@ -236,26 +332,31 @@ public class PrepareUpdateService extends IntentService {
+      *
+      * @throws IOException when can't download a file
+      */
+-    private void downloadPreStreamingFiles(UpdateConfig config, String dir)
++    private void downloadPreStreamingFiles(UpdateConfig config, String updateUrl, Path dir)
+             throws IOException {
++        ensureDirectory(dir);
+         Log.d(TAG, "Deleting existing files from " + dir);
+         for (String file : PRE_STREAMING_FILES_SET) {
+-            Files.deleteIfExists(Paths.get(OTA_PACKAGE_DIR, file));
++            Files.deleteIfExists(dir.resolve(file));
+         }
+         Log.d(TAG, "Downloading files to " + dir);
+         for (UpdateConfig.PackageFile file : config.getAbConfig().getPropertyFiles()) {
+             if (PRE_STREAMING_FILES_SET.contains(file.getFilename())) {
+                 Log.d(TAG, "Downloading file " + file.getFilename());
+                 FileDownloader downloader = new FileDownloader(
+-                        config.getUrl(),
++                    updateUrl,
+                         file.getOffset(),
+                         file.getSize(),
+-                        Paths.get(dir, file.getFilename()).toFile());
++                        dir.resolve(file.getFilename()).toFile());
+                 downloader.download();
+             }
+         }
+     }
+ 
++    private Path getStagingDirectory() {
++        return Paths.get(getFilesDir().getAbsolutePath(), "ota_package");
++    }
++
+     /**
+      * @param file physical location of {@link PackageFiles#COMPATIBILITY_ZIP_FILE_NAME}
+      * @return true if OTA package is compatible with this device
+@@ -269,6 +370,14 @@ public class PrepareUpdateService extends IntentService {
+         }
+     }
+ 
++    private void ensureDirectory(Path dir) throws IOException {
++        if (Files.exists(dir) && !Files.isDirectory(dir)) {
++            Log.w(TAG, "Removing stale file at " + dir + " to create directory");
++            Files.delete(dir);
++        }
++        Files.createDirectories(dir);
++    }
++
+     /**
+      * Used by {@link PrepareUpdateService} to pass {@link PayloadSpec}
+      * to {@link UpdateResultCallback#onReceiveResult}.
+@@ -294,10 +403,21 @@ public class PrepareUpdateService extends IntentService {
+         protected void onReceiveResult(int resultCode, Bundle resultData) {
+             PayloadSpec payloadSpec = null;
+             if (resultCode == RESULT_CODE_SUCCESS) {
+-                payloadSpec = (PayloadSpec) resultData.getSerializable(BUNDLE_PARAM_PAYLOAD_SPEC);
++                payloadSpec = getPayloadSpec(resultData);
+             }
+             mUpdateResultCallback.onReceiveResult(resultCode, payloadSpec);
+         }
++
++        @SuppressWarnings("deprecation")
++        private static PayloadSpec getPayloadSpec(Bundle resultData) {
++            if (resultData == null) {
++                return null;
++            }
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++                return resultData.getSerializable(BUNDLE_PARAM_PAYLOAD_SPEC, PayloadSpec.class);
++            }
++            return (PayloadSpec) resultData.getSerializable(BUNDLE_PARAM_PAYLOAD_SPEC);
++        }
+     }
+ 
+     private static class PreparationFailedException extends Exception {
+diff --git a/updater_sample/src/com/example/android/systemupdatersample/ui/MainActivity.java b/updater_sample/src/com/example/android/systemupdatersample/ui/MainActivity.java
+index 6d1e4c35..e10e18ad 100644
+--- a/updater_sample/src/com/example/android/systemupdatersample/ui/MainActivity.java
++++ b/updater_sample/src/com/example/android/systemupdatersample/ui/MainActivity.java
+@@ -30,6 +30,7 @@ import android.widget.Button;
+ import android.widget.ProgressBar;
+ import android.widget.Spinner;
+ import android.widget.TextView;
++import android.widget.Toast;
+ 
+ import com.example.android.systemupdatersample.R;
+ import com.example.android.systemupdatersample.UpdateConfig;
+@@ -52,6 +53,7 @@ public class MainActivity extends Activity {
+     private Spinner mSpinnerConfigs;
+     private TextView mTextViewConfigsDirHint;
+     private Button mButtonReload;
++    private Button mButtonViewConfig;
+     private Button mButtonApplyConfig;
+     private Button mButtonStop;
+     private Button mButtonReset;
+@@ -66,8 +68,7 @@ public class MainActivity extends Activity {
+ 
+     private List<UpdateConfig> mConfigs;
+ 
+-    private final UpdateManager mUpdateManager =
+-            new UpdateManager(new UpdateEngine(), new Handler());
++    private UpdateManager mUpdateManager;
+ 
+     @Override
+     protected void onCreate(Bundle savedInstanceState) {
+@@ -78,6 +79,7 @@ public class MainActivity extends Activity {
+         this.mSpinnerConfigs = findViewById(R.id.spinnerConfigs);
+         this.mTextViewConfigsDirHint = findViewById(R.id.textViewConfigsDirHint);
+         this.mButtonReload = findViewById(R.id.buttonReload);
++        this.mButtonViewConfig = findViewById(R.id.buttonViewConfig);
+         this.mButtonApplyConfig = findViewById(R.id.buttonApplyConfig);
+         this.mButtonStop = findViewById(R.id.buttonStop);
+         this.mButtonReset = findViewById(R.id.buttonReset);
+@@ -95,23 +97,25 @@ public class MainActivity extends Activity {
+         uiResetWidgets();
+         loadUpdateConfigs();
+ 
+-        this.mUpdateManager.setOnStateChangeCallback(this::onUpdaterStateChange);
+-        this.mUpdateManager.setOnEngineStatusUpdateCallback(this::onEngineStatusUpdate);
+-        this.mUpdateManager.setOnEngineCompleteCallback(this::onEnginePayloadApplicationComplete);
+-        this.mUpdateManager.setOnProgressUpdateCallback(this::onProgressUpdate);
++        initializeUpdateManager();
+     }
+ 
+     @Override
+     protected void onDestroy() {
+-        this.mUpdateManager.setOnEngineStatusUpdateCallback(null);
+-        this.mUpdateManager.setOnProgressUpdateCallback(null);
+-        this.mUpdateManager.setOnEngineCompleteCallback(null);
++        if (mUpdateManager != null) {
++            this.mUpdateManager.setOnEngineStatusUpdateCallback(null);
++            this.mUpdateManager.setOnProgressUpdateCallback(null);
++            this.mUpdateManager.setOnEngineCompleteCallback(null);
++        }
+         super.onDestroy();
+     }
+ 
+     @Override
+     protected void onResume() {
+         super.onResume();
++        if (mUpdateManager == null) {
++            return;
++        }
+         // Binding to UpdateEngine invokes onStatusUpdate callback,
+         // persisted updater state has to be loaded and prepared beforehand.
+         this.mUpdateManager.bind();
+@@ -119,10 +123,29 @@ public class MainActivity extends Activity {
+ 
+     @Override
+     protected void onPause() {
+-        this.mUpdateManager.unbind();
++        if (mUpdateManager != null) {
++            this.mUpdateManager.unbind();
++        }
+         super.onPause();
+     }
+ 
++    private void initializeUpdateManager() {
++        try {
++            mUpdateManager = new UpdateManager(new UpdateEngine(), new Handler());
++            this.mUpdateManager.setOnStateChangeCallback(this::onUpdaterStateChange);
++            this.mUpdateManager.setOnEngineStatusUpdateCallback(this::onEngineStatusUpdate);
++            this.mUpdateManager.setOnEngineCompleteCallback(this::onEnginePayloadApplicationComplete);
++            this.mUpdateManager.setOnProgressUpdateCallback(this::onProgressUpdate);
++        } catch (IllegalStateException e) {
++            Log.e(TAG, "update_engine service is unavailable", e);
++            mUpdateManager = null;
++            uiStateEngineUnavailable();
++            Toast.makeText(this,
++                    "Update service unavailable on this build",
++                    Toast.LENGTH_LONG).show();
++        }
++    }
++
+     /**
+      * reload button is clicked
+      */
+@@ -134,7 +157,11 @@ public class MainActivity extends Activity {
+      * view config button is clicked
+      */
+     public void onViewConfigClick(View view) {
+-        UpdateConfig config = mConfigs.get(mSpinnerConfigs.getSelectedItemPosition());
++        UpdateConfig config = getSelectedConfig();
++        if (config == null) {
++            Toast.makeText(this, R.string.no_configs_available, Toast.LENGTH_SHORT).show();
++            return;
++        }
+         new AlertDialog.Builder(this)
+                 .setTitle(config.getName())
+                 .setMessage(config.getRawJson())
+@@ -146,6 +173,11 @@ public class MainActivity extends Activity {
+      * apply config button is clicked
+      */
+     public void onApplyConfigClick(View view) {
++        UpdateConfig selectedConfig = getSelectedConfig();
++        if (selectedConfig == null) {
++            Toast.makeText(this, R.string.no_configs_available, Toast.LENGTH_SHORT).show();
++            return;
++        }
+         new AlertDialog.Builder(this)
+                 .setTitle("Apply Update")
+                 .setMessage("Do you really want to apply this update?")
+@@ -153,13 +185,16 @@ public class MainActivity extends Activity {
+                 .setPositiveButton(android.R.string.ok, (dialog, whichButton) -> {
+                     uiResetWidgets();
+                     uiResetEngineText();
+-                    applyUpdate(getSelectedConfig());
++                    applyUpdate(selectedConfig);
+                 })
+                 .setNegativeButton(android.R.string.cancel, null)
+                 .show();
+     }
+ 
+     private void applyUpdate(UpdateConfig config) {
++        if (mUpdateManager == null) {
++            return;
++        }
+         try {
+             mUpdateManager.applyUpdate(this, config);
+         } catch (UpdaterState.InvalidTransitionException e) {
+@@ -182,6 +217,9 @@ public class MainActivity extends Activity {
+     }
+ 
+     private void cancelRunningUpdate() {
++        if (mUpdateManager == null) {
++            return;
++        }
+         try {
+             mUpdateManager.cancelRunningUpdate();
+         } catch (UpdaterState.InvalidTransitionException e) {
+@@ -205,6 +243,9 @@ public class MainActivity extends Activity {
+     }
+ 
+     private void resetUpdate() {
++        if (mUpdateManager == null) {
++            return;
++        }
+         try {
+             mUpdateManager.resetUpdate();
+         } catch (UpdaterState.InvalidTransitionException e) {
+@@ -216,6 +257,9 @@ public class MainActivity extends Activity {
+      * suspend button clicked
+      */
+     public void onSuspendClick(View view) {
++        if (mUpdateManager == null) {
++            return;
++        }
+         try {
+             mUpdateManager.suspend();
+         } catch (UpdaterState.InvalidTransitionException e) {
+@@ -227,6 +271,9 @@ public class MainActivity extends Activity {
+      * resume button clicked
+      */
+     public void onResumeClick(View view) {
++        if (mUpdateManager == null) {
++            return;
++        }
+         try {
+             uiResetWidgets();
+             uiResetEngineText();
+@@ -240,6 +287,9 @@ public class MainActivity extends Activity {
+      * switch slot button clicked
+      */
+     public void onSwitchSlotClick(View view) {
++        if (mUpdateManager == null) {
++            return;
++        }
+         uiResetWidgets();
+         mUpdateManager.setSwitchSlotOnReboot();
+     }
+@@ -315,6 +365,7 @@ public class MainActivity extends Activity {
+         mTextViewBuild.setText(Build.DISPLAY);
+         mSpinnerConfigs.setEnabled(false);
+         mButtonReload.setEnabled(false);
++        mButtonViewConfig.setEnabled(false);
+         mButtonApplyConfig.setEnabled(false);
+         mButtonStop.setEnabled(false);
+         mButtonReset.setEnabled(false);
+@@ -337,7 +388,7 @@ public class MainActivity extends Activity {
+         mButtonReset.setEnabled(true);
+         mSpinnerConfigs.setEnabled(true);
+         mButtonReload.setEnabled(true);
+-        mButtonApplyConfig.setEnabled(true);
++        updateConfigButtons(true);
+         mProgressBar.setProgress(0);
+     }
+ 
+@@ -378,12 +429,30 @@ public class MainActivity extends Activity {
+         mButtonReset.setEnabled(true);
+     }
+ 
++    private void uiStateEngineUnavailable() {
++        uiResetWidgets();
++        mSpinnerConfigs.setEnabled(true);
++        mButtonReload.setEnabled(true);
++        updateConfigButtons(false);
++        mTextViewUpdateInfo.setText("UpdateEngine service unavailable on this build");
++        mTextViewUpdateInfo.setTextColor(Color.RED);
++    }
++
+     /**
+      * loads json configurations from configs dir that is defined in {@link UpdateConfigs}.
+      */
+     private void loadUpdateConfigs() {
+         mConfigs = UpdateConfigs.getUpdateConfigs(this);
+         loadConfigsToSpinner(mConfigs);
++        if (mConfigs.isEmpty()) {
++            mTextViewUpdateInfo.setText(R.string.no_configs_available);
++            mTextViewUpdateInfo.setTextColor(Color.RED);
++        }
++        if (mUpdateManager == null) {
++            updateConfigButtons(false);
++        } else {
++            updateConfigButtons(mUpdateManager.getUpdaterState() == UpdaterState.IDLE);
++        }
+     }
+ 
+     /**
+@@ -421,7 +490,20 @@ public class MainActivity extends Activity {
+     }
+ 
+     private UpdateConfig getSelectedConfig() {
++        if (mConfigs == null || mConfigs.isEmpty()) {
++            return null;
++        }
++        int position = mSpinnerConfigs.getSelectedItemPosition();
++        if (position < 0 || position >= mConfigs.size()) {
++            return null;
++        }
+         return mConfigs.get(mSpinnerConfigs.getSelectedItemPosition());
+     }
+ 
++    private void updateConfigButtons(boolean allowApply) {
++        boolean hasConfigs = mConfigs != null && !mConfigs.isEmpty();
++        mButtonViewConfig.setEnabled(hasConfigs);
++        mButtonApplyConfig.setEnabled(hasConfigs && allowApply);
++    }
++
+ }
+diff --git a/updater_sample/src/com/example/android/systemupdatersample/util/UpdateConfigs.java b/updater_sample/src/com/example/android/systemupdatersample/util/UpdateConfigs.java
+index bbefcaf1..f7315400 100644
+--- a/updater_sample/src/com/example/android/systemupdatersample/util/UpdateConfigs.java
++++ b/updater_sample/src/com/example/android/systemupdatersample/util/UpdateConfigs.java
+@@ -36,6 +36,7 @@ import java.util.Optional;
+ public final class UpdateConfigs {
+ 
+     public static final String UPDATE_CONFIGS_ROOT = "configs/";
++    private static final String FALLBACK_CONFIGS_ROOT = "/data/local/tmp/SystemUpdaterSample/configs/";
+ 
+     /**
+      * @param configs update configs
+@@ -50,9 +51,28 @@ public final class UpdateConfigs {
+      * @return configs root directory
+      */
+     public static String getConfigsRoot(Context context) {
+-        return Paths
+-                .get(context.getFilesDir().toString(), UPDATE_CONFIGS_ROOT)
+-                .toString();
++        List<String> roots = Arrays.asList(
++                Paths.get(context.getFilesDir().toString(), UPDATE_CONFIGS_ROOT).toString(),
++                FALLBACK_CONFIGS_ROOT);
++
++        for (String rootPath : roots) {
++            File root = new File(rootPath);
++            if (!root.exists()) {
++                continue;
++            }
++            File[] configs = root.listFiles((dir, name) -> name.endsWith(".json"));
++            if (configs != null && configs.length > 0) {
++                return rootPath;
++            }
++        }
++
++        for (String rootPath : roots) {
++            if (new File(rootPath).exists()) {
++                return rootPath;
++            }
++        }
++
++        return roots.get(0);
+     }
+ 
+     /**
+diff --git a/updater_sample/src/com/example/android/systemupdatersample/util/UpdateEngineErrorCodes.java b/updater_sample/src/com/example/android/systemupdatersample/util/UpdateEngineErrorCodes.java
+index 13df88b1..54d9bd27 100644
+--- a/updater_sample/src/com/example/android/systemupdatersample/util/UpdateEngineErrorCodes.java
++++ b/updater_sample/src/com/example/android/systemupdatersample/util/UpdateEngineErrorCodes.java
+@@ -37,6 +37,7 @@ public final class UpdateEngineErrorCodes {
+     public static final int UNKNOWN = -1;
+     public static final int UPDATED_BUT_NOT_ACTIVE = 52;
+     public static final int USER_CANCELLED = 48;
++    public static final int PAYLOAD_TIMESTAMP_ERROR = 51;
+ 
+     private static final SparseArray<String> CODE_TO_NAME_MAP = new SparseArray<>();
+ 
+@@ -56,6 +57,7 @@ public final class UpdateEngineErrorCodes {
+         CODE_TO_NAME_MAP.put(20, "DOWNLOAD_STATE_INITIALIZATION_ERROR");
+         CODE_TO_NAME_MAP.put(26, "DOWNLOAD_METADATA_SIGNATURE_MISMATCH");
+         CODE_TO_NAME_MAP.put(48, "USER_CANCELLED");
++        CODE_TO_NAME_MAP.put(51, "PAYLOAD_TIMESTAMP_ERROR");
+         CODE_TO_NAME_MAP.put(52, "UPDATED_BUT_NOT_ACTIVE");
+     }
+ 
+-- 
+2.34.1
+

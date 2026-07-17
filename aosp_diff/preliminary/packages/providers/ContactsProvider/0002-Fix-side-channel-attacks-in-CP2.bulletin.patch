@@ -1,0 +1,112 @@
+From e1314bb3790100f4da8309695448d490452cd009 Mon Sep 17 00:00:00 2001
+From: Himanshu Gupta <himanshuz@google.com>
+Date: Wed, 11 Feb 2026 14:17:07 +0000
+Subject: [PATCH 2/2] Fix side channel attacks in CP2
+
+Currently, CP2 does not impose any
+strict sql checks to callers allowing callers
+to use malformed queries to perform side channel
+attacks by parsing the return trings from the SQLite
+exception thrown.
+
+This change fixes the same by stripping SQLite error
+messages when text containing "json" is present in same.
+This is only done for callers without "READ_CONTACTS" as
+callers with the same can anyways read the entrie cp2 db.
+
+Bug: 465133716
+Flag: EXEMPT CVE_FIX
+Test: atest ContactsProviderTests
+Change-Id: Ica3d495519430f846247e6c9d62bd572f8dc62bc
+(cherry picked from commit 6044ca5db93f9e8e5ef59dd94b97b7039a3e2c7d)
+---
+ .../providers/contacts/ContactsProvider2.java | 33 +++++++++++++++++--
+ 1 file changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/src/com/android/providers/contacts/ContactsProvider2.java b/src/com/android/providers/contacts/ContactsProvider2.java
+index 1764fb52..66463eb8 100644
+--- a/src/com/android/providers/contacts/ContactsProvider2.java
++++ b/src/com/android/providers/contacts/ContactsProvider2.java
+@@ -68,6 +68,7 @@ import android.database.MatrixCursor.RowBuilder;
+ import android.database.MergeCursor;
+ import android.database.sqlite.SQLiteDatabase;
+ import android.database.sqlite.SQLiteDoneException;
++import android.database.sqlite.SQLiteException;
+ import android.database.sqlite.SQLiteQueryBuilder;
+ import android.graphics.Bitmap;
+ import android.graphics.BitmapFactory;
+@@ -2383,6 +2384,26 @@ public class ContactsProvider2 extends AbstractContactsProvider
+         mInProfileMode.set(false);
+     }
+ 
++    private void maybeStripAndThrowSQLiteExceptionWithJson(Exception e, String permission,
++            LogFields.Builder logBuilder) {
++        // b/465133716: Using certain "json" tokens exposes a side channel attack by deciphering
++        // the error message, so we strip the same.
++        //
++        // Note: We use checkCallingPermission() instead of checkCallingOrSelfPermission()
++        // intentionally. If the call is coming from a non-binder thread (e.g., self-call
++        // after clearing identity), we don't want to grant access to the raw error message
++        // if it might contain sensitive info triggered by user-provided SQL.
++        if (e instanceof SQLiteException
++                && getContext().checkCallingPermission(permission) != PERMISSION_GRANTED) {
++            final String message = e.getMessage();
++            if (message != null && message.toLowerCase(Locale.ROOT).contains("json")) {
++                SQLiteException strippedEx = new SQLiteException("Stripped exception message");
++                logBuilder.setException(strippedEx);
++                throw strippedEx;
++            }
++        }
++    }
++
+     @Override
+     public Uri insert(Uri uri, ContentValues values) {
+         LogFields.Builder logBuilder = LogFields.Builder.aLogFields()
+@@ -2414,6 +2435,7 @@ public class ContactsProvider2 extends AbstractContactsProvider
+             resultUri = super.insert(uri, values);
+             return resultUri;
+         } catch (Exception e) {
++            maybeStripAndThrowSQLiteExceptionWithJson(e, WRITE_PERMISSION, logBuilder);
+             logBuilder.setException(e);
+             throw e;
+         } finally {
+@@ -2455,6 +2477,7 @@ public class ContactsProvider2 extends AbstractContactsProvider
+             updates = super.update(uri, values, selection, selectionArgs);
+             return updates;
+         } catch (Exception e) {
++            maybeStripAndThrowSQLiteExceptionWithJson(e, WRITE_PERMISSION, logBuilder);
+             logBuilder.setException(e);
+             throw e;
+         } finally {
+@@ -2493,6 +2516,7 @@ public class ContactsProvider2 extends AbstractContactsProvider
+             deletes = super.delete(uri, selection, selectionArgs);
+             return deletes;
+         } catch (Exception e) {
++            maybeStripAndThrowSQLiteExceptionWithJson(e, WRITE_PERMISSION, logBuilder);
+             logBuilder.setException(e);
+             throw e;
+         } finally {
+@@ -6020,13 +6044,18 @@ public class ContactsProvider2 extends AbstractContactsProvider
+         try {
+             cursor = queryInternal(uri, projection, selection, selectionArgs, sortOrder,
+                     cancellationSignal);
++            if (cursor != null) {
++                // Consuming the cursor allows the actual exception (if any) thrown to be
++                // caught in the exception block below.
++                logBuilder.setResultCount(cursor.getCount());
++            }
+             return cursor;
+         } catch (Exception e) {
++            maybeStripAndThrowSQLiteExceptionWithJson(e, READ_PERMISSION, logBuilder);
+             logBuilder.setException(e);
+             throw e;
+         } finally {
+-            LogUtils.log(
+-                    logBuilder.setResultCount(cursor == null ? 0 : cursor.getCount()).build());
++            LogUtils.log(logBuilder.build());
+         }
+     }
+ 
+-- 
+2.53.0
+

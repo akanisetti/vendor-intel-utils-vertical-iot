@@ -1,0 +1,42 @@
+From f8ceb4d32394bbfd1085dd6badfcb49b4205eb93 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Sat, 25 Apr 2026 02:44:55 +0000
+Subject: [PATCH] Include LocationControlTest prebuilt app in build
+
+- Reference prebuilt LocationControlTestPrebuilt module from
+  vendor/intel/external/apps/
+- Copy privapp-permissions allowlist XML to system/etc/permissions/
+- Allows LocationControlTest to request LOCATION_HARDWARE
+  (signature|privileged)
+- App can now read/write location data via the static location HAL on
+  both
+  user and userdebug builds
+
+Tracked-On: NIACP3-1182
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ groups/staticlocation/true/product.mk | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/groups/staticlocation/true/product.mk b/groups/staticlocation/true/product.mk
+index 73fe08ee..18dfee9e 100644
+--- a/groups/staticlocation/true/product.mk
++++ b/groups/staticlocation/true/product.mk
+@@ -9,3 +9,14 @@ PRODUCT_PACKAGES += \
+ # SELinux policy
+ PRODUCT_PACKAGES += \
+     vendor_hal_location_sepolicy
++
++# Location control test app prebuilt (privileged; lands in /system/priv-app)
++PRODUCT_PACKAGES += \
++    LocationControlTestPrebuilt
++
++# Privapp-permissions allowlist — must be on the same partition as the APK
++# (privileged: true without vendor:/product_specific: → /system/priv-app)
++# ro.control_privapp_permissions=enforce on user builds will strip
++# signature|privileged permissions unless an allowlist XML is present here.
++PRODUCT_COPY_FILES += \
++    vendor/intel/external/apps/LocationControlTest/privapp-permissions-com.android.locationcontroltest.xml:system/etc/permissions/privapp-permissions-com.android.locationcontroltest.xml
+-- 
+2.34.1
+

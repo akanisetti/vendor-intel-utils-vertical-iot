@@ -1,0 +1,114 @@
+From b5e1ab97819c4c25d5cd91b6fe5411e24a9513e7 Mon Sep 17 00:00:00 2001
+From: gdonthu <gangadhar.donthu@intel.com>
+Date: Thu, 16 Jul 2026 09:23:04 +0000
+Subject: [PATCH] Adding device properties for provisioning.
+
+Auto provisioning done on first boot after flash.
+
+Tracked-On: NICACP3-1403
+
+Co-authored-by: bchew <basil.chew@intel.com>
+
+Signed-off-by: gdonthu <gangadhar.donthu@intel.com>
+---
+ .../tee/trusty/auto_provision_attestation.sh  | 30 +++++++++++++++++++
+ groups/tee/trusty/files.spec                  |  1 +
+ groups/tee/trusty/init.rc                     | 15 ++++++++++
+ groups/tee/trusty/product.mk                  |  4 ++-
+ 4 files changed, 49 insertions(+), 1 deletion(-)
+ create mode 100644 groups/tee/trusty/auto_provision_attestation.sh
+
+diff --git a/groups/tee/trusty/auto_provision_attestation.sh b/groups/tee/trusty/auto_provision_attestation.sh
+new file mode 100644
+index 00000000..b69fa681
+--- /dev/null
++++ b/groups/tee/trusty/auto_provision_attestation.sh
+@@ -0,0 +1,30 @@
++#!/vendor/bin/sh
++# Simple auto-provisioning script
++# Runs once on first boot after flash
++
++# Check if already done
++if [ "$(getprop persist.vendor.attestation.done)" = "1" ]; then
++    exit 0
++fi
++
++# Read device properties
++BRAND=$(getprop ro.product.brand)
++DEVICE=$(getprop ro.product.device)
++PRODUCT=$(getprop ro.product.name)
++MANUFACTURER=$(getprop ro.product.manufacturer)
++MODEL=$(getprop ro.product.model)
++SERIAL=$(getprop ro.serialno)
++
++# Provision
++/vendor/bin/trusty_keymaster_set_attestation_ids \
++    --brand "$BRAND" \
++    --device "$DEVICE" \
++    --product "$PRODUCT" \
++    --manufacturer "$MANUFACTURER" \
++    --model "$MODEL" \
++    --serial "$SERIAL"
++
++# Mark as done if successful
++if [ $? -eq 0 ]; then
++    setprop persist.vendor.attestation.done 1
++fi
+diff --git a/groups/tee/trusty/files.spec b/groups/tee/trusty/files.spec
+index 6eb9003b..725285bf 100644
+--- a/groups/tee/trusty/files.spec
++++ b/groups/tee/trusty/files.spec
+@@ -1,3 +1,4 @@
+ [extrafiles]
+ trusty_{{boot-arch}}.mk : "Trusty build script"
+ load_trusty_modules.in : "load trusty modules"
++auto_provision_attestation.sh: "Auto-provisioning attestation script"
+diff --git a/groups/tee/trusty/init.rc b/groups/tee/trusty/init.rc
+index 1aa3ed70..a2b7b26a 100644
+--- a/groups/tee/trusty/init.rc
++++ b/groups/tee/trusty/init.rc
+@@ -1,6 +1,21 @@
+ on post-fs-data
+     mkdir /data/vendor/securestorage 0700 system system
+ 
++# Attestation IDs Auto-Provisioning Service
++# Runs ONCE on first boot after fresh flash
++service vendor.attestation-provision /vendor/bin/auto_provision_attestation.sh
++    class late_start
++    user root
++    group root system drmrpc
++    seclabel u:r:set_attestation_ids:s0
++    disabled
++    oneshot
++
++# Trigger provisioning only if NOT already provisioned
++# This runs on every boot but the service only starts if property is empty
++on property:sys.boot_completed=1 && property:persist.vendor.attestation.done=""
++    start vendor.attestation-provision
++
+ on boot
+     start keyboxd
+ 
+diff --git a/groups/tee/trusty/product.mk b/groups/tee/trusty/product.mk
+index 4070e7b8..32a9d265 100644
+--- a/groups/tee/trusty/product.mk
++++ b/groups/tee/trusty/product.mk
+@@ -6,6 +6,7 @@ PRODUCT_PACKAGES += \
+ 	libinteltrustystorageinterface \
+ 	android.hardware.gatekeeper-service.trusty \
+ 	android.hardware.security.keymint-service.rust.trusty \
++	trusty_keymaster_set_attestation_ids \
+ 	keybox_provisioning \
+ 	RemoteProvisioner \
+ 	rpmb_dev
+@@ -23,5 +24,6 @@ PRODUCT_PROPERTY_OVERRIDES += \
+ 	ro.hardware.keystore=trusty
+ 
+ PRODUCT_COPY_FILES += \
+-	frameworks/native/data/etc/android.hardware.keystore.app_attest_key.xml:vendor/etc/permissions/android.hardware.keystore.app_attest_key.xml
++	frameworks/native/data/etc/android.hardware.keystore.app_attest_key.xml:vendor/etc/permissions/android.hardware.keystore.app_attest_key.xml \
++	$(LOCAL_PATH)/{{_extra_dir}}/auto_provision_attestation.sh:$(TARGET_COPY_OUT_VENDOR)/bin/auto_provision_attestation.sh
+ 
+-- 
+2.34.1
+

@@ -1,0 +1,79 @@
+From 64e9377ed72862fa72337da18a1f91d00f0f19fa Mon Sep 17 00:00:00 2001
+From: Yurii Zubrytskyi <zyy@google.com>
+Date: Mon, 23 Mar 2026 14:50:08 -0700
+Subject: [PATCH 34/38] Validate package ID range in LoadedArsc
+
+The package ID in a RES_TABLE_PACKAGE_TYPE chunk is 32-bit,
+but resource IDs only allocate 8 bits for the package ID.
+If a malformed ARSC file has a package ID greater than 255, it
+could lead to unexpected behavior or overflow when being parsed.
+
+This change adds a range check to ensure the package ID is within the
+valid range during loading.
+
+Test: atest libandroidfw_tests
+Bug: 484973621
+Flag: EXEMPT CVE_FIX
+Change-Id: I438cd0e7f64e2b0ef4cc2bcb4f1f81778216e5e8
+---
+ libs/androidfw/LoadedArsc.cpp            |  8 +++++++-
+ libs/androidfw/tests/LoadedArsc_test.cpp | 24 ++++++++++++++++++++++++
+ 2 files changed, 31 insertions(+), 1 deletion(-)
+
+diff --git a/libs/androidfw/LoadedArsc.cpp b/libs/androidfw/LoadedArsc.cpp
+index 7cebb6d79502..92c086ac0db7 100644
+--- a/libs/androidfw/LoadedArsc.cpp
++++ b/libs/androidfw/LoadedArsc.cpp
+@@ -485,7 +485,13 @@ std::unique_ptr<const LoadedPackage> LoadedPackage::Load(const Chunk& chunk,
+     loaded_package->property_flags_ |= PROPERTY_OVERLAY | PROPERTY_DYNAMIC;
+   }
+ 
+-  loaded_package->package_id_ = dtohl(header->id);
++  const uint32_t package_id = dtohl(header->id);
++  if (package_id > std::numeric_limits<uint8_t>::max()) {
++    LOG(ERROR) << "RES_TABLE_PACKAGE_TYPE package id is out of valid range";
++    return {};
++  }
++
++  loaded_package->package_id_ = static_cast<int>(package_id);
+   if (loaded_package->package_id_ == 0 ||
+       (loaded_package->package_id_ == kAppPackageId && (property_flags & PROPERTY_DYNAMIC) != 0)) {
+     loaded_package->property_flags_ |= PROPERTY_DYNAMIC;
+diff --git a/libs/androidfw/tests/LoadedArsc_test.cpp b/libs/androidfw/tests/LoadedArsc_test.cpp
+index c90ec197b5ef..6e934e41e752 100644
+--- a/libs/androidfw/tests/LoadedArsc_test.cpp
++++ b/libs/androidfw/tests/LoadedArsc_test.cpp
+@@ -420,6 +420,30 @@ TEST_P(LoadedArscParameterizedTest, FindSparseEntryApp) {
+   ASSERT_EQ(id.value(), fix_package_id(sparse::R::string::only_land, 0));
+ }
+ 
++TEST(LoadedArscTest, LoadArscWithInvalidPackageId) {
++  struct {
++    ResTable_header table_header;
++    ResTable_package package_header;
++  } __attribute__((packed)) data = {};
++
++  data.table_header.header.type = htods(RES_TABLE_TYPE);
++  data.table_header.header.headerSize = htods(sizeof(data.table_header));
++  data.table_header.header.size = htodl(sizeof(data));
++  data.table_header.packageCount = htodl(1);
++
++  data.package_header.header.type = htods(RES_TABLE_PACKAGE_TYPE);
++  data.package_header.header.headerSize = htods(sizeof(data.package_header));
++  data.package_header.header.size = htodl(sizeof(data.package_header));
++  data.package_header.id = htodl(256); // Invalid ID (> 255)
++  data.package_header.typeStrings = htodl(sizeof(data.package_header));
++  data.package_header.keyStrings = htodl(sizeof(data.package_header));
++
++  auto loaded_arsc = LoadedArsc::Load(&data, sizeof(data));
++  ASSERT_THAT(loaded_arsc, IsNull())
++      << "Expected to fail loading but got " << loaded_arsc->GetPackages().size()
++      << " packages, first ID " << loaded_arsc->GetPackages().at(0)->GetPackageId();
++}
++
+ INSTANTIATE_TEST_SUITE_P(
+         FrameWorkResourcesLoadedArscTests,
+         LoadedArscParameterizedTest,
+-- 
+2.53.0
+

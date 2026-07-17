@@ -1,0 +1,69 @@
+From 2796a04130e5b9c60c26dee2bb28c5e3d022bda3 Mon Sep 17 00:00:00 2001
+From: celadon <celadon@intel.com>
+Date: Wed, 8 Jul 2026 07:14:13 +0000
+Subject: [PATCH] x86_64_defconfig: enable F2FS compression and FUSE_BPF for
+ NIACP3-1482 Enable F2FS compression support with LZO/LZ4/ZSTD algorithms and
+ enable FUSE_BPF. Reorder ASHMEM_C/ANDROID_FWDATA to match savedefconfig
+ output.
+
+Enabled:
+  CONFIG_F2FS_FS_COMPRESSION=y  (was: not set)
+  CONFIG_F2FS_FS_LZO=y
+  CONFIG_F2FS_FS_LZORLE=y
+  CONFIG_F2FS_FS_LZ4=y
+  CONFIG_F2FS_FS_LZ4HC=y
+  CONFIG_F2FS_FS_ZSTD=y
+  CONFIG_FUSE_BPF=y             (was: not set)
+
+Signed-off-by: Tushar Jagad <tushar.jagad@intel.com>
+---
+ .../config-lts/linux-intel-lts2024/x86_64_defconfig | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig b/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig
+index ddf3d040..2f76fe8a 100644
+--- a/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig
++++ b/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig
+@@ -6144,8 +6144,8 @@ CONFIG_RTLLIB_CRYPTO_WEP=m
+ #
+ CONFIG_ANDROID_STAGING=y
+ CONFIG_ASHMEM=y
+-CONFIG_ANDROID_FWDATA=y
+ CONFIG_ASHMEM_C=y
++CONFIG_ANDROID_FWDATA=y
+ # end of Android
+ 
+ CONFIG_LTE_GDM724X=m
+@@ -7180,7 +7180,12 @@ CONFIG_F2FS_FS_POSIX_ACL=y
+ CONFIG_F2FS_FS_SECURITY=y
+ # CONFIG_F2FS_CHECK_FS is not set
+ # CONFIG_F2FS_FAULT_INJECTION is not set
+-# CONFIG_F2FS_FS_COMPRESSION is not set
++CONFIG_F2FS_FS_COMPRESSION=y
++CONFIG_F2FS_FS_LZO=y
++CONFIG_F2FS_FS_LZORLE=y
++CONFIG_F2FS_FS_LZ4=y
++CONFIG_F2FS_FS_LZ4HC=y
++CONFIG_F2FS_FS_ZSTD=y
+ CONFIG_F2FS_IOSTAT=y
+ CONFIG_F2FS_UNFAIR_RWSEM=y
+ # CONFIG_BCACHEFS_FS is not set
+@@ -7210,7 +7215,7 @@ CONFIG_FUSE_FS=y
+ # CONFIG_CUSE is not set
+ CONFIG_VIRTIO_FS=y
+ CONFIG_FUSE_PASSTHROUGH=y
+-# CONFIG_FUSE_BPF is not set
++CONFIG_FUSE_BPF=y
+ CONFIG_OVERLAY_FS=y
+ # CONFIG_OVERLAY_FS_REDIRECT_DIR is not set
+ CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y
+@@ -8282,4 +8287,4 @@ CONFIG_ARCH_USE_MEMTEST=y
+ # Rust hacking
+ #
+ # end of Rust hacking
+-# end of Kernel hacking
++# end of Kernel hacking
+\ No newline at end of file
+-- 
+2.34.1
+

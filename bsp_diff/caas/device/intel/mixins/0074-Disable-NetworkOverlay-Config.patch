@@ -1,0 +1,21 @@
+From ab4e1c9ba716e80e7373ee86b3dd08ac3d667879 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Mon, 6 Jul 2026 05:09:58 +0000
+Subject: [PATCH] Disable NetworkOverlay Config
+
+CAPTIVE_PORTAL_SERVER to use the Google default setting
+
+Tracked-On: NIACP3-1431
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+
+diff --git a/groups/net/common/product.mk b/groups/net/common/product.mk
+index d6db6bcd..26261649 100644
+--- a/groups/net/common/product.mk
++++ b/groups/net/common/product.mk
+@@ -1,2 +1 @@
+-PRODUCT_PACKAGES += \
+-    NetworkConfigOverlay 
++# NetworkConfigOverlay removed to use NetworkStack module defaults
+-- 
+2.34.1
+

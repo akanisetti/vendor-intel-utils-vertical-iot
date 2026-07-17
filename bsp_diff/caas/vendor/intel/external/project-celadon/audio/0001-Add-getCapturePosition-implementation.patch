@@ -1,4 +1,4 @@
-From f32ac2f04058f84968644b90239d7847274bbc72 Mon Sep 17 00:00:00 2001
+From 281057fbf8e5de432dcb5ba5b0e5ed7103d37bad Mon Sep 17 00:00:00 2001
 From: "Kothapeta, BikshapathiX" <bikshapathix.kothapeta@intel.com>
 Date: Wed, 8 Feb 2023 17:49:00 +0530
 Subject: [PATCH] Add getCapturePosition implementation
@@ -9,12 +9,23 @@ VtsHalAudioV7_0Target Tests Fixed
 
 Tracked-On: OAM-102967
 Signed-off-by: Kothapeta, BikshapathiX <bikshapathix.kothapeta@intel.com>
+---
+ primary/audio_hw.c | 100 ++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 98 insertions(+), 2 deletions(-)
 
 diff --git a/primary/audio_hw.c b/primary/audio_hw.c
-index e4394c5..9e6cf83 100755
+index 8000c3b..64fd77b 100755
 --- a/primary/audio_hw.c
 +++ b/primary/audio_hw.c
-@@ -65,6 +65,12 @@
+@@ -17,6 +17,7 @@
+ #define LOG_TAG "audio_hw_primary"
+ /*#define LOG_NDEBUG 0*/
+ 
++#include <limits.h>
+ #include <dirent.h>
+ #include <errno.h>
+ #include <fcntl.h>
+@@ -62,6 +63,12 @@
  #define SAMPLE_SIZE_IN_BYTES          2
  #define SAMPLE_SIZE_IN_BYTES_STEREO   4
  
@@ -27,7 +38,7 @@ index e4394c5..9e6cf83 100755
  //#define DEBUG_PCM_DUMP
  
  #ifdef DEBUG_PCM_DUMP
-@@ -175,16 +181,33 @@ struct stream_in {
+@@ -172,16 +179,33 @@ struct stream_in {
      struct audio_config req_config;
      bool unavailable;
      bool standby;
@@ -62,19 +73,21 @@ index e4394c5..9e6cf83 100755
  
  static void select_devices(struct audio_device *adev)
  {
-@@ -706,6 +729,24 @@ static int out_get_presentation_position(const struct audio_stream_out *stream,
+@@ -703,6 +727,26 @@ static int out_get_presentation_position(const struct audio_stream_out *stream,
      return ret;
  }
  
 +static int getCapturePosition(const struct audio_stream_in *stream, int64_t* frames, int64_t* time1){
 +    if (stream == NULL || frames == NULL || time1 == NULL) {
 +        return -EINVAL;
-+     }
++    }
 +    struct stream_in* in = (struct stream_in*)stream;
 +
++    pthread_mutex_lock(&in->lock);
 +    *frames = in->frames_read;
 +    *time1 = in->timestamp_nsec;
-+    ALOGV("%s: frames_read: %d, timestamp (nsec): %" PRIu64, __func__, in->frames_read, *time1);
++    pthread_mutex_unlock(&in->lock);
++    ALOGV("%s: frames_read: %" PRId64 ", timestamp (nsec): %" PRIu64, __func__, *frames, *time1);
 +
 +    return 0;
 +}
@@ -87,7 +100,7 @@ index e4394c5..9e6cf83 100755
  static int out_add_audio_effect(const struct audio_stream *stream __unused, effect_handle_t effect __unused)
  {
      ALOGV("out_add_audio_effect: %p", effect);
-@@ -880,6 +921,40 @@ static int in_set_gain(struct audio_stream_in *stream __unused, float gain __unu
+@@ -877,6 +921,40 @@ static int in_set_gain(struct audio_stream_in *stream __unused, float gain __unu
      return 0;
  }
  
@@ -119,7 +132,7 @@ index e4394c5..9e6cf83 100755
 +    if (isOutput) {
 +       frames = pcm_get_buffer_size(pcm) - info->available;
 +    } else {
-+       frames = -info->available; /* rewind timestamp */
++       frames = -((ssize_t)info->available); /* rewind timestamp */
 +    }
 +    timestamp_adjust(&info->timestamp, frames, sample_rate);
 +    return ret;
@@ -128,7 +141,7 @@ index e4394c5..9e6cf83 100755
  static ssize_t in_read(struct audio_stream_in *stream, void* buffer,
                         size_t bytes)
  {
-@@ -928,6 +1003,19 @@ static ssize_t in_read(struct audio_stream_in *stream, void* buffer,
+@@ -925,6 +1003,19 @@ static ssize_t in_read(struct audio_stream_in *stream, void* buffer,
          int16_t *buf_out = (int16_t *) malloc (buf_size_out);
          int16_t *buf_in = (int16_t *) malloc (buf_size_in);
          int16_t *buf_remapped = (int16_t *) malloc (buf_size_remapped);
@@ -148,7 +161,7 @@ index e4394c5..9e6cf83 100755
  
          if(adev->voip_in_resampler == NULL) {
              int ret = create_resampler(bt_in_config.rate /*src rate*/, in->pcm_config->rate /*dst rate*/, in->pcm_config->channels/*dst channels*/,
-@@ -953,7 +1041,7 @@ static ssize_t in_read(struct audio_stream_in *stream, void* buffer,
+@@ -950,7 +1041,7 @@ static ssize_t in_read(struct audio_stream_in *stream, void* buffer,
          memset(buf_out, 0, buf_size_out);
  
          ret = pcm_read(in->pcm, buf_in, buf_size_in);
@@ -157,7 +170,7 @@ index e4394c5..9e6cf83 100755
  #ifdef DEBUG_PCM_DUMP
          if(sco_call_read != NULL) {
              fwrite(buf_in, 1, buf_size_in, sco_call_read);
-@@ -1001,7 +1089,11 @@ static ssize_t in_read(struct audio_stream_in *stream, void* buffer,
+@@ -998,7 +1089,11 @@ static ssize_t in_read(struct audio_stream_in *stream, void* buffer,
      } else {
          /* pcm read for primary card */
          ret = pcm_read(in->pcm, buffer, bytes);
@@ -169,7 +182,7 @@ index e4394c5..9e6cf83 100755
  #ifdef DEBUG_PCM_DUMP
          if(in_read_dump != NULL) {
              fwrite(buffer, 1, bytes, in_read_dump);
-@@ -1359,6 +1451,7 @@ static int adev_open_input_stream(struct audio_hw_device *dev,
+@@ -1382,6 +1477,7 @@ static int adev_open_input_stream(struct audio_hw_device *dev,
      in->stream.set_gain = in_set_gain;
      in->stream.read = in_read;
      in->stream.get_input_frames_lost = in_get_input_frames_lost;
@@ -178,5 +191,5 @@ index e4394c5..9e6cf83 100755
      in->dev = adev;
      in->standby = true;
 -- 
-2.39.1
+2.34.1
 

@@ -1,0 +1,78 @@
+From 2d05713f865b301b0c7cc8a0f2a3d33a217fbe1e Mon Sep 17 00:00:00 2001
+From: Riddle Hsu <riddlehsu@google.com>
+Date: Wed, 7 Jan 2026 16:48:51 +0800
+Subject: [PATCH 18/38] Apply visibility policy to window state surface
+
+The client side can access the ViewRootImpl surface and changes
+its visibility, so the server side visibility policy should control
+the visibility of the surface which is not accessible from the
+client side, i.e. the surface of window state instead of the
+client surface.
+
+Bug: 452010556
+Flag: EXEMPT BUGFIX
+Test: atest WindowStateTests#testIsOnScreen_hiddenByPolicy
+Test: Show an overlay window and loop to show the VRI surface.
+      Launch Settings. The overlay window should not be visible.
+Merged-In: I326fcaf71f901a11cf4aee3d734494090a1d0fb3
+Change-Id: I326fcaf71f901a11cf4aee3d734494090a1d0fb3
+---
+ .../core/java/com/android/server/wm/WindowState.java     | 9 +++++++++
+ .../src/com/android/server/wm/WindowStateTests.java      | 3 +++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/services/core/java/com/android/server/wm/WindowState.java b/services/core/java/com/android/server/wm/WindowState.java
+index 93876f5eeed4..d8c63284d150 100644
+--- a/services/core/java/com/android/server/wm/WindowState.java
++++ b/services/core/java/com/android/server/wm/WindowState.java
+@@ -2672,6 +2672,9 @@ class WindowState extends WindowContainer<WindowState> implements WindowManagerP
+             }
+             if (!isVisibleByPolicy()) {
+                 mWinAnimator.hide(getPendingTransaction(), "checkPolicyVisibilityChange");
++                if (mSurfaceControl != null) {
++                    getPendingTransaction().hide(mSurfaceControl);
++                }
+                 if (isFocused()) {
+                     ProtoLog.i(WM_DEBUG_FOCUS_LIGHT,
+                             "setAnimationLocked: setting mFocusMayChange true");
+@@ -2940,6 +2943,9 @@ class WindowState extends WindowContainer<WindowState> implements WindowManagerP
+         }
+         setPolicyVisibilityFlag(LEGACY_POLICY_VISIBILITY);
+         mLegacyPolicyVisibilityAfterAnim = true;
++        if (mSurfaceControl != null) {
++            getPendingTransaction().show(mSurfaceControl);
++        }
+         if (doAnimation) {
+             mWinAnimator.applyAnimationLocked(TRANSIT_ENTER, true);
+         }
+@@ -2987,6 +2993,9 @@ class WindowState extends WindowContainer<WindowState> implements WindowManagerP
+                         "WindowState.hideLw: setting mFocusMayChange true");
+                 mWmService.mFocusMayChange = true;
+             }
++            if (mSurfaceControl != null) {
++                getPendingTransaction().hide(mSurfaceControl);
++            }
+         }
+         if (requestAnim) {
+             mWmService.scheduleAnimationLocked();
+diff --git a/services/tests/wmtests/src/com/android/server/wm/WindowStateTests.java b/services/tests/wmtests/src/com/android/server/wm/WindowStateTests.java
+index fa77e42611e1..3ea13404c814 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/WindowStateTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/WindowStateTests.java
+@@ -256,10 +256,13 @@ public class WindowStateTests extends WindowTestsBase {
+         assertTrue(window.isOnScreen());
+         window.hide(false /* doAnimation */, false /* requestAnim */);
+         assertFalse(window.isOnScreen());
++        verify(mTransaction).hide(window.mSurfaceControl);
++        clearInvocations(mTransaction);
+ 
+         // Verifies that a window without animation can be hidden even if its parent is animating.
+         window.show(false /* doAnimation */, false /* requestAnim */);
+         assertTrue(window.isVisibleByPolicy());
++        verify(mTransaction).show(window.mSurfaceControl);
+         window.getParent().startAnimation(mTransaction, mock(AnimationAdapter.class),
+                 false /* hidden */, SurfaceAnimator.ANIMATION_TYPE_TOKEN_TRANSFORM);
+         window.mAttrs.windowAnimations = 0;
+-- 
+2.53.0
+

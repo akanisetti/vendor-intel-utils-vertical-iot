@@ -1,0 +1,138 @@
+From e3272e51e0c83cdffb79d17a81c5f254dbfd91d4 Mon Sep 17 00:00:00 2001
+From: Bhavuk Garg <bhavukgarg@google.com>
+Date: Mon, 2 Feb 2026 10:33:09 +0000
+Subject: [PATCH 1/2] Fix size check bypass for case-mismatched columns
+
+The size enforcement logic in applySimpleFieldMaxSize previously relied
+on exact string matching. This CL adds case-insensitive key resolution
+to ensure that inputs like "DaTa1" are correctly truncated to the
+maximum allowed size, preventing oversized data from bypassing checks
+
+Bug: 414389102
+Flag: EXEMPT CVE_FIX
+Test: atest ContactsProviderTests
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:a191ae10a38ba55f76fe54a84ec153bf74e672c7
+Merged-In: I91a2a7263f4017affcf5ed2f9da43bf2df9c1d8d
+Change-Id: I91a2a7263f4017affcf5ed2f9da43bf2df9c1d8d
+---
+ .../providers/contacts/DataRowHandler.java    | 25 ++++++++-
+ .../contacts/ContactsProvider2Test.java       | 56 ++++++++++++++++++-
+ 2 files changed, 78 insertions(+), 3 deletions(-)
+
+diff --git a/src/com/android/providers/contacts/DataRowHandler.java b/src/com/android/providers/contacts/DataRowHandler.java
+index b9becf16..6474c241 100644
+--- a/src/com/android/providers/contacts/DataRowHandler.java
++++ b/src/com/android/providers/contacts/DataRowHandler.java
+@@ -445,11 +445,34 @@ public abstract class DataRowHandler {
+ 
+     protected static void applySimpleFieldMaxSize(ContentValues cv, String column) {
+         final int maxSize = ContactsDatabaseHelper.getSimpleFieldMaxSize();
+-        String v = cv.getAsString(column);
++        String key = findKey(cv, column);
++        String v = cv.getAsString(key);
+         if (v == null || v.length() <= maxSize) {
+             return;
+         }
+         Log.w(TAG, "Truncating field " + column + ": length=" + v.length() + " max=" + maxSize);
+         cv.put(column, v.substring(0, maxSize));
+     }
++
++    /**
++     * Returns the key from {@code cv} matching {@code column}, ignoring case.
++     *
++     * <p>Examples:
++     * <ul>
++     * <li>{@code findKey({"data1": "v"}, "data1")} &rarr; "data1"
++     * <li>{@code findKey({"DaTa1": "v"}, "data1")} &rarr; "DaTa1"
++     * <li>{@code findKey({}, "data1")} &rarr; "data1"
++     * </ul>
++     */
++    private static String findKey(ContentValues cv, String column) {
++        if (cv.containsKey(column)) {
++            return column;
++        }
++        for (String key : cv.keySet()) {
++            if (key.equalsIgnoreCase(column)) {
++                return key;
++            }
++        }
++        return column;
++    }
+ }
+diff --git a/tests/src/com/android/providers/contacts/ContactsProvider2Test.java b/tests/src/com/android/providers/contacts/ContactsProvider2Test.java
+index 59f37771..b98b266b 100644
+--- a/tests/src/com/android/providers/contacts/ContactsProvider2Test.java
++++ b/tests/src/com/android/providers/contacts/ContactsProvider2Test.java
+@@ -164,8 +164,6 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
+ 
+     private int mOldMinMatch1;
+     private int mOldMinMatch2;
+-
+-    ContactsDatabaseHelper mMockContactsDatabaseHelper;
+     private ContactsProvider2 mContactsProvider2;
+     private ContactsDatabaseHelper mDbHelper;
+     private BroadcastReceiver mBroadcastReceiver;
+@@ -1481,6 +1479,60 @@ public class ContactsProvider2Test extends BaseContactsProvider2Test {
+         assertNetworkNotified(true);
+     }
+ 
++    @Test
++    public void testUpdateFailsWithOnlyCaseMismatchedColumn() {
++        long rawContactId = RawContactUtil.createRawContactWithName(mResolver, "John", "Doe");
++        Uri nameUri = DataUtil.insertStructuredName(mResolver, rawContactId, "Jane", "Smith");
++
++        ContentValues values = new ContentValues();
++        values.put("daTa1", "New Display Name"); // "data1" is the correct case but we used "daTa1"
++        int updateCount = mResolver.update(nameUri, values, null, null);
++
++        // Verify the update was rejected.
++        assertEquals(0, updateCount);
++        assertStoredValue(nameUri, Data.DATA1, "Jane Smith");
++    }
++
++    @Test
++    public void testUpdateSucceedsWithAtLeastOneCaseSensitiveColumn() {
++        long rawContactId = RawContactUtil.createRawContactWithName(mResolver, "John", "Doe");
++        Uri nameUri = DataUtil.insertStructuredName(mResolver, rawContactId, "Jane", "Smith");
++
++        ContentValues values = new ContentValues();
++        values.put("daTa1", "New Display Name"); // Mismatched case
++        values.put("data14", "Some Data");      // Exact case match
++        int updateCount = mResolver.update(nameUri, values, null, null);
++
++        assertEquals(1, updateCount);
++        // Verify both values were updated, including the one with the case-mismatched key.
++        assertStoredValue(nameUri, Data.DATA1, "New Display Name");
++        assertStoredValue(nameUri, Data.DATA14, "Some Data");
++    }
++
++
++    @Test
++    public void testCaseMismatchingFieldUpdatesAreTruncatedToMaxSize() {
++        int maxSize = ContactsDatabaseHelper.getSimpleFieldMaxSize();
++        String tooLong = "D".repeat(maxSize + 100);
++        String expectedTruncated = tooLong.substring(0, maxSize);
++
++        String[] columnVariants = new String[] { "data1", "daTa1", "DATA1", "Data1" };
++
++        for (String column : columnVariants) {
++            long rawContactId = RawContactUtil.createRawContactWithName(mResolver, "John", "Doe");
++            Uri nameUri = DataUtil.insertStructuredName(mResolver, rawContactId, "Jane", "Smith");
++
++            ContentValues values = new ContentValues();
++            values.put(column, tooLong);
++            // At least one case sensitive column match is required for successful update
++            values.put("data14", "Sample Data");
++            mResolver.update(nameUri, values, null, null);
++
++            // Verify data1 was updated and truncated to maxSize
++            assertStoredValue(nameUri, Data.DATA1, expectedTruncated);
++        }
++    }
++
+     @Test
+     public void testDataInsertAndUpdateHashId() {
+         long rawContactId = RawContactUtil.createRawContactWithName(mResolver, "John", "Doe");
+-- 
+2.53.0
+

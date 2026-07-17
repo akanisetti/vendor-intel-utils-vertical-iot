@@ -1,0 +1,38 @@
+From 22e2f26e86d83ec56c2e76763da16c193d70aa72 Mon Sep 17 00:00:00 2001
+From: Basil Chew <basil.chew@intel.com>
+Date: Mon, 6 Jul 2026 06:44:42 +0000
+Subject: [PATCH] Spectre Module Silently Fails Without IBRS Support
+
+Change:
+- added panic on boot if Spectre v2 mitigation unavailable on vulnerable CPU
+
+Tracked-On: NIACP3-1463
+Signed-off-by: Basil Chew <basil.chew@intel.com>
+---
+ arch/x86/kernel/cpu/bugs.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/arch/x86/kernel/cpu/bugs.c b/arch/x86/kernel/cpu/bugs.c
+index 939401b5d2ef..9c2ffda5d944 100644
+--- a/arch/x86/kernel/cpu/bugs.c
++++ b/arch/x86/kernel/cpu/bugs.c
+@@ -1717,6 +1717,7 @@ static enum spectre_v2_mitigation __init spectre_v2_select_retpoline(void)
+ {
+ 	if (!IS_ENABLED(CONFIG_MITIGATION_RETPOLINE)) {
+ 		pr_err("Kernel not compiled with retpoline; no mitigation available!");
++		panic("Spectre v2: no mitigation available on vulnerable CPU");
+ 		return SPECTRE_V2_NONE;
+ 	}
+ 
+@@ -1983,6 +1984,8 @@ static void __init spectre_v2_select_mitigation(void)
+ 		bhi_select_mitigation();
+ 
+ 	spectre_v2_enabled = mode;
++	if (mode == SPECTRE_V2_NONE && boot_cpu_has_bug(X86_BUG_SPECTRE_V2))
++		panic("Spectre v2: no mitigation available on vulnerable CPU");
+ 	pr_info("%s\n", spectre_v2_strings[mode]);
+ 
+ 	/*
+-- 
+2.34.1
+

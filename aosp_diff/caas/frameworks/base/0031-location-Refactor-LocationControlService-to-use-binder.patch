@@ -1,0 +1,143 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Suresh, Prashanth <prashanth.suresh@intel.com>
+Date: Mon, 29 Jun 2026 00:00:00 +0000
+Subject: [PATCH] location: refactor LocationControlService to update location via ILocationHal binder
+
+Remove direct vendor data-file writes from LocationControlService.
+Writing /data/vendor/location/location.conf from system_server violates
+the core/vendor data-separation neverallow in system/sepolicy/domain.te.
+
+Instead, route the setLocation() call through LocationHalWrapper which
+holds the ILocationHal binder stub. The vendor HAL then owns all writes
+to its own data partition, keeping SELinux boundaries clean.
+
+Changes:
+- LocationControlService: remove writeConfig(), CONFIG_PATH, TAG, and
+  all java.io imports; delegate to mHalWrapper.setLocation()
+- LocationHalWrapper: add setLocation() that forwards to the HAL binder
+
+Tracked-On: NIACP3-1182
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ .../server/location/LocationControlService.java    | 56 +---------------------
+ .../server/location/LocationHalWrapper.java        |  9 ++++
+ 2 files changed, 11 insertions(+), 54 deletions(-)
+diff --git a/services/core/java/com/android/server/location/LocationControlService.java b/services/core/java/com/android/server/location/LocationControlService.java
+index d68d0710acb8..b309e76a9506 100644
+--- a/services/core/java/com/android/server/location/LocationControlService.java
++++ b/services/core/java/com/android/server/location/LocationControlService.java
+@@ -18,7 +18,6 @@ package com.android.server.location;
+ 
+ import android.Manifest;
+ import android.content.Context;
+-import android.util.Log;
+ 
+ import com.android.server.LocalServices;
+ import com.android.server.SystemService;
+@@ -26,12 +25,6 @@ import com.android.server.location.provider.StaticLocationProvider;
+ 
+ import android.location.ILocationControlService;
+ 
+-import java.io.File;
+-import java.io.FileOutputStream;
+-import java.io.IOException;
+-import java.io.OutputStreamWriter;
+-import java.nio.charset.StandardCharsets;
+-
+ /**
+  * Service for controlling static location provider.
+  * Allows system/privileged apps to update the location.
+@@ -40,10 +33,9 @@ import java.nio.charset.StandardCharsets;
+  */
+ public final class LocationControlService extends SystemService {
+ 
+-    private static final String TAG = "LocationControlService";
+     private static final String SERVICE_NAME = "location_control";
+-    private static final String CONFIG_PATH = "/data/vendor/location/location.conf";
+ 
++    private final LocationHalWrapper mHalWrapper = new LocationHalWrapper();
+     private StaticLocationProvider mStaticLocationProvider;
+ 
+     public LocationControlService(Context context) {
+@@ -83,7 +75,7 @@ public final class LocationControlService extends SystemService {
+ 
+             validateCoordinates(lat, lon);
+ 
+-            writeConfig(lat, lon);
++            mHalWrapper.setLocation(lat, lon);
+ 
+             StaticLocationProvider provider = getStaticLocationProvider();
+             if (provider != null) {
+@@ -106,49 +98,5 @@ public final class LocationControlService extends SystemService {
+                         "Longitude out of range [-180.0, 180.0]: " + lon);
+             }
+         }
+-
+-        private void writeConfig(double lat, double lon) {
+-            FileOutputStream fos = null;
+-            OutputStreamWriter writer = null;
+-
+-            try {
+-                File configFile = new File(CONFIG_PATH);
+-                File parentDir = configFile.getParentFile();
+-                if (parentDir == null) {
+-                    throw new IOException("Config path has no parent directory: " + CONFIG_PATH);
+-                }
+-                if (!parentDir.exists()) {
+-                    throw new IOException("Missing config parent directory: "
+-                            + parentDir + ". It must be created and SELinux-labeled by init or "
+-                            + "the HAL before LocationControlService writes the config");
+-                }
+-                if (!parentDir.isDirectory()) {
+-                    throw new IOException("Config parent path is not a directory: " + parentDir);
+-                }
+-
+-                fos = new FileOutputStream(configFile, false);
+-                writer = new OutputStreamWriter(fos, StandardCharsets.UTF_8);
+-
+-                writer.write("lat=" + lat + "\n");
+-                writer.write("lon=" + lon + "\n");
+-
+-                writer.flush();
+-                fos.flush();
+-                fos.getFD().sync();
+-
+-                Log.d(TAG, "Wrote location config");
+-            } catch (IOException e) {
+-                Log.e(TAG, "Failed to write location config", e);
+-            } finally {
+-                try {
+-                    if (writer != null) {
+-                        writer.close();
+-                    } else if (fos != null) {
+-                        fos.close();
+-                    }
+-                } catch (IOException ignored) {
+-                }
+-            }
+-        }
+     }
+ }
+diff --git a/services/core/java/com/android/server/location/LocationHalWrapper.java b/services/core/java/com/android/server/location/LocationHalWrapper.java
+index 534c271b48e0..bc109595d439 100644
+--- a/services/core/java/com/android/server/location/LocationHalWrapper.java
++++ b/services/core/java/com/android/server/location/LocationHalWrapper.java
+@@ -47,6 +47,15 @@ public final class LocationHalWrapper {
+         return getHal().getLongitude();
+     }
+ 
++    /**
++     * Asks the vendor HAL to persist a new static location. The HAL owns the
++     * vendor data store, so the framework never writes vendor data files itself.
++     */
++    public void setLocation(double latitudeDegrees, double longitudeDegrees)
++            throws RemoteException {
++        getHal().setLocation(latitudeDegrees, longitudeDegrees);
++    }
++
+     private ILocationHal getHal() throws RemoteException {
+         if (mHal == null) {
+             final IBinder binder = ServiceManager.waitForService(HAL_SERVICE);
+
+-- 
+2.34.1

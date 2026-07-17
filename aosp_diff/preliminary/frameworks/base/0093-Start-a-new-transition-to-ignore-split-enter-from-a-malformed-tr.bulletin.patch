@@ -1,0 +1,310 @@
+From b6bcbca18c0b025a584aa3fc59f9f860299fa614 Mon Sep 17 00:00:00 2001
+From: Winson Chung <winsonc@google.com>
+Date: Mon, 10 Nov 2025 23:30:25 +0000
+Subject: [PATCH 17/38] Start a new transition to ignore split-enter from a
+ malformed transition
+
+- If two tasks are started in immediately one after the other in order
+  with the latter being an adjacent launch, the launch of the two tasks
+  can end up in the same transition but the transition request will
+  report the first task launch as the trigger task. As a result,
+  StageCoordinator will not be resolved as the handler for the
+  transition and the enter transition not play correctly (falling
+  through the default transition handler which only shows the adjacent
+  task without being in split).
+
+  If we detect this rare edge case, we instead restore the adjacent task
+  to the TaskDisplayArea instead of treating it as an adjacent launch.
+
+Bug: 405392600
+Flag: EXEMPT bugfix
+Test: atest SplitTransitionUtilsTests
+Test: Manual, with test app from b/405392600
+Change-Id: I88f43913431c5be8ca736c1bd074804a2c9f61fe
+(cherry picked from commit 3be8f7ff61baa3a98320de393a94735aecc6e77c)
+---
+ .../common/split/SplitTransitionUtils.java    |  80 ++++++++++
+ .../shell/splitscreen/StageCoordinator.java   |  17 +-
+ .../SplitTransitionUtilsTests.java            | 147 ++++++++++++++++++
+ 3 files changed, 240 insertions(+), 4 deletions(-)
+ create mode 100644 libs/WindowManager/Shell/src/com/android/wm/shell/common/split/SplitTransitionUtils.java
+ create mode 100644 libs/WindowManager/Shell/tests/unittest/src/com/android/wm/shell/splitscreen/SplitTransitionUtilsTests.java
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/common/split/SplitTransitionUtils.java b/libs/WindowManager/Shell/src/com/android/wm/shell/common/split/SplitTransitionUtils.java
+new file mode 100644
+index 000000000000..dbbe0e07c244
+--- /dev/null
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/common/split/SplitTransitionUtils.java
+@@ -0,0 +1,80 @@
++/*
++ * Copyright (C) 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.wm.shell.common.split;
++
++import static com.android.wm.shell.protolog.ShellProtoLogGroup.WM_SHELL_SPLIT_SCREEN;
++import static com.android.wm.shell.shared.TransitionUtil.isOpeningMode;
++
++import android.annotation.NonNull;
++import android.annotation.Nullable;
++import android.app.ActivityManager;
++import android.window.TransitionInfo;
++import android.window.WindowContainerTransaction;
++
++import com.android.internal.protolog.ProtoLog;
++import com.android.wm.shell.splitscreen.StageTaskListener;
++
++import java.util.ArrayList;
++import java.util.HashSet;
++import java.util.function.Function;
++
++public class SplitTransitionUtils {
++    /**
++     * Returns a WCT to apply if the provided transition contains only a partial set of tasks
++     * necessary to probably create a split pair, and try to clean up the broken state by
++     * reparenting the split tasks back into the TaskDisplayArea.
++     */
++    @Nullable
++    public static WindowContainerTransaction handleMalformedEnterTransition(
++            @NonNull TransitionInfo info,
++            @NonNull Function<ActivityManager.RunningTaskInfo, StageTaskListener> stageResolver) {
++        // Extract the leaf split tasks in the transition
++        final ArrayList<ActivityManager.RunningTaskInfo> leafSplitTasks = new ArrayList<>();
++        final HashSet<StageTaskListener> parentStages = new HashSet<>();
++        for (int i = 0; i < info.getChanges().size(); i++) {
++            final TransitionInfo.Change change = info.getChanges().get(i);
++            final ActivityManager.RunningTaskInfo taskInfo = change.getTaskInfo();
++            final StageTaskListener stage = taskInfo != null
++                    ? stageResolver.apply(taskInfo)
++                    : null;
++            if (stage == null || !isOpeningMode(change.getMode())) {
++                // Is non-task or the task is not opening or related to split
++                continue;
++            }
++            parentStages.add(stage);
++            leafSplitTasks.add(taskInfo);
++        }
++
++        // In all cases, we consider an enter split transition malformed if it doesn't have tasks
++        // for at least 2 stages
++        final boolean isMalformedEnterTransition = !leafSplitTasks.isEmpty()
++                && (parentStages.size() <= 1);
++        if (!isMalformedEnterTransition) {
++            return null;
++        }
++
++        // We have a malformed enter transition, restore the state for now by reparenting the task
++        // back to the TDA.
++        ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "Malformed enter transition=%d detected",
++                info.getDebugId());
++        WindowContainerTransaction wct = new WindowContainerTransaction();
++        for (int i = 0; i < leafSplitTasks.size(); i++) {
++            wct.reparent(leafSplitTasks.get(i).token, null /* parent */,
++                    true /* onTop */);
++        }
++        return wct;
++    }
++}
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/splitscreen/StageCoordinator.java b/libs/WindowManager/Shell/src/com/android/wm/shell/splitscreen/StageCoordinator.java
+index d240aca522bb..6837351ce720 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/splitscreen/StageCoordinator.java
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/splitscreen/StageCoordinator.java
+@@ -152,6 +152,7 @@ import com.android.wm.shell.common.split.OffscreenTouchZone;
+ import com.android.wm.shell.common.split.SplitDecorManager;
+ import com.android.wm.shell.common.split.SplitLayout;
+ import com.android.wm.shell.common.split.SplitState;
++import com.android.wm.shell.common.split.SplitTransitionUtils;
+ import com.android.wm.shell.common.split.SplitWindowManager;
+ import com.android.wm.shell.desktopmode.DesktopTasksController;
+ import com.android.wm.shell.protolog.ShellProtoLogGroup;
+@@ -3097,11 +3098,19 @@ public class StageCoordinator implements SplitLayout.SplitLayoutHandler,
+             @NonNull Transitions.TransitionFinishCallback finishCallback) {
+         if (!mSplitTransitions.isPendingTransition(transition)) {
+             // Not entering or exiting, so just do some house-keeping and validation.
++            ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "startAnimation: transition=%d isSplitActive=%b",
++                    info.getDebugId(), isSplitActive());
++
++            if (!isSplitActive()) {
++                final WindowContainerTransaction wct =
++                        SplitTransitionUtils.handleMalformedEnterTransition(info,
++                                (taskInfo) -> getStageOfTask(taskInfo));
++                if (wct != null) {
++                    mTransitions.startTransition(TRANSIT_CLOSE, wct, null);
++                }
++                return false;
++            }
+ 
+-            // If we're not in split-mode, just abort so something else can handle it.
+-            if (!isSplitActive()) return false;
+-
+-            ProtoLog.d(WM_SHELL_SPLIT_SCREEN, "startAnimation: transition=%d", info.getDebugId());
+             mSplitLayout.setFreezeDividerWindow(false);
+             final StageChangeRecord record = new StageChangeRecord();
+             final int transitType = info.getType();
+diff --git a/libs/WindowManager/Shell/tests/unittest/src/com/android/wm/shell/splitscreen/SplitTransitionUtilsTests.java b/libs/WindowManager/Shell/tests/unittest/src/com/android/wm/shell/splitscreen/SplitTransitionUtilsTests.java
+new file mode 100644
+index 000000000000..d05864b56692
+--- /dev/null
++++ b/libs/WindowManager/Shell/tests/unittest/src/com/android/wm/shell/splitscreen/SplitTransitionUtilsTests.java
+@@ -0,0 +1,147 @@
++/*
++ * Copyright (C) 2025 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.wm.shell.splitscreen;
++
++import static android.view.WindowManager.TRANSIT_OPEN;
++
++import static org.junit.Assert.assertNotNull;
++import static org.junit.Assert.assertNull;
++import static org.mockito.Mockito.mock;
++
++import android.app.ActivityManager;
++import android.view.SurfaceControl;
++import android.window.TransitionInfo;
++import android.window.WindowContainerToken;
++import android.window.WindowContainerTransaction;
++
++import androidx.test.ext.junit.runners.AndroidJUnit4;
++import androidx.test.filters.SmallTest;
++
++import com.android.wm.shell.ShellTestCase;
++import com.android.wm.shell.common.split.SplitTransitionUtils;
++
++import org.junit.Before;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.mockito.Mock;
++import org.mockito.MockitoAnnotations;
++
++import java.util.function.Function;
++
++/** Tests for {@link SplitTransitionUtils} */
++@SmallTest
++@RunWith(AndroidJUnit4.class)
++public class SplitTransitionUtilsTests extends ShellTestCase {
++
++    @Mock
++    private StageTaskListener mStage1;
++    @Mock
++    private StageTaskListener mStage2;
++    @Mock
++    private WindowContainerToken mToken;
++
++    private ActivityManager.RunningTaskInfo mTaskInfo1;
++    private ActivityManager.RunningTaskInfo mTaskInfo2;
++
++    @Before
++    public void setUp() {
++        MockitoAnnotations.initMocks(this);
++        mTaskInfo1 = new ActivityManager.RunningTaskInfo();
++        mTaskInfo1.token = mToken;
++        mTaskInfo2 = new ActivityManager.RunningTaskInfo();
++        mTaskInfo2.token = mToken;
++    }
++
++    @Test
++    public void testHandleMalformedEnterTransition_notMalformed() {
++        TransitionInfo info = new TransitionInfo(TRANSIT_OPEN, 0);
++        info.addChange(new TransitionInfo.Change(mToken, mock(SurfaceControl.class)));
++        info.getChange(mToken).setTaskInfo(mTaskInfo1);
++        info.addChange(new TransitionInfo.Change(mToken, mock(SurfaceControl.class)));
++        info.getChange(mToken).setTaskInfo(mTaskInfo2);
++
++        Function<ActivityManager.RunningTaskInfo, StageTaskListener> stageResolver = (taskInfo) -> {
++            if (taskInfo == mTaskInfo1) {
++                return mStage1;
++            } else {
++                return mStage2;
++            }
++        };
++
++        WindowContainerTransaction wct = SplitTransitionUtils.handleMalformedEnterTransition(info,
++                stageResolver);
++        assertNull(wct);
++    }
++
++    @Test
++    public void testHandleMalformedEnterTransition_oneStage() {
++        TransitionInfo info = new TransitionInfo(TRANSIT_OPEN, 0);
++        TransitionInfo.Change chg = new TransitionInfo.Change(mToken, mock(SurfaceControl.class));
++        chg.setMode(TRANSIT_OPEN);
++        chg.setTaskInfo(mTaskInfo1);
++        info.addChange(chg);
++
++        Function<ActivityManager.RunningTaskInfo, StageTaskListener> stageResolver =
++                (taskInfo) -> mStage1;
++
++        WindowContainerTransaction wct = SplitTransitionUtils.handleMalformedEnterTransition(info,
++                stageResolver);
++        assertNotNull(wct);
++    }
++
++    @Test
++    public void testHandleMalformedEnterTransition_noStages() {
++        TransitionInfo info = new TransitionInfo(TRANSIT_OPEN, 0);
++        info.addChange(new TransitionInfo.Change(mToken, mock(SurfaceControl.class)));
++        info.getChange(mToken).setTaskInfo(mTaskInfo1);
++
++        Function<ActivityManager.RunningTaskInfo, StageTaskListener> stageResolver =
++                (taskInfo) -> null;
++
++        WindowContainerTransaction wct = SplitTransitionUtils.handleMalformedEnterTransition(info,
++                stageResolver);
++        assertNull(wct);
++    }
++
++    @Test
++    public void testHandleMalformedEnterTransition_nonOpeningTask() {
++        TransitionInfo info = new TransitionInfo(TRANSIT_OPEN, 0);
++        info.addChange(new TransitionInfo.Change(mToken, mock(SurfaceControl.class)));
++        info.getChange(mToken).setTaskInfo(mTaskInfo1);
++        info.getChange(mToken).setMode(TRANSIT_OPEN + 1);
++
++        Function<ActivityManager.RunningTaskInfo, StageTaskListener> stageResolver =
++                (taskInfo) -> mStage1;
++
++        WindowContainerTransaction wct = SplitTransitionUtils.handleMalformedEnterTransition(info,
++                stageResolver);
++        assertNull(wct);
++    }
++
++    @Test
++    public void testHandleMalformedEnterTransition_nullTaskInfo() {
++        TransitionInfo info = new TransitionInfo(TRANSIT_OPEN, 0);
++        info.addChange(new TransitionInfo.Change(mToken, mock(SurfaceControl.class)));
++
++        Function<ActivityManager.RunningTaskInfo, StageTaskListener> stageResolver =
++                (taskInfo) -> mStage1;
++
++        WindowContainerTransaction wct = SplitTransitionUtils.handleMalformedEnterTransition(info,
++                stageResolver);
++        assertNull(wct);
++    }
++}
+-- 
+2.53.0
+

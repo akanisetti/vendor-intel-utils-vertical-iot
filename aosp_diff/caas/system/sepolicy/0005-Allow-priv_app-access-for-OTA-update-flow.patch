@@ -1,0 +1,45 @@
+From 488007f8ab959bcffb7ece71976da6684d704ae4 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 29 May 2026 13:28:20 +0000
+Subject: [PATCH] Allow priv_app access for OTA update flow
+
+Grant priv_app access to update_engine services and /data/ota_package so
+SystemUpdaterSample can stage and apply OTA packages on user builds.
+
+Tracked-On: NIACP3-1352
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ private/priv_app.te | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/private/priv_app.te b/private/priv_app.te
+index 1ef5be156..d99d6c93b 100644
+--- a/private/priv_app.te
++++ b/private/priv_app.te
+@@ -49,14 +49,23 @@ allow priv_app oem_lock_service:service_manager find;
+ allow priv_app persistent_data_block_service:service_manager find;
+ allow priv_app radio_service:service_manager find;
+ allow priv_app recovery_service:service_manager find;
++allow priv_app update_engine_service:service_manager find;
++allow priv_app update_engine_stable_service:service_manager find;
+ allow priv_app stats_service:service_manager find;
+ 
++# Allow binder communication with update_engine
++binder_call(priv_app, update_engine)
++
+ # Write to /cache.
+ allow priv_app { cache_file cache_recovery_file }:dir create_dir_perms;
+ allow priv_app { cache_file cache_recovery_file }:file create_file_perms;
+ # /cache is a symlink to /data/cache on some devices. Allow reading the link.
+ allow priv_app cache_file:lnk_file r_file_perms;
+ 
++# Write to /data/ota_package for OTA packages.
++allow priv_app ota_package_file:dir create_dir_perms;
++allow priv_app ota_package_file:file create_file_perms;
++
+ # Access to /data/media.
+ allow priv_app media_rw_data_file:dir create_dir_perms;
+ allow priv_app media_rw_data_file:file create_file_perms;
+-- 
+2.34.1
+

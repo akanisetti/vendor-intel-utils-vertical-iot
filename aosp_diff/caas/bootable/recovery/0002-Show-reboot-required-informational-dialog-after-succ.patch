@@ -1,0 +1,80 @@
+From b0bec81abfbdf902edae5acf9fcd9dabba6e00e5 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Mon, 8 Jun 2026 18:29:32 +0000
+Subject: [PATCH] Show reboot-required informational dialog after successful
+ OTA
+
+- Adds a reboot-required informational dialog when update_engine reaches
+  successful completion.
+- Ensures dialog appears reliably across completion and resume paths.
+- Removes any in-app reboot action from dialog to keep reboot manual.
+
+Tracked-On: NIACP3-1352
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ .../systemupdatersample/ui/MainActivity.java  | 28 +++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/updater_sample/src/com/example/android/systemupdatersample/ui/MainActivity.java b/updater_sample/src/com/example/android/systemupdatersample/ui/MainActivity.java
+index e10e18ad..9b6c2f32 100644
+--- a/updater_sample/src/com/example/android/systemupdatersample/ui/MainActivity.java
++++ b/updater_sample/src/com/example/android/systemupdatersample/ui/MainActivity.java
+@@ -65,6 +65,7 @@ public class MainActivity extends Activity {
+     private TextView mTextViewEngineErrorCode;
+     private TextView mTextViewUpdateInfo;
+     private Button mButtonSwitchSlot;
++    private boolean mRebootDialogShown;
+ 
+     private List<UpdateConfig> mConfigs;
+ 
+@@ -119,6 +120,10 @@ public class MainActivity extends Activity {
+         // Binding to UpdateEngine invokes onStatusUpdate callback,
+         // persisted updater state has to be loaded and prepared beforehand.
+         this.mUpdateManager.bind();
++
++        if (mUpdateManager.getUpdaterState() == UpdaterState.REBOOT_REQUIRED) {
++            maybeShowRebootRequiredDialog();
++        }
+     }
+ 
+     @Override
+@@ -350,6 +355,11 @@ public class MainActivity extends Activity {
+                         + " " + completionState);
+         runOnUiThread(() -> {
+             setUiEngineErrorCode(errorCode);
++            if (UpdateEngineErrorCodes.isUpdateSucceeded(errorCode)
++                    && mUpdateManager != null
++                    && mUpdateManager.getUpdaterState() == UpdaterState.REBOOT_REQUIRED) {
++                maybeShowRebootRequiredDialog();
++            }
+         });
+     }
+ 
+@@ -427,6 +437,24 @@ public class MainActivity extends Activity {
+     private void uiStateRebootRequired() {
+         uiResetWidgets();
+         mButtonReset.setEnabled(true);
++        maybeShowRebootRequiredDialog();
++    }
++
++    private void maybeShowRebootRequiredDialog() {
++        if (mRebootDialogShown || isFinishing()
++                || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed())) {
++            return;
++        }
++        mRebootDialogShown = true;
++        new AlertDialog.Builder(this)
++                .setTitle("Update Complete")
++                .setMessage("Update has been successfully applied.\n\n"
++                        + "A manual reboot is required to complete the update and make image files "
++                        + "take effect.")
++                .setIcon(android.R.drawable.ic_dialog_info)
++                .setPositiveButton(android.R.string.ok, (dialog, which) -> dialog.dismiss())
++                .setOnDismissListener(dialog -> mRebootDialogShown = false)
++                .show();
+     }
+ 
+     private void uiStateEngineUnavailable() {
+-- 
+2.34.1
+

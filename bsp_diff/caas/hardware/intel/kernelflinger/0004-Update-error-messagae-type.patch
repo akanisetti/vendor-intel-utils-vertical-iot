@@ -1,0 +1,48 @@
+From 084b54c38a6b20c1ec8d08c7a52c9290617545d3 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Mon, 13 Jul 2026 15:09:49 +0000
+Subject: [PATCH] Update error message type
+
+Update error message type from error to info for:
+- "Error while trying to read the reboot reason"
+- "Failed to read file" when the file is Not Found (e.g. userdata.img
+  during signed image flashing), which is expected and not an error.
+
+Tracked-On: NIACP3-1168
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ libkernelflinger/android.c    | 2 +-
+ libkernelflinger/uefi_utils.c | 4 +++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/libkernelflinger/android.c b/libkernelflinger/android.c
+index 1c0d839..5a73d55 100644
+--- a/libkernelflinger/android.c
++++ b/libkernelflinger/android.c
+@@ -901,7 +901,7 @@ static CHAR16 *get_boot_reason(void)
+         /* in case of an OS initiated reboot => get reason from efi var */
+         bootreason = get_reboot_reason();
+         if (!bootreason) {
+-                error(L"Error while trying to read the reboot reason");
++                info(L"Error while trying to read the reboot reason");
+                 bootreason = L"unknown";
+                 goto done;
+         }
+diff --git a/libkernelflinger/uefi_utils.c b/libkernelflinger/uefi_utils.c
+index c45ba28..d24b5ec 100644
+--- a/libkernelflinger/uefi_utils.c
++++ b/libkernelflinger/uefi_utils.c
+@@ -163,7 +163,9 @@ free_info:
+ close:
+ 	uefi_call_wrapper(file->Close, 1, file);
+ out:
+-	if (EFI_ERROR(ret))
++	if (ret == EFI_NOT_FOUND)
++		info(L"Failed to read file %s: %r", filename, ret);
++	else if (EFI_ERROR(ret))
+ 		efi_perror(ret, L"Failed to read file %s", filename);
+ 	return ret;
+ }
+-- 
+2.34.1
+

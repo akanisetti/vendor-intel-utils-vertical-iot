@@ -1,0 +1,46 @@
+From 631ea52cb90804db1c13ee7d719b0304f204bdc2 Mon Sep 17 00:00:00 2001
+From: Yuxin Hu <yuxinhu@google.com>
+Date: Tue, 11 Nov 2025 15:16:38 -0800
+Subject: [PATCH 2/9] Add a warning asking user to backup device data
+
+The "Experimental: Enable ANGLE" switch is aimed for dogfood users
+and developers to test ANGLE as the system driver. On a released
+commercial android device, user should not play around with the switch,
+as this can brick the device into unusable state and need a factory
+reset to fix. Add a warning to ask user to backup their device data
+so that they are aware of the potential risk, and if they do decide
+to toggle the switch, they can mitigate the risk by backing up their
+device data.
+
+This change should be backported to earlier Android release.
+
+Flag: EXEMPT BUGFIX
+Bug: b/270994705
+Bug: b/459639258
+Test: make, flash to Pixel 9
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:5d63abc7cb36b98b1e5e45472fdc83ccf26221fd
+Merged-In: I10501b6fdee67621151aa2b206586f2024a7f95e
+Change-Id: I10501b6fdee67621151aa2b206586f2024a7f95e
+---
+ res/values/strings.xml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index 0c5bedca93d..279f3d5bd03 100644
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -12298,9 +12298,9 @@ Data usage charges may apply.</string>
+     <!-- Debugging developer settings: enable angle as system driver? [CHAR LIMIT=50] -->
+     <string name="enable_angle_as_system_driver">Experimental: Enable ANGLE</string>
+     <!-- Debugging developer settings: enable angle as system driver summary [CHAR LIMIT=NONE] -->
+-    <string name="enable_angle_as_system_driver_summary">Warning: Enable ANGLE as default OpenGL ES driver. This feature is in experiment and may not be compatible with some camera and video apps.</string>
++    <string name="enable_angle_as_system_driver_summary">Warning: Enable ANGLE as default OpenGL ES driver. This feature is in experiment and may not be compatible with some camera and video apps. Please backup your device data before turning on the switch</string>
+     <!--Dialog body text used to explain a reboot is required after changing ANGLE as system GLES driver setting-->
+-    <string name="reboot_dialog_enable_angle_as_system_driver">A reboot is required to change the system OpenGL ES driver</string>
++    <string name="reboot_dialog_enable_angle_as_system_driver">A reboot is required to change the system OpenGL ES driver. Please back up your device data before rebooting. In case the reboot failed, you need a factory reset to restore the device</string>
+ 
+     <!-- Title for App Compatibility Changes dashboard where developers can configure per-app overrides for compatibility changes [CHAR LIMIT=50] -->
+     <string name="platform_compat_dashboard_title">App Compatibility Changes</string>
+-- 
+2.53.0
+

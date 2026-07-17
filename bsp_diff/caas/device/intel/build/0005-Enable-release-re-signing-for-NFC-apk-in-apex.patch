@@ -1,0 +1,33 @@
+From aadecbee34e22b41a3be0dc4fb7a5a99e73d4e2f Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Tue, 14 Jul 2026 07:32:47 +0000
+Subject: [PATCH] Enable release re-signing for NFC apk-in-apex
+
+Extend the release signing key mapping to include the NFC apk-in-apex
+(NfcNciApex.apk), aligning it with the release NFC certificate used for
+the platform SELinux mac_permissions. This keeps the NFC module's APK
+signature consistent with the other mainline modules (e.g. Bluetooth)
+during RELEASE_BUILD signing, so NFC starts with its intended SELinux
+domain on release-signed builds.
+
+Tracked-On: NIACP3-1486
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ tasks/flashfiles.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tasks/flashfiles.mk b/tasks/flashfiles.mk
+index a32c9aa..471e14f 100755
+--- a/tasks/flashfiles.mk
++++ b/tasks/flashfiles.mk
+@@ -130,6 +130,7 @@ $(BUILT_RELEASE_TARGET_FILES_PACKAGE):$(BUILT_TARGET_FILES_PACKAGE) sign_target_
+ 	--extra_apks             $(BUILT_APKS)=device/intel/build/testkeys/cts-release-test/apex \
+ 	--extra_apex_payload_key $(BUILT_APEXS)=device/intel/build/testkeys/cts-release-test/apex.pem \
+ 	--extra_apks             Bluetooth.apk=device/intel/build/testkeys/cts-release-test/bluetooth \
++	--extra_apks             NfcNciApex.apk=device/intel/build/testkeys/cts-release-test/nfc \
+ 	$(BUILT_TARGET_FILES_PACKAGE) $@
+ 
+ ifeq ($(SUPER_IMG_IN_FLASHZIP),true)
+-- 
+2.34.1
+

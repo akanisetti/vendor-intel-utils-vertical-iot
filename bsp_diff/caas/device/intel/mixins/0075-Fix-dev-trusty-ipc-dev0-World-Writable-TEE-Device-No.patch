@@ -1,0 +1,39 @@
+From 76deca0e251427613b037a709469d560dc68dc9b Mon Sep 17 00:00:00 2001
+From: Basil Chew <basil.chew@intel.com>
+Date: Thu, 2 Jul 2026 16:17:00 +0800
+Subject: [PATCH] =?UTF-8?q?Fix=20/dev/trusty-ipc-dev0=20=E2=80=94=20World-?=
+ =?UTF-8?q?Writable=20TEE=20Device=20Node?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Change:
+- restricted TEE IPC device node to authorized system and DRM processes only
+
+Tracked-On: NIACP3-1462
+Signed-off-by: Basil Chew <basil.chew@intel.com>
+---
+ groups/tee/trusty/init.rc    | 1 -
+ groups/tee/trusty/ueventd.rc | 2 +-
+ 2 files changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/groups/tee/trusty/init.rc b/groups/tee/trusty/init.rc
+index e2fe05cf..1aa3ed70 100644
+--- a/groups/tee/trusty/init.rc
++++ b/groups/tee/trusty/init.rc
+@@ -13,4 +13,3 @@ on post-fs
+     # Restore SELinux labels on teedata partition after formattable creates ext4
+     restorecon_recursive /mnt/vendor/persist
+     wait_for_prop vendor.modules.trusty.ready true
+-    chmod 666 /dev/trusty-ipc-dev0
+diff --git a/groups/tee/trusty/ueventd.rc b/groups/tee/trusty/ueventd.rc
+index cf2c813c..fcbc4fbe 100644
+--- a/groups/tee/trusty/ueventd.rc
++++ b/groups/tee/trusty/ueventd.rc
+@@ -1,2 +1,2 @@
+ /dev/block/p*/*/*/by-name/teedata      0660 root system
+-/dev/trusty-ipc-dev0                   0666 root root
++/dev/trusty-ipc-dev0                   0660 system drmrpc
+-- 
+2.35.3
+

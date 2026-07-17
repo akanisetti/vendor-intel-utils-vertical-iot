@@ -1,0 +1,28 @@
+From 0f5f31619e68b009b8ff71648a9cd22d559b2af3 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Tue, 7 Jul 2026 05:56:27 +0000
+Subject: [PATCH] Fix sepolicy for netd_integration_test
+
+Add missing sepolicy for NetdSELinuxTest#CheckProperMTULabels case on platforms whose Ethernet interfaces are exposed through the PCI paths under 0000:00:1c.0 and 0000:00:1c.7.
+
+Tracked-On: NIACP3-1474
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ ethernet/common/genfs_contexts | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/ethernet/common/genfs_contexts b/ethernet/common/genfs_contexts
+index dcb511b..0c489be 100644
+--- a/ethernet/common/genfs_contexts
++++ b/ethernet/common/genfs_contexts
+@@ -1,6 +1,8 @@
+ # /sys/class/net
+ genfscon sysfs /devices/pci0000:00/0000:00:13.2/0000:03:00.0/net u:object_r:sysfs_net:s0
+ genfscon sysfs /devices/pci0000:00/0000:00:13.1/0000:02:00.0/net u:object_r:sysfs_net:s0
++genfscon sysfs /devices/pci0000:00/0000:00:1c.0/0000:01:00.0/net u:object_r:sysfs_net:s0
++genfscon sysfs /devices/pci0000:00/0000:00:1c.7/0000:02:00.0/net u:object_r:sysfs_net:s0
+ genfscon sysfs /devices/pci0000:00/0000:00:04.0/net u:object_r:sysfs_net:s0
+ genfscon sysfs /devices/pci0000:00/0000:00:07.0/net u:object_r:sysfs_net:s0
+ genfscon sysfs /devices/pci0000:00/0000:00:0a.0/net u:object_r:sysfs_net:s0
+-- 
+2.34.1
