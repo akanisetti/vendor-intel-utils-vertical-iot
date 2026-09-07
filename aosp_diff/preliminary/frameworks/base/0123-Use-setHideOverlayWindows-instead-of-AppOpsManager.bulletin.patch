@@ -1,0 +1,381 @@
+From 328a2c2f1586c25ec2ee95af0750e6eea949009d Mon Sep 17 00:00:00 2001
+From: Charles Chen <charlesccchen@google.com>
+Date: Tue, 14 Apr 2026 23:48:09 -0700
+Subject: [PATCH] Use setHideOverlayWindows instead of AppOpsManager
+
+... to hide non-system overlay windows
+
+Previously, OverlayControl use AppOpsManager to control overlay show and hide.
+However it didn't stop overlay window showing again without
+SYSTEM_ALERT_WINDOW permission when the restrictions are released.
+
+This fix use Window#setHideOverlayWindows mechanism instead to prevent
+any non-system overlay window shown on top of the window.
+
+Test: presubmit
+Bug: 463364901
+Flag: EXEMPT bugfix
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:740cb9e8f2e4bafac209c865b3b304b0b4731d00
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:43c538b65f4d257628f3d5782fd296510a2baec0
+Merged-In: Id566caf9b1c39fd202dbbc3376cb2e7c48a4eac7
+Change-Id: Id566caf9b1c39fd202dbbc3376cb2e7c48a4eac7
+---
+ .../server/autofill/ui/AutoFillUI.java        |  8 +--
+ .../server/autofill/ui/DialogFillUi.java      | 28 +++------
+ .../android/server/autofill/ui/FillUi.java    | 18 +++---
+ .../server/autofill/ui/OverlayControl.java    | 57 -------------------
+ .../android/server/autofill/ui/SaveUi.java    | 33 ++++-------
+ 5 files changed, 30 insertions(+), 114 deletions(-)
+ delete mode 100644 services/autofill/java/com/android/server/autofill/ui/OverlayControl.java
+
+diff --git a/services/autofill/java/com/android/server/autofill/ui/AutoFillUI.java b/services/autofill/java/com/android/server/autofill/ui/AutoFillUI.java
+index 2446a6dfee89..2b5127bb612d 100644
+--- a/services/autofill/java/com/android/server/autofill/ui/AutoFillUI.java
++++ b/services/autofill/java/com/android/server/autofill/ui/AutoFillUI.java
+@@ -79,7 +79,6 @@ public final class AutoFillUI {
+ 
+     private final MetricsLogger mMetricsLogger = new MetricsLogger();
+ 
+-    private final @NonNull OverlayControl mOverlayControl;
+     private final @NonNull UiModeManagerInternal mUiModeMgr;
+ 
+     private @Nullable Runnable mCreateFillUiRunnable;
+@@ -107,7 +106,6 @@ public final class AutoFillUI {
+ 
+     public AutoFillUI(@NonNull Context context) {
+         mContext = context;
+-        mOverlayControl = new OverlayControl(context);
+         mUiModeMgr = LocalServices.getService(UiModeManagerInternal.class);
+     }
+ 
+@@ -230,7 +228,7 @@ public final class AutoFillUI {
+                 return;
+             }
+             hideAllUiThread(callback);
+-            mFillUi = new FillUi(context, response, focusedId, filterText, mOverlayControl,
++            mFillUi = new FillUi(context, response, focusedId, filterText,
+                     serviceLabel, serviceIcon, mUiModeMgr.isNightMode(), maxInputLengthForAutofill,
+                     new FillUi.Callback() {
+                 @Override
+@@ -363,7 +361,7 @@ public final class AutoFillUI {
+             hideAllUiThread(callback);
+             mSaveUiCallback = callback;
+             mSaveUi = new SaveUi(context, pendingSaveUi, serviceLabel, serviceIcon,
+-                    servicePackageName, componentName, info, valueFinder, mOverlayControl,
++                    servicePackageName, componentName, info, valueFinder,
+                     new SaveUi.OnSaveListener() {
+                 @Override
+                 public void onSave() {
+@@ -446,7 +444,7 @@ public final class AutoFillUI {
+             }
+             hideAllUiThread(callback);
+             mFillDialog = new DialogFillUi(mContext, response, focusedId, filterText,
+-                    serviceIcon, servicePackageName, componentName, mOverlayControl,
++                    serviceIcon, servicePackageName, componentName,
+                     mUiModeMgr.isNightMode(), new DialogFillUi.UiCallback() {
+                         @Override
+                         public void onResponsePicked(FillResponse response) {
+diff --git a/services/autofill/java/com/android/server/autofill/ui/DialogFillUi.java b/services/autofill/java/com/android/server/autofill/ui/DialogFillUi.java
+index c7b6be60dd3e..21b59a31c9bc 100644
+--- a/services/autofill/java/com/android/server/autofill/ui/DialogFillUi.java
++++ b/services/autofill/java/com/android/server/autofill/ui/DialogFillUi.java
+@@ -90,7 +90,6 @@ final class DialogFillUi {
+     }
+ 
+     private final @NonNull Dialog mDialog;
+-    private final @NonNull OverlayControl mOverlayControl;
+     private final String mServicePackageName;
+     private final ComponentName mComponentName;
+     private final int mThemeId;
+@@ -110,12 +109,11 @@ final class DialogFillUi {
+     DialogFillUi(@NonNull Context context, @NonNull FillResponse response,
+             @NonNull AutofillId focusedViewId, @Nullable String filterText,
+             @Nullable Drawable serviceIcon, @Nullable String servicePackageName,
+-            @Nullable ComponentName componentName, @NonNull OverlayControl overlayControl,
+-            boolean nightMode, @NonNull UiCallback callback) {
++            @Nullable ComponentName componentName, boolean nightMode,
++            @NonNull UiCallback callback) {
+         if (sVerbose) Slog.v(TAG, "nightMode: " + nightMode);
+         mThemeId = nightMode ? THEME_ID_DARK : THEME_ID_LIGHT;
+         mCallback = callback;
+-        mOverlayControl = overlayControl;
+         mServicePackageName = servicePackageName;
+         mComponentName = componentName;
+ 
+@@ -153,6 +151,7 @@ final class DialogFillUi {
+ 
+         mDialog = new Dialog(mContext, mThemeId);
+         mDialog.setContentView(decor);
++        mDialog.getWindow().setHideOverlayWindows(true);
+         setDialogParamsAsBottomSheet();
+         mDialog.setOnCancelListener((d) -> mCallback.onCanceled());
+         int datasetsShown = (mAdapter != null) ? mAdapter.getCount() : 0;
+@@ -395,7 +394,6 @@ final class DialogFillUi {
+     private void show() {
+         Slog.i(TAG, "Showing fill dialog");
+         mDialog.show();
+-        mOverlayControl.hideOverlays();
+     }
+ 
+     boolean isShowing() {
+@@ -404,23 +402,15 @@ final class DialogFillUi {
+ 
+     void hide() {
+         if (sVerbose) Slog.v(TAG, "Hiding fill dialog.");
+-        try {
+-            mDialog.hide();
+-        } finally {
+-            mOverlayControl.showOverlays();
+-        }
++        mDialog.hide();
+     }
+ 
+     void destroy() {
+-        try {
+-            if (sDebug) Slog.d(TAG, "destroy()");
+-            throwIfDestroyed();
+-
+-            mDialog.dismiss();
+-            mDestroyed = true;
+-        } finally {
+-            mOverlayControl.showOverlays();
+-        }
++        if (sDebug) Slog.d(TAG, "destroy()");
++        throwIfDestroyed();
++
++        mDialog.dismiss();
++        mDestroyed = true;
+     }
+ 
+     private void throwIfDestroyed() {
+diff --git a/services/autofill/java/com/android/server/autofill/ui/FillUi.java b/services/autofill/java/com/android/server/autofill/ui/FillUi.java
+index dc0b4b8c9083..e67a6c3447cd 100644
+--- a/services/autofill/java/com/android/server/autofill/ui/FillUi.java
++++ b/services/autofill/java/com/android/server/autofill/ui/FillUi.java
+@@ -16,6 +16,7 @@
+ package com.android.server.autofill.ui;
+ 
+ import static android.service.autofill.FillResponse.FLAG_CREDENTIAL_MANAGER_RESPONSE;
++import static android.view.WindowManager.LayoutParams.SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS;
+ 
+ import static com.android.server.autofill.Helper.paramsToString;
+ import static com.android.server.autofill.Helper.sDebug;
+@@ -150,9 +151,8 @@ final class FillUi {
+     @SuppressWarnings("AndroidFrameworkRequiresPermission")
+     FillUi(@NonNull Context context, @NonNull FillResponse response,
+             @NonNull AutofillId focusedViewId, @Nullable String filterText,
+-            @NonNull OverlayControl overlayControl, @NonNull CharSequence serviceLabel,
+-            @NonNull Drawable serviceIcon, boolean nightMode, int maxInputLengthForAutofill,
+-            @NonNull Callback callback) {
++            @NonNull CharSequence serviceLabel, @NonNull Drawable serviceIcon, boolean nightMode,
++            int maxInputLengthForAutofill, @NonNull Callback callback) {
+         if (sVerbose) {
+             Slogf.v(TAG, "nightMode: %b displayId: %d", nightMode, context.getDisplayId());
+         }
+@@ -281,7 +281,7 @@ final class FillUi {
+                 mContentHeight = content.getMeasuredHeight();
+             }
+ 
+-            mWindow = new AnchoredWindow(decor, overlayControl);
++            mWindow = new AnchoredWindow(decor);
+             requestShowFillUi();
+         } else {
+             final int datasetCount = response.getDatasets().size();
+@@ -406,7 +406,7 @@ final class FillUi {
+             }
+ 
+             applyNewFilterText();
+-            mWindow = new AnchoredWindow(decor, overlayControl);
++            mWindow = new AnchoredWindow(decor);
+         }
+     }
+ 
+@@ -735,7 +735,6 @@ final class FillUi {
+     }
+ 
+     final class AnchoredWindow {
+-        private final @NonNull OverlayControl mOverlayControl;
+         private final WindowManager mWm;
+         private final View mContentView;
+         private boolean mShowing;
+@@ -747,10 +746,9 @@ final class FillUi {
+          *
+          * @param contentView content of the window
+          */
+-        AnchoredWindow(View contentView, @NonNull OverlayControl overlayControl) {
++        AnchoredWindow(View contentView) {
+             mWm = contentView.getContext().getSystemService(WindowManager.class);
+             mContentView = contentView;
+-            mOverlayControl = overlayControl;
+         }
+ 
+         /**
+@@ -764,11 +762,11 @@ final class FillUi {
+             try {
+                 params.packageName = "android";
+                 params.setTitle("Autofill UI"); // Title is set for debugging purposes
++                params.privateFlags |= SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS;
+                 if (!mShowing) {
+                     params.accessibilityTitle = mContentView.getContext()
+                             .getString(R.string.autofill_picker_accessibility_title);
+                     mWm.addView(mContentView, params);
+-                    mOverlayControl.hideOverlays();
+                     mShowing = true;
+                     int numShownDatasets = (mAdapter == null) ? 0 : mAdapter.getCount();
+                     mCallback.onShown(numShownDatasets);
+@@ -808,8 +806,6 @@ final class FillUi {
+                 if (destroyCallbackOnError) {
+                     mCallback.onDestroy();
+                 }
+-            } finally {
+-                mOverlayControl.showOverlays();
+             }
+         }
+     }
+diff --git a/services/autofill/java/com/android/server/autofill/ui/OverlayControl.java b/services/autofill/java/com/android/server/autofill/ui/OverlayControl.java
+deleted file mode 100644
+index 49f4b538448e..000000000000
+--- a/services/autofill/java/com/android/server/autofill/ui/OverlayControl.java
++++ /dev/null
+@@ -1,57 +0,0 @@
+-/*
+- * Copyright (C) 2017 The Android Open Source Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package com.android.server.autofill.ui;
+-
+-import android.annotation.NonNull;
+-import android.app.AppOpsManager;
+-import android.content.Context;
+-import android.os.Binder;
+-import android.os.IBinder;
+-import android.os.UserHandle;
+-
+-/**
+- * This class controls showing/hiding overlays. We don't
+- * hide all overlays (toast/system alerts) while sensitive
+- * autofill UI is up.
+- */
+-class OverlayControl {
+-
+-    private final IBinder mToken = new Binder();
+-
+-    private final @NonNull AppOpsManager mAppOpsManager;
+-
+-    OverlayControl(@NonNull Context context) {
+-        mAppOpsManager = context.getSystemService(AppOpsManager.class);
+-    }
+-
+-    void hideOverlays() {
+-        setOverlayAllowed(false);
+-    }
+-
+-    void showOverlays() {
+-        setOverlayAllowed(true);
+-    }
+-
+-    private void setOverlayAllowed(boolean allowed) {
+-        if (mAppOpsManager != null) {
+-            mAppOpsManager.setUserRestrictionForUser(AppOpsManager.OP_SYSTEM_ALERT_WINDOW, !allowed,
+-                    mToken, null, UserHandle.USER_ALL);
+-            mAppOpsManager.setUserRestrictionForUser(AppOpsManager.OP_TOAST_WINDOW, !allowed,
+-                    mToken, null, UserHandle.USER_ALL);
+-        }
+-    }
+-}
+diff --git a/services/autofill/java/com/android/server/autofill/ui/SaveUi.java b/services/autofill/java/com/android/server/autofill/ui/SaveUi.java
+index 2ecce0b46662..a92d5d6f19f6 100644
+--- a/services/autofill/java/com/android/server/autofill/ui/SaveUi.java
++++ b/services/autofill/java/com/android/server/autofill/ui/SaveUi.java
+@@ -163,8 +163,6 @@ final class SaveUi {
+ 
+     private final @NonNull OneActionThenDestroyListener mListener;
+ 
+-    private final @NonNull OverlayControl mOverlayControl;
+-
+     private final CharSequence mTitle;
+     private final CharSequence mSubTitle;
+     private final PendingUi mPendingUi;
+@@ -182,15 +180,14 @@ final class SaveUi {
+            @NonNull CharSequence serviceLabel, @NonNull Drawable serviceIcon,
+            @Nullable String servicePackageName, @NonNull ComponentName componentName,
+            @NonNull SaveInfo info, @NonNull ValueFinder valueFinder,
+-           @NonNull OverlayControl overlayControl, @NonNull OnSaveListener listener,
+-           boolean nightMode, boolean isUpdate, boolean compatMode, boolean showServiceIcon) {
++           @NonNull OnSaveListener listener, boolean nightMode, boolean isUpdate,
++           boolean compatMode, boolean showServiceIcon) {
+         if (sVerbose) {
+             Slogf.v(TAG, "nightMode: %b displayId: %d", nightMode, context.getDisplayId());
+         }
+         mThemeId = nightMode ? THEME_ID_DARK : THEME_ID_LIGHT;
+         mPendingUi = pendingUi;
+         mListener = new OneActionThenDestroyListener(listener);
+-        mOverlayControl = overlayControl;
+         mServicePackageName = servicePackageName;
+         mComponentName = componentName;
+         mCompatMode = compatMode;
+@@ -369,6 +366,7 @@ final class SaveUi {
+         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
+         window.setGravity(Gravity.BOTTOM | Gravity.CENTER);
+         window.setCloseOnTouchOutside(true);
++        window.setHideOverlayWindows(true);
+         final WindowManager.LayoutParams params = window.getAttributes();
+ 
+         params.accessibilityTitle = context.getString(R.string.autofill_save_accessibility_title);
+@@ -657,16 +655,11 @@ final class SaveUi {
+     private void show() {
+         Slog.i(TAG, "Showing save dialog: " + mTitle);
+         mDialog.show();
+-        mOverlayControl.hideOverlays();
+-   }
++    }
+ 
+     PendingUi hide() {
+         if (sVerbose) Slog.v(TAG, "Hiding save dialog.");
+-        try {
+-            mDialog.hide();
+-        } finally {
+-            mOverlayControl.showOverlays();
+-        }
++        mDialog.hide();
+         return mPendingUi;
+     }
+ 
+@@ -675,16 +668,12 @@ final class SaveUi {
+     }
+ 
+     void destroy() {
+-        try {
+-            if (sDebug) Slog.d(TAG, "destroy()");
+-            throwIfDestroyed();
+-            mListener.onDestroy();
+-            mHandler.removeCallbacksAndMessages(mListener);
+-            mDialog.dismiss();
+-            mDestroyed = true;
+-        } finally {
+-            mOverlayControl.showOverlays();
+-        }
++        if (sDebug) Slog.d(TAG, "destroy()");
++        throwIfDestroyed();
++        mListener.onDestroy();
++        mHandler.removeCallbacksAndMessages(mListener);
++        mDialog.dismiss();
++        mDestroyed = true;
+     }
+ 
+     private void throwIfDestroyed() {
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

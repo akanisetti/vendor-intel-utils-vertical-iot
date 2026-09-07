@@ -1,0 +1,89 @@
+From ab8569011da324a9e0e0ef40c9de47c56335bb89 Mon Sep 17 00:00:00 2001
+From: Charles Chen <charlesccchen@google.com>
+Date: Wed, 4 Feb 2026 05:48:37 +0000
+Subject: [PATCH] Use setHideOverlayWindows instead of AppOpsManager
+
+... to hide non-system overlay windows
+
+Previously, DeviceAdminAdd added the check in onResume, and removed the
+check in onPause. However it didn't stop overlay window showing again without
+SYSTEM_ALERT_WINDOW permission when the restrictions are released.
+
+This fix use Window#setHideOverlayWindows mechanism instead to prevent
+any non-system overlay window shown on top of the window.
+
+Test: presubmit
+Bug: 463364901
+Flag: EXEMPT bugfix
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:c5f056067eb6d0f2ca3d2502bcee798c99cd2ef2
+Merged-In: Iff59eec12280db291f153e32691187a503118b9d
+Change-Id: Iff59eec12280db291f153e32691187a503118b9d
+---
+ .../tv/settings/deviceadmin/DeviceAdminAdd.java     | 13 +------------
+ 1 file changed, 1 insertion(+), 12 deletions(-)
+
+diff --git a/Settings/src/com/android/tv/settings/deviceadmin/DeviceAdminAdd.java b/Settings/src/com/android/tv/settings/deviceadmin/DeviceAdminAdd.java
+index 7fd966f8d..5832a20ce 100644
+--- a/Settings/src/com/android/tv/settings/deviceadmin/DeviceAdminAdd.java
++++ b/Settings/src/com/android/tv/settings/deviceadmin/DeviceAdminAdd.java
+@@ -18,7 +18,6 @@ package com.android.tv.settings.deviceadmin;
+ 
+ import android.app.Activity;
+ import android.app.ActivityManager;
+-import android.app.AppOpsManager;
+ import android.app.Dialog;
+ import android.app.admin.DeviceAdminInfo;
+ import android.app.admin.DeviceAdminReceiver;
+@@ -35,10 +34,8 @@ import android.content.pm.PackageManager.NameNotFoundException;
+ import android.content.pm.ResolveInfo;
+ import android.content.pm.UserInfo;
+ import android.content.res.Resources;
+-import android.os.Binder;
+ import android.os.Bundle;
+ import android.os.Handler;
+-import android.os.IBinder;
+ import android.os.RemoteCallback;
+ import android.os.RemoteException;
+ import android.os.UserHandle;
+@@ -81,10 +78,7 @@ public class DeviceAdminAdd extends FragmentActivity {
+     public static final String EXTRA_CALLED_FROM_SUPPORT_DIALOG =
+             "android.app.extra.CALLED_FROM_SUPPORT_DIALOG";
+ 
+-    private final IBinder mToken = new Binder();
+-
+     DevicePolicyManager mDPM;
+-    AppOpsManager mAppOps;
+     DeviceAdminInfo mDeviceAdmin;
+ 
+     boolean mRefreshing;
+@@ -115,7 +109,7 @@ public class DeviceAdminAdd extends FragmentActivity {
+         super.onCreate(icicle);
+ 
+         mDPM = getSystemService(DevicePolicyManager.class);
+-        mAppOps = getSystemService(AppOpsManager.class);
++        getWindow().setHideOverlayWindows(true);
+         PackageManager packageManager = getPackageManager();
+ 
+         if ((getIntent().getFlags() & Intent.FLAG_ACTIVITY_NEW_TASK) != 0) {
+@@ -328,9 +322,6 @@ public class DeviceAdminAdd extends FragmentActivity {
+         if (!mAddingProfileOwner) {
+             updateInterface();
+         }
+-        // As long as we are running, don't let anyone overlay stuff on top of the screen.
+-        mAppOps.setUserRestriction(AppOpsManager.OP_SYSTEM_ALERT_WINDOW, true, mToken);
+-        mAppOps.setUserRestriction(AppOpsManager.OP_TOAST_WINDOW, true, mToken);
+     }
+ 
+     @Override
+@@ -338,8 +329,6 @@ public class DeviceAdminAdd extends FragmentActivity {
+         super.onPause();
+         // This just greys out the button. The actual listener is attached to R.id.restricted_action
+         mActionButton.setEnabled(false);
+-        mAppOps.setUserRestriction(AppOpsManager.OP_SYSTEM_ALERT_WINDOW, false, mToken);
+-        mAppOps.setUserRestriction(AppOpsManager.OP_TOAST_WINDOW, false, mToken);
+         try {
+             ActivityManager.getService().resumeAppSwitches();
+         } catch (RemoteException e) {
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

@@ -1,0 +1,96 @@
+From 02e941ce8cf1a4a79cf673c936a99d8fd76c6e02 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Fri, 14 Aug 2026 06:53:36 +0000
+Subject: [PATCH] Support dynamic trusty support option
+
+Trusty support is enabled via environment path in Android workspace
+ # ENABLE_TRUSTY must be exported before running lunch.
+ # ENABLE_TRUSTY=true  -> tee: trusty  (IKGT/eVMM + Trusty TEE enabled)
+ # ENABLE_TRUSTY=false -> tee: false   (no TEE, softwarekeymint/gatekeeper)
+ # Unset               -> use value already in mixins.spec
+
+Tracked-On:NIACP3-1508
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+
+diff --git a/mixin-update b/mixin-update
+index 0e2274ed..78f7279f 100755
+--- a/mixin-update
++++ b/mixin-update
+@@ -597,7 +597,7 @@ class Parser(FileHelper):
+         "option" : "---",
+     }
+ 
+-    def __init__(self, sf=None, dry_run=False, abort_on_errors=True):
++    def __init__(self, sf=None, dry_run=False, abort_on_errors=True, tee_option_override=None):
+         self.spec_file = sf
+         self.dry_run = dry_run
+         self.mixins_control = False
+@@ -623,6 +623,26 @@ class Parser(FileHelper):
+         self.internal_mixins_tree = {}
+         self.file_map = {}
+         self.group_deps = set()
++        self.tee_option_override = tee_option_override
++
++    def _apply_tee_option_override(self):
++        if not self.tee_option_override:
++            return
++
++        tee_found = False
++        trusty_enabled = self.tee_option_override == "trusty"
++        for i, (group, option, params) in enumerate(self.spec_selections):
++            if group == "tee":
++                self.spec_selections[i] = (group, self.tee_option_override, params)
++                tee_found = True
++
++            # Keep trusty-dependent params coherent with tee option.
++            if "trusty" in params:
++                params["trusty"] = "true" if trusty_enabled else "false"
++                self._coerce_boolean(params)
++
++        if not tee_found:
++            self.spec_selections.append(("tee", self.tee_option_override, ReadTrackingDict()))
+ 
+ 
+ 
+@@ -994,6 +1014,7 @@ class Parser(FileHelper):
+         if self.product_dir == '':
+             self.product_dir = '.'
+         self.spec_selections = self._split_params(cp.items("groups"))
++        self._apply_tee_option_override()
+         self.spec_mixins_tree_dir = cp.get("main", "mixinsdir")
+         if self.spec_mixins_tree_dir.startswith('.'):
+             self.mixins_tree_dir = os.path.join(self.product_dir, self.spec_mixins_tree_dir.replace("./", ""))
+@@ -1316,7 +1337,7 @@ def get_valid_spec_files_and_targets():
+ 
+     return ret, valid_targets
+ 
+-def main(dry_run=False, sfiles=None, warn_only=False, debug_log=False, check_version=False, check_target=False):
++def main(dry_run=False, sfiles=None, warn_only=False, debug_log=False, check_version=False, check_target=False, tee_option_override=None):
+ 
+     ret = 0
+     abort_on_errors = not warn_only
+@@ -1342,7 +1363,7 @@ def main(dry_run=False, sfiles=None, warn_only=False, debug_log=False, check_ver
+         sfiles = get_valid_spec_files_and_targets()[0]
+ 
+     for sf in sfiles:
+-        parser = Parser(sf, dry_run, abort_on_errors)
++        parser = Parser(sf, dry_run, abort_on_errors, tee_option_override)
+         tag = parser.product_name
+         checker = Checker(abort_on_errors, tag)
+         releaser = Releaser(dry_run, abort_on_errors, tag)
+@@ -1402,7 +1423,11 @@ if __name__ == "__main__":
+             help="Get valid lunch targets",
+             action="store_true")
+ 
++    parser.add_argument("--tee-option",
++            choices=["trusty", "optee", "false"],
++            help="Override tee option in mixins spec at generation time")
++
+     args = parser.parse_args()
+ 
+-    ret = main(args.dry_run, args.spec, args.warn_only, args.debug, args.version, args.target)
++    ret = main(args.dry_run, args.spec, args.warn_only, args.debug, args.version, args.target, args.tee_option)
+     sys.exit(ret)
+-- 
+2.34.1
+

@@ -1,0 +1,35 @@
+From 49a60b644920cdf7b513b8fffe3904f1b154f916 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bar=C4=B1=C5=9F=20Kaya?= <bkaya@google.com>
+Date: Thu, 5 Mar 2026 15:41:02 +0000
+Subject: [PATCH] Catch OutOfMemoryError while parsing xml in
+ GameManagerService
+
+This part of the GameManagerService would fail if the given xml was too big (>1 GB). Catching the OutOfMemoryError allows the process to continue instead of crashing.
+
+Test: Tested on 25q4-release branch with the apk and repro steps provided on the bug
+Bug: b/480975165
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:d3a1cc8820b17b04723df14b9e5df02473f440d6
+Merged-In: I7142bde41c0583022cacbf076b5ba6acbbcfd3c2
+Change-Id: I7142bde41c0583022cacbf076b5ba6acbbcfd3c2
+---
+ .../core/java/com/android/server/app/GameManagerService.java   | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/app/GameManagerService.java b/services/core/java/com/android/server/app/GameManagerService.java
+index 767201125e09..7dd97feb1f16 100644
+--- a/services/core/java/com/android/server/app/GameManagerService.java
++++ b/services/core/java/com/android/server/app/GameManagerService.java
+@@ -633,7 +633,8 @@ public final class GameManagerService extends IGameManagerService.Stub {
+                         array.recycle();
+                     }
+                 }
+-            } catch (NameNotFoundException | XmlPullParserException | IOException ex) {
++            } catch (NameNotFoundException | XmlPullParserException | IOException
++                     | OutOfMemoryError ex) {
+                 // set flag back to default values when parsing fails
+                 mPerfModeOverridden = false;
+                 mBatteryModeOverridden = false;
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

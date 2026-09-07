@@ -1,0 +1,61 @@
+From 66ccc4332b9007b0b8b480dc8f3b4f7f37eb2d1b Mon Sep 17 00:00:00 2001
+From: Oli Thompson <olit@google.com>
+Date: Fri, 6 Mar 2026 11:40:45 +0000
+Subject: [PATCH] Sanitize intent selector in IntentForwarderActivity
+
+Flag: EXEMPT BUGFIX
+Bug: 407763772 403565650
+Test: manually tested
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:abdb996163dd2ed47f6486b3428beb133616ca22
+Merged-In: Ifb705a644a45dbcbc1d888cd866b2da3b039af3f
+Change-Id: Ifb705a644a45dbcbc1d888cd866b2da3b039af3f
+---
+ .../internal/app/IntentForwarderActivity.java       | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/core/java/com/android/internal/app/IntentForwarderActivity.java b/core/java/com/android/internal/app/IntentForwarderActivity.java
+index cbd94c229537..4b9f4fa4cb54 100644
+--- a/core/java/com/android/internal/app/IntentForwarderActivity.java
++++ b/core/java/com/android/internal/app/IntentForwarderActivity.java
+@@ -528,9 +528,6 @@ public class IntentForwarderActivity extends Activity  {
+                 ? targetUserId : callingUserId;
+         int selectedProfile = findSelectedProfile(className);
+         sanitizeIntent(intentReceived);
+-        if (intentReceived.getSelector() != null) {
+-            sanitizeIntent(intentReceived.getSelector());
+-        }
+         intentReceived.putExtra(EXTRA_SELECTED_PROFILE, selectedProfile);
+         intentReceived.putExtra(EXTRA_CALLING_USER, UserHandle.of(callingUserId));
+         if (singleTabOnly) {
+@@ -611,7 +608,6 @@ public class IntentForwarderActivity extends Activity  {
+             return null;
+         }
+         if (forwardIntent.getSelector() != null) {
+-            sanitizeIntent(forwardIntent.getSelector());
+             if (!canForwardInner(forwardIntent.getSelector(), sourceUserId, targetUserId,
+                     packageManager, resolvedType)) {
+                 return null;
+@@ -678,12 +674,19 @@ public class IntentForwarderActivity extends Activity  {
+     }
+ 
+     /**
+-     * Sanitize the intent in place.
++     * Sanitize the intent and sanitize its selector in place.
+      */
+     private static void sanitizeIntent(Intent intent) {
+         // Apps should not be allowed to target a specific package/ component in the target user.
+         intent.setPackage(null);
+         intent.setComponent(null);
++
++        var selector = intent.getSelector();
++        if (selector != null) {
++            selector.setPackage(null);
++            selector.setComponent(null);
++            selector.setSelector(null);
++        }
+     }
+ 
+     protected MetricsLogger getMetricsLogger() {
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

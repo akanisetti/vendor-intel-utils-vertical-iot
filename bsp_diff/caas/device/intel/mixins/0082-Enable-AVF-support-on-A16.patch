@@ -1,0 +1,272 @@
+From 0d14db6f0f6c2017c2befaa4cead8c2cb8e600bb Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Mon, 24 Aug 2026 14:53:50 +0000
+Subject: [PATCH] Enable AVF feature support on A16
+
+Add Kernel configurations for AVF feature
+Include Apex AVF package required for crossvm, virtualizationservice
+Add KVM properties for
+
+Tracked-On: NIACP3-1534
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ groups/device-specific/caas/BoardConfig.mk    |  7 ++
+ groups/device-specific/caas/files.spec        |  1 +
+ groups/device-specific/caas/init.avf.rc       |  8 ++
+ groups/device-specific/caas/product.mk        |  5 ++
+ .../linux-intel-lts2024/x86_64_defconfig      | 76 +++++++++++++++++--
+ 5 files changed, 92 insertions(+), 5 deletions(-)
+ create mode 100644 groups/device-specific/caas/init.avf.rc
+ mode change 100755 => 100644 groups/device-specific/caas/product.mk
+
+diff --git a/groups/device-specific/caas/BoardConfig.mk b/groups/device-specific/caas/BoardConfig.mk
+index fa717c53..55257e38 100644
+--- a/groups/device-specific/caas/BoardConfig.mk
++++ b/groups/device-specific/caas/BoardConfig.mk
+@@ -10,6 +10,13 @@ BOARD_KERNEL_CMDLINE += \
+ 	reboot=a,e,p,t,f \
+ 	loop.max_part=7
+ 
++# AVF: Set hypervisor properties in bootconfig for VirtualizationService
++ifeq ($(BOOTCONFIG_ENABLE), true)
++BOARD_BOOTCONFIG += androidboot.hypervisor.vm.supported=1
++BOARD_BOOTCONFIG += androidboot.hypervisor.protected_vm.supported=0
++BOARD_BOOTCONFIG += androidboot.hypervisor.version=kvm
++endif
++
+ BOARD_FLASHFILES += ${TARGET_DEVICE_DIR}/bldr_utils.img:bldr_utils.img
+ BOARD_FLASHFILES += $(PRODUCT_OUT)/LICENSE
+ BOARD_FLASHFILES += $(PRODUCT_OUT)/scripts/start_flash_usb.sh
+diff --git a/groups/device-specific/caas/files.spec b/groups/device-specific/caas/files.spec
+index 0984f016..cf9db2a6 100644
+--- a/groups/device-specific/caas/files.spec
++++ b/groups/device-specific/caas/files.spec
+@@ -10,6 +10,7 @@ framework_manifest.xml: "define hidl framework interface"
+ framework_compatibility_matrix.xml: "define framework compatibility matrix"
+ overlay: "configurations for SystemUI"
+ system.prop: "system properties file"
++init.avf.rc: "AVF early-init property script"
+ {{ref_target}}.mk: "product definition file"
+ r2_{{target}}.mk: "Ring 2 target for P.car"
+ android-removed-permissions.xml: "remove features not supported"
+diff --git a/groups/device-specific/caas/init.avf.rc b/groups/device-specific/caas/init.avf.rc
+new file mode 100644
+index 00000000..d3787ed5
+--- /dev/null
++++ b/groups/device-specific/caas/init.avf.rc
+@@ -0,0 +1,8 @@
++# AVF Hypervisor properties for VirtualizationService
++# These tell virtmgr that KVM-based VMs are supported on this device.
++# Must run in early-init before virtualizationservice starts.
++
++on early-init
++    setprop ro.boot.hypervisor.vm.supported 1
++    setprop ro.boot.hypervisor.protected_vm.supported 0
++    setprop ro.boot.hypervisor.version kvm
+diff --git a/groups/device-specific/caas/product.mk b/groups/device-specific/caas/product.mk
+old mode 100755
+new mode 100644
+index 06d9baf5..b5e5f0f6
+--- a/groups/device-specific/caas/product.mk
++++ b/groups/device-specific/caas/product.mk
+@@ -9,6 +9,7 @@ PRODUCT_COPY_FILES += \
+ {{#treble}}
+     $(LOCAL_PATH)/init.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/hw/init.$(TARGET_PRODUCT).rc \
+     $(LOCAL_PATH)/ueventd.rc:$(TARGET_COPY_OUT_VENDOR)/etc/ueventd.rc \
++    $(LOCAL_PATH)/init.avf.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/hw/init.avf.rc \
+ {{/treble}}
+ {{^treble}}
+     $(LOCAL_PATH)/init.rc:root/init.$(TARGET_PRODUCT).rc \
+@@ -19,6 +20,10 @@ PRODUCT_PACKAGES += vndservicemanager
+ 
+ PRODUCT_PACKAGES += SystemUpdaterSample
+ 
++# AVF (Android Virtualization Framework) - enable full APEX with vm CLI, crosvm, virtualizationservice
++$(call inherit-product, packages/modules/Virtualization/apex/product_packages.mk)
++PRODUCT_PACKAGES += com.android.virt
++
+ # PRODUCT_PACKAGES += androidx.window.extensions \
+ 		    androidx.window.sidecar
+ 
+diff --git a/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig b/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig
+index 8bff8b9b..b752fb95 100644
+--- a/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig
++++ b/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig
+@@ -287,6 +287,7 @@ CONFIG_KALLSYMS_ALL=y
+ CONFIG_KALLSYMS_ABSOLUTE_PERCPU=y
+ CONFIG_ARCH_HAS_MEMBARRIER_SYNC_CORE=y
+ CONFIG_HAVE_PERF_EVENTS=y
++CONFIG_GUEST_PERF_EVENTS=y
+ 
+ #
+ # Kernel Performance Events And Counters
+@@ -345,7 +346,10 @@ CONFIG_X86_X2APIC=y
+ CONFIG_X86_MPPARSE=y
+ # CONFIG_X86_CPU_RESCTRL is not set
+ # CONFIG_X86_FRED is not set
+-# CONFIG_X86_EXTENDED_PLATFORM is not set
++CONFIG_X86_EXTENDED_PLATFORM=y
++# CONFIG_X86_VSMP is not set
++# CONFIG_X86_GOLDFISH is not set
++# CONFIG_X86_INTEL_MID is not set
+ CONFIG_X86_INTEL_LPSS=y
+ # CONFIG_X86_AMD_PLATFORM_DEVICE is not set
+ CONFIG_IOSF_MBI=y
+@@ -451,6 +455,7 @@ CONFIG_X86_INTEL_TSX_MODE_OFF=y
+ # CONFIG_X86_INTEL_TSX_MODE_AUTO is not set
+ # CONFIG_X86_SGX is not set
+ # CONFIG_X86_USER_SHADOW_STACK is not set
++# CONFIG_INTEL_TDX_HOST is not set
+ CONFIG_EFI=y
+ # CONFIG_EFI_STUB is not set
+ # CONFIG_EFI_RUNTIME_MAP is not set
+@@ -523,6 +528,7 @@ CONFIG_MITIGATION_SRBDS=y
+ CONFIG_MITIGATION_SSB=y
+ CONFIG_MITIGATION_ITS=y
+ CONFIG_MITIGATION_TSA=y
++CONFIG_MITIGATION_VMSCAPE=y
+ CONFIG_ARCH_HAS_ADD_PAGES=y
+ 
+ #
+@@ -677,8 +683,41 @@ CONFIG_COMPAT=y
+ CONFIG_COMPAT_FOR_U64_ALIGNMENT=y
+ # end of Binary Emulations
+ 
++CONFIG_KVM_COMMON=y
++CONFIG_HAVE_KVM_PFNCACHE=y
++CONFIG_HAVE_KVM_IRQCHIP=y
++CONFIG_HAVE_KVM_IRQ_ROUTING=y
++CONFIG_HAVE_KVM_DIRTY_RING=y
++CONFIG_HAVE_KVM_DIRTY_RING_TSO=y
++CONFIG_HAVE_KVM_DIRTY_RING_ACQ_REL=y
++CONFIG_KVM_MMIO=y
++CONFIG_KVM_ASYNC_PF=y
++CONFIG_HAVE_KVM_MSI=y
++CONFIG_HAVE_KVM_READONLY_MEM=y
++CONFIG_HAVE_KVM_CPU_RELAX_INTERCEPT=y
++CONFIG_KVM_VFIO=y
++CONFIG_KVM_GENERIC_DIRTYLOG_READ_PROTECT=y
++CONFIG_KVM_GENERIC_PRE_FAULT_MEMORY=y
++CONFIG_KVM_COMPAT=y
++CONFIG_HAVE_KVM_IRQ_BYPASS=y
++CONFIG_HAVE_KVM_NO_POLL=y
++CONFIG_KVM_XFER_TO_GUEST_WORK=y
++CONFIG_HAVE_KVM_PM_NOTIFIER=y
++CONFIG_KVM_GENERIC_HARDWARE_ENABLING=y
++CONFIG_KVM_GENERIC_MMU_NOTIFIER=y
+ CONFIG_VIRTUALIZATION=y
+-# CONFIG_KVM is not set
++CONFIG_KVM_X86=y
++CONFIG_KVM=y
++# CONFIG_KVM_WERROR is not set
++# CONFIG_KVM_SW_PROTECTED_VM is not set
++CONFIG_KVM_INTEL=y
++# CONFIG_KVM_INTEL_PROVE_VE is not set
++# CONFIG_KVM_AMD is not set
++CONFIG_KVM_SMM=y
++CONFIG_KVM_HYPERV=y
++# CONFIG_KVM_XEN is not set
++# CONFIG_KVM_PROVE_MMU is not set
++CONFIG_KVM_MAX_NR_VCPUS=1024
+ CONFIG_AS_AVX512=y
+ CONFIG_AS_SHA1_NI=y
+ CONFIG_AS_SHA256_NI=y
+@@ -710,6 +749,7 @@ CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS=y
+ CONFIG_ARCH_USE_BUILTIN_BSWAP=y
+ CONFIG_KRETPROBES=y
+ CONFIG_KRETPROBE_ON_RETHOOK=y
++CONFIG_USER_RETURN_NOTIFIER=y
+ CONFIG_HAVE_IOREMAP_PROT=y
+ CONFIG_HAVE_KPROBES=y
+ CONFIG_HAVE_KRETPROBES=y
+@@ -943,6 +983,7 @@ CONFIG_BFQ_GROUP_IOSCHED=y
+ # CONFIG_BFQ_CGROUP_DEBUG is not set
+ # end of IO Schedulers
+ 
++CONFIG_PREEMPT_NOTIFIERS=y
+ CONFIG_PADATA=y
+ CONFIG_ASN1=y
+ CONFIG_UNINLINE_SPIN_UNLOCK=y
+@@ -976,7 +1017,7 @@ CONFIG_ARCH_HAS_SYSCALL_WRAPPER=y
+ # CONFIG_GKI_HIDDEN_RPMSG_CONFIGS is not set
+ CONFIG_GKI_HIDDEN_GPU_CONFIGS=y
+ # CONFIG_GKI_HIDDEN_IRQ_CONFIGS is not set
+-# CONFIG_GKI_HIDDEN_HYPERVISOR_CONFIGS is not set
++CONFIG_GKI_HIDDEN_HYPERVISOR_CONFIGS=y
+ # CONFIG_GKI_HIDDEN_NET_CONFIGS is not set
+ # CONFIG_GKI_HIDDEN_PHY_CONFIGS is not set
+ # CONFIG_GKI_HIDDEN_MM_CONFIGS is not set
+@@ -1835,6 +1876,7 @@ CONFIG_DEV_COREDUMP=y
+ CONFIG_DEBUG_DEVRES=y
+ # CONFIG_DEBUG_TEST_DRIVER_REMOVE is not set
+ # CONFIG_TEST_ASYNC_DRIVER_PROBE is not set
++CONFIG_SYS_HYPERVISOR=y
+ CONFIG_GENERIC_CPU_DEVICES=y
+ CONFIG_GENERIC_CPU_AUTOPROBE=y
+ CONFIG_GENERIC_CPU_VULNERABILITIES=y
+@@ -4539,6 +4581,7 @@ CONFIG_DRM_I915_FORCE_PROBE=""
+ CONFIG_DRM_I915_CAPTURE_ERROR=y
+ CONFIG_DRM_I915_COMPRESS_ERROR=y
+ CONFIG_DRM_I915_USERPTR=y
++# CONFIG_DRM_I915_GVT_KVMGT is not set
+ # CONFIG_DRM_I915_PXP is not set
+ 
+ #
+@@ -6049,7 +6092,28 @@ CONFIG_DMABUF_HEAPS_SYSTEM=y
+ # end of DMABUF options
+ 
+ # CONFIG_UIO is not set
+-# CONFIG_VFIO is not set
++CONFIG_VFIO=y
++CONFIG_VFIO_DEVICE_CDEV=y
++CONFIG_VFIO_GROUP=y
++CONFIG_VFIO_CONTAINER=y
++CONFIG_VFIO_IOMMU_TYPE1=y
++CONFIG_VFIO_NOIOMMU=y
++CONFIG_VFIO_VIRQFD=y
++CONFIG_VFIO_DEBUGFS=y
++
++#
++# VFIO support for PCI devices
++#
++CONFIG_VFIO_PCI_CORE=y
++CONFIG_VFIO_PCI_MMAP=y
++CONFIG_VFIO_PCI_INTX=y
++CONFIG_VFIO_PCI=y
++CONFIG_VFIO_PCI_VGA=y
++CONFIG_VFIO_PCI_IGD=y
++CONFIG_VIRTIO_VFIO_PCI=y
++# end of VFIO support for PCI devices
++
++CONFIG_IRQ_BYPASS_MANAGER=y
+ CONFIG_VIRT_DRIVERS=y
+ CONFIG_VMGENID=y
+ # CONFIG_VBOXGUEST is not set
+@@ -6286,6 +6350,7 @@ CONFIG_PCC=y
+ # CONFIG_ALTERA_MBOX is not set
+ CONFIG_IOMMU_IOVA=y
+ CONFIG_IOMMU_API=y
++CONFIG_IOMMUFD_DRIVER=y
+ CONFIG_IOMMU_SUPPORT=y
+ 
+ #
+@@ -6308,7 +6373,7 @@ CONFIG_INTEL_IOMMU_DEFAULT_ON=y
+ CONFIG_INTEL_IOMMU_FLOPPY_WA=y
+ # CONFIG_INTEL_IOMMU_SCALABLE_MODE_DEFAULT_ON is not set
+ CONFIG_INTEL_IOMMU_PERF_EVENTS=y
+-# CONFIG_IOMMUFD is not set
++CONFIG_IOMMUFD=y
+ CONFIG_IRQ_REMAP=y
+ # CONFIG_VIRTIO_IOMMU is not set
+ 
+@@ -7833,6 +7898,7 @@ CONFIG_TEXTSEARCH_KMP=y
+ CONFIG_TEXTSEARCH_BM=y
+ CONFIG_TEXTSEARCH_FSM=y
+ CONFIG_INTERVAL_TREE=y
++CONFIG_INTERVAL_TREE_SPAN_ITER=y
+ CONFIG_XARRAY_MULTI=y
+ CONFIG_ASSOCIATIVE_ARRAY=y
+ CONFIG_CLOSURES=y
+-- 
+2.34.1
+

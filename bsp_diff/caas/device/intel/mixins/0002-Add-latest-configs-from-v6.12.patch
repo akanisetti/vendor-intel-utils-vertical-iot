@@ -1,22 +1,21 @@
-From 189660370c39dde219338c70073a980c9d2d3604 Mon Sep 17 00:00:00 2001
+From 799d02da9a259e29845f79b6f1973c573fe7de1f Mon Sep 17 00:00:00 2001
 From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
-Date: Thu, 23 Apr 2026 07:25:03 +0000
+Date: Wed, 2 Sep 2026 08:55:30 +0000
 Subject: [PATCH] Add latest configs from v6.12
 
 Kernel config repo: os.linux.kernel.kernel-config
 Branch: 6.12/config_v
-Tag: lts-v6.12.89-android_v-260609T060850Z
-SHA: cd47f8c88826ce3278f1fb28f842e433b10913dc
+Tag: lts-v6.12.92-android_v-260827T011001Z
 
-Tracked-On:NIACP3-1395
-Signed-off-by: pradyumnax.tumaskar@intel.com
+Tracked-On:NIACP3-1552
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
 ---
  .../linux-intel-lts2024/aaos_diffconfig       |   27 +
  .../linux-intel-lts2024/caas_diffconfig       |   11 +
  .../linux-intel-lts2024/debug_diffconfig      |   80 +
  .../linux-intel-lts2024/virt_diffconfig       |   33 +
- .../linux-intel-lts2024/x86_64_defconfig      | 8285 +++++++++++++++++
- 5 files changed, 8436 insertions(+)
+ .../linux-intel-lts2024/x86_64_defconfig      | 8290 +++++++++++++++++
+ 5 files changed, 8441 insertions(+)
  create mode 100644 groups/kernel/gmin64/config-lts/linux-intel-lts2024/aaos_diffconfig
  create mode 100644 groups/kernel/gmin64/config-lts/linux-intel-lts2024/caas_diffconfig
  create mode 100644 groups/kernel/gmin64/config-lts/linux-intel-lts2024/debug_diffconfig
@@ -200,13 +199,13 @@ index 00000000..4ce1d148
 +CONFIG_VIDEO_VIRTIO_CAMERA=y
 diff --git a/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig b/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig
 new file mode 100644
-index 00000000..ddf3d040
+index 00000000..4e2ee97c
 --- /dev/null
 +++ b/groups/kernel/gmin64/config-lts/linux-intel-lts2024/x86_64_defconfig
-@@ -0,0 +1,8285 @@
+@@ -0,0 +1,8290 @@
 +#
 +# Automatically generated file; DO NOT EDIT.
-+# Linux/x86_64 6.12.89 Kernel Configuration
++# Linux/x86_64 6.12.92 Kernel Configuration
 +#
 +CONFIG_CC_VERSION_TEXT="Android (13290119, +pgo, +bolt, +lto, +mlgo, based on r547379) clang version 20.0.0 (https://android.googlesource.com/toolchain/llvm-project b718bcaf8c198c82f3021447d943401e3ab5bd54)"
 +CONFIG_GCC_VERSION=0
@@ -6350,8 +6349,8 @@ index 00000000..ddf3d040
 +#
 +CONFIG_ANDROID_STAGING=y
 +CONFIG_ASHMEM=y
-+CONFIG_ANDROID_FWDATA=y
 +CONFIG_ASHMEM_C=y
++CONFIG_ANDROID_FWDATA=y
 +# end of Android
 +
 +CONFIG_LTE_GDM724X=m
@@ -7386,7 +7385,12 @@ index 00000000..ddf3d040
 +CONFIG_F2FS_FS_SECURITY=y
 +# CONFIG_F2FS_CHECK_FS is not set
 +# CONFIG_F2FS_FAULT_INJECTION is not set
-+# CONFIG_F2FS_FS_COMPRESSION is not set
++CONFIG_F2FS_FS_COMPRESSION=y
++CONFIG_F2FS_FS_LZO=y
++CONFIG_F2FS_FS_LZORLE=y
++CONFIG_F2FS_FS_LZ4=y
++CONFIG_F2FS_FS_LZ4HC=y
++CONFIG_F2FS_FS_ZSTD=y
 +CONFIG_F2FS_IOSTAT=y
 +CONFIG_F2FS_UNFAIR_RWSEM=y
 +# CONFIG_BCACHEFS_FS is not set
@@ -7416,7 +7420,7 @@ index 00000000..ddf3d040
 +# CONFIG_CUSE is not set
 +CONFIG_VIRTIO_FS=y
 +CONFIG_FUSE_PASSTHROUGH=y
-+# CONFIG_FUSE_BPF is not set
++CONFIG_FUSE_BPF=y
 +CONFIG_OVERLAY_FS=y
 +# CONFIG_OVERLAY_FS_REDIRECT_DIR is not set
 +CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y
@@ -8490,5 +8494,5 @@ index 00000000..ddf3d040
 +# end of Rust hacking
 +# end of Kernel hacking
 -- 
-2.53.0
+2.34.1
 

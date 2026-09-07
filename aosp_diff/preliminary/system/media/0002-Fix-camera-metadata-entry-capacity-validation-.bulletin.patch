@@ -1,0 +1,83 @@
+From 6d526cb2075ba315d5ea91679c3f2e1d1416d5c7 Mon Sep 17 00:00:00 2001
+From: Avichal Rakesh <arakesh@google.com>
+Date: Mon, 9 Mar 2026 14:36:43 -0800
+Subject: [PATCH] Fix camera metadata entry capacity validation.
+
+The current logic in validate_camera_metadata_structure considers
+entry_capacity as the size of entries in bytes when validating the
+header structure. However, entry_capacity is meant to be the number of
+entries that can be held. This meant that a maliciously crafted camera
+metadata would pass the validate check causing out of bounds write,
+which eventually led to cameraserver crashing.
+
+This CL now multiplies entry_capacity by
+sizeof(camera_metadata_buffer_entry_t) to get the size needed by
+entry_capacity in bytes. It adds an overflow check to ensure that the
+size of entry_capacity does not overflow, and updates the existing logic
+to use the newly calculated size.
+
+Flag: EXEMPT BUGFIX
+Bug: 486597445
+Test: Verified that malicious camera_metadata is successfully detected
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:930c247918143f812a9ccb0b682dcacf482e44ec
+Merged-In: I798ae12e04a8b95760fb083b42099dbe5934d198
+Change-Id: I798ae12e04a8b95760fb083b42099dbe5934d198
+---
+ camera/src/camera_metadata.c | 27 +++++++++++++++++++++------
+ 1 file changed, 21 insertions(+), 6 deletions(-)
+
+diff --git a/camera/src/camera_metadata.c b/camera/src/camera_metadata.c
+index 1f09d5b1..95116f6c 100644
+--- a/camera/src/camera_metadata.c
++++ b/camera/src/camera_metadata.c
+@@ -96,10 +96,10 @@ struct camera_metadata {
+     uint32_t                 version;
+     uint32_t                 flags;
+     metadata_size_t          entry_count;
+-    metadata_size_t          entry_capacity;
++    metadata_size_t          entry_capacity; // Number of entries that can be stored
+     metadata_uptrdiff_t      entries_start; // Offset from camera_metadata
+     metadata_size_t          data_count;
+-    metadata_size_t          data_capacity;
++    metadata_size_t          data_capacity; // Number of data bytes that can be stored
+     metadata_uptrdiff_t      data_start; // Offset from camera_metadata
+     uint32_t                 padding;    // padding to 8 bytes boundary
+     metadata_vendor_id_t     vendor_id;
+@@ -487,15 +487,30 @@ int validate_camera_metadata_structure(const camera_metadata_t *metadata,
+         return CAMERA_METADATA_VALIDATION_ERROR;
+     }
+ 
++    // Check for overflow when calculating entry capacity bytes.
++    // (metadata_size_t)~0 represents the maximum representable value of metadata_size_t.
++    if (header->entry_capacity > (metadata_size_t)~0 / sizeof(camera_metadata_buffer_entry_t)) {
++        ALOGE("%s: Entry capacity (%" PRIu32 ") is too large",
++              __FUNCTION__, header->entry_capacity);
++        return CAMERA_METADATA_VALIDATION_ERROR;
++    }
++
++    metadata_size_t entries_capacity_bytes =
++            sizeof(camera_metadata_buffer_entry_t) * header->entry_capacity;
+     const metadata_uptrdiff_t entries_end =
+-        header->entries_start + header->entry_capacity;
+-    if (entries_end < header->entries_start || // overflow check
+-        entries_end > header->data_start) {
++        header->entries_start + entries_capacity_bytes;
++
++    if (entries_end < header->entries_start) {
++        ALOGE("%s: Entry start (%" PRIu32 ") + capacity bytes (%" PRIu32 ") "
++              "overflows", __FUNCTION__, header->entries_start, entries_capacity_bytes);
++        return CAMERA_METADATA_VALIDATION_ERROR;
++    }
+ 
++    if (entries_end > header->data_start) {
+         ALOGE("%s: Entry start + capacity (%" PRIu32 ") should be <= data start "
+               "(%" PRIu32 ")",
+                __FUNCTION__,
+-              (header->entries_start + header->entry_capacity),
++              entries_end,
+               header->data_start);
+         return CAMERA_METADATA_VALIDATION_ERROR;
+     }
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

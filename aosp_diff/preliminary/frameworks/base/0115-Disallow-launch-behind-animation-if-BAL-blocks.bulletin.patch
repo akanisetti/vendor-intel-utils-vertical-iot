@@ -1,0 +1,39 @@
+From fece5d22e1a9fe302730c60afd3c67f9f9791b64 Mon Sep 17 00:00:00 2001
+From: Louis Chang <louischang@google.com>
+Date: Wed, 7 Jan 2026 07:52:35 +0000
+Subject: [PATCH] Disallow launch-behind animation if BAL blocks
+
+There's no need to perform the launch-behind animation if the BAL
+blocks.
+
+Bug: 460778875
+Test: locally verified
+Flag: EXEMPT CVE_FIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:34bbada3964e240057515958c510ed26f539d527
+Merged-In: Iab9bd9fc6ebe7291d2eeec7f697cb877240d1c9e
+Change-Id: Iab9bd9fc6ebe7291d2eeec7f697cb877240d1c9e
+---
+ .../core/java/com/android/server/wm/ActivityStarter.java   | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/services/core/java/com/android/server/wm/ActivityStarter.java b/services/core/java/com/android/server/wm/ActivityStarter.java
+index 222698ce24db..7998bf56915a 100644
+--- a/services/core/java/com/android/server/wm/ActivityStarter.java
++++ b/services/core/java/com/android/server/wm/ActivityStarter.java
+@@ -1497,6 +1497,13 @@ class ActivityStarter {
+                 .setSourceRecord(sourceRecord)
+                 .build();
+ 
++        // Reset the launch-behind flag to avoid making it visible if the activity launch should
++        // be blocked.
++        if (r.mLaunchTaskBehind && balVerdict.blocks()) {
++            Slog.w(TAG, "Disallowed launching behind for a background launch");
++            r.mLaunchTaskBehind = false;
++        }
++
+         mLastStartActivityRecord = r;
+ 
+         if (r.appTimeTracker == null && sourceRecord != null) {
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

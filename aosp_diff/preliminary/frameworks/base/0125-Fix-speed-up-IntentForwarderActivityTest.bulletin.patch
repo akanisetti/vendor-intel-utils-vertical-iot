@@ -1,0 +1,275 @@
+From a9afcde1ea0991c9e3a64a29a895112af4012d02 Mon Sep 17 00:00:00 2001
+From: Matt Casey <mrcasey@google.com>
+Date: Wed, 8 Apr 2026 14:06:04 +0000
+Subject: [PATCH] Fix & speed up IntentForwarderActivityTest
+
+IntentForwarderActivityTest was waiting for 30 seconds for each test
+because it awaited an executor shutdown that it never requested. Fixing
+this exposed some race conditions that were being hidden by the delay.
+
+Also:
+- Injecting device provisioning bool instead of writing to global
+settings in the test.
+- Add android.permission.HIDE_OVERLAY_WINDOWS, otherwise
+IntentForwarderActivity crashes when it calls setHideOverlayWindows() in
+the test.
+- Fix some assertions that were backwards (asserting null on
+something that had to be non-null for the other lines to pass).
+- Re-enable the test
+
+Bug: 410925936
+Bug: 397216638
+Bug: 407763772
+Bug: 403565650
+Bug: 461500706
+Test: atest IntentForwarderActivityTest
+Flag: EXEMPT TEST_ONLY
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:7722192034b5aa341b46cf7803bad3050cf6a054
+Merged-In: Iade781e0758c477ca888bd1541e0c53e2dee3761
+Change-Id: Iade781e0758c477ca888bd1541e0c53e2dee3761
+---
+ .../internal/app/IntentForwarderActivity.java | 20 ++++-
+ core/tests/coretests/Android.bp               |  1 -
+ core/tests/coretests/AndroidManifest.xml      |  1 +
+ .../app/IntentForwarderActivityTest.java      | 78 +++++++++++++------
+ 4 files changed, 71 insertions(+), 29 deletions(-)
+
+diff --git a/core/java/com/android/internal/app/IntentForwarderActivity.java b/core/java/com/android/internal/app/IntentForwarderActivity.java
+index 525fde5d0592..f98008417c00 100644
+--- a/core/java/com/android/internal/app/IntentForwarderActivity.java
++++ b/core/java/com/android/internal/app/IntentForwarderActivity.java
+@@ -129,7 +129,7 @@ public class IntentForwarderActivity extends Activity  {
+     protected void onCreate(Bundle savedInstanceState) {
+         super.onCreate(savedInstanceState);
+         mInjector = createInjector();
+-        mExecutorService = Executors.newSingleThreadExecutor();
++        mExecutorService = mInjector.getExecutorService();
+ 
+         Intent intentReceived = getIntent();
+         String className = intentReceived.getComponent().getClassName();
+@@ -566,8 +566,7 @@ public class IntentForwarderActivity extends Activity  {
+     }
+ 
+     private boolean isDeviceProvisioned() {
+-        return Settings.Global.getInt(getContentResolver(),
+-                Settings.Global.DEVICE_PROVISIONED, /* def= */ 0) != 0;
++        return mInjector.isDeviceProvisioned();
+     }
+ 
+     private boolean isTextMessageIntent(Intent intent) {
+@@ -761,6 +760,17 @@ public class IntentForwarderActivity extends Activity  {
+         public void showToast(String message, int duration) {
+             Toast.makeText(IntentForwarderActivity.this, message, duration).show();
+         }
++
++        @Override
++        public ExecutorService getExecutorService() {
++            return Executors.newSingleThreadExecutor();
++        }
++
++        @Override
++        public boolean isDeviceProvisioned() {
++            return Settings.Global.getInt(getContentResolver(),
++                    Settings.Global.DEVICE_PROVISIONED, /* def= */ 0) != 0;
++        }
+     }
+ 
+     public interface Injector {
+@@ -776,5 +786,9 @@ public class IntentForwarderActivity extends Activity  {
+         CompletableFuture<ResolveInfo> resolveActivityAsUser(Intent intent, int flags, int userId);
+ 
+         void showToast(String message, int duration);
++
++        ExecutorService getExecutorService();
++
++        boolean isDeviceProvisioned();
+     }
+ }
+diff --git a/core/tests/coretests/Android.bp b/core/tests/coretests/Android.bp
+index 48544eed3e2a..ddad7de89ea0 100644
+--- a/core/tests/coretests/Android.bp
++++ b/core/tests/coretests/Android.bp
+@@ -510,7 +510,6 @@ test_module_config {
+     ],
+     include_filters: ["com.android.internal.app."],
+     exclude_filters: [
+-        "com.android.internal.app.IntentForwarderActivityTest",
+         "com.android.internal.app.WindowDecorActionBarTest",
+     ],
+ }
+diff --git a/core/tests/coretests/AndroidManifest.xml b/core/tests/coretests/AndroidManifest.xml
+index 9675d6bb1aba..20a146b4461d 100644
+--- a/core/tests/coretests/AndroidManifest.xml
++++ b/core/tests/coretests/AndroidManifest.xml
+@@ -62,6 +62,7 @@
+     <uses-permission android:name="android.permission.DOWNLOAD_CACHE_NON_PURGEABLE" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+     <uses-permission android:name="android.permission.GET_PACKAGE_SIZE" />
++    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+     <uses-permission android:name="android.permission.INTERNET" />
+     <uses-permission android:name="android.permission.INJECT_EVENTS" />
+     <uses-permission android:name="android.permission.MANAGE_APP_PREDICTIONS"/>
+diff --git a/core/tests/coretests/src/com/android/internal/app/IntentForwarderActivityTest.java b/core/tests/coretests/src/com/android/internal/app/IntentForwarderActivityTest.java
+index c0f027c1c139..907696417bae 100644
+--- a/core/tests/coretests/src/com/android/internal/app/IntentForwarderActivityTest.java
++++ b/core/tests/coretests/src/com/android/internal/app/IntentForwarderActivityTest.java
+@@ -55,7 +55,6 @@ import android.os.RemoteException;
+ import android.os.UserHandle;
+ import android.os.UserManager;
+ import android.platform.test.flag.junit.SetFlagsRule;
+-import android.provider.Settings;
+ 
+ import androidx.test.InstrumentationRegistry;
+ import androidx.test.ext.junit.runners.AndroidJUnit4;
+@@ -65,7 +64,6 @@ import com.android.internal.R;
+ import com.android.internal.logging.MetricsLogger;
+ import com.android.internal.logging.nano.MetricsProto.MetricsEvent;
+ 
+-import org.junit.After;
+ import org.junit.Before;
+ import org.junit.Rule;
+ import org.junit.Test;
+@@ -76,7 +74,9 @@ import org.mockito.MockitoAnnotations;
+ 
+ import java.util.ArrayList;
+ import java.util.List;
++import java.util.concurrent.AbstractExecutorService;
+ import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ExecutorService;
+ import java.util.concurrent.TimeUnit;
+ 
+ @RunWith(AndroidJUnit4.class)
+@@ -139,14 +139,6 @@ public class IntentForwarderActivityTest {
+         MockitoAnnotations.initMocks(this);
+         mContext = InstrumentationRegistry.getTargetContext();
+         sInjector = spy(new TestInjector());
+-        mDeviceProvisionedInitialValue = Settings.Global.getInt(mContext.getContentResolver(),
+-                Settings.Global.DEVICE_PROVISIONED, /* def= */ 0);
+-    }
+-
+-    @After
+-    public void tearDown() {
+-        Settings.Global.putInt(mContext.getContentResolver(), Settings.Global.DEVICE_PROVISIONED,
+-                mDeviceProvisionedInitialValue);
+     }
+ 
+     @Test
+@@ -154,7 +146,6 @@ public class IntentForwarderActivityTest {
+         sComponentName = FORWARD_TO_MANAGED_PROFILE_COMPONENT_NAME;
+         sActivityName = "MyTestActivity";
+         sPackageName = "test.package.name";
+-
+         // Intent can be forwarded.
+         when(mIPm.canForwardTo(
+                 any(Intent.class), nullable(String.class), anyInt(), anyInt())).thenReturn(true);
+@@ -295,12 +286,12 @@ public class IntentForwarderActivityTest {
+                 intentCaptor.capture(), nullable(String.class), anyInt(), anyInt());
+         List<Intent> capturedIntents = intentCaptor.getAllValues();
+         // Verify root intent is checked and sanitized
++        assertNotNull(capturedIntents.get(0));
+         assertEquals(Intent.ACTION_MAIN, capturedIntents.get(0).getAction());
+-        assertNull(capturedIntents.get(0));
+         assertNull(capturedIntents.get(0).getPackage());
+         // Verify selector is checked and sanitized
++        assertNotNull(capturedIntents.get(1));
+         assertEquals(Intent.ACTION_VIEW, capturedIntents.get(1).getAction());
+-        assertNull(capturedIntents.get(1));
+         assertNull(capturedIntents.get(1).getPackage());
+         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+         onView(withId(R.id.icon)).check(matches(isDisplayed()));
+@@ -578,8 +569,7 @@ public class IntentForwarderActivityTest {
+     @Test
+     public void shouldSkipDisclosure_duringDeviceSetup() throws RemoteException {
+         setupShouldSkipDisclosureTest();
+-        Settings.Global.putInt(mContext.getContentResolver(), Settings.Global.DEVICE_PROVISIONED,
+-                /* value= */ 0);
++        when(sInjector.isDeviceProvisioned()).thenReturn(false);
+         Intent intent = new Intent(mContext, IntentForwarderWrapperActivity.class)
+                 .setAction(Intent.ACTION_VIEW)
+                 .addCategory(Intent.CATEGORY_BROWSABLE)
+@@ -698,15 +688,14 @@ public class IntentForwarderActivityTest {
+         sComponentName = FORWARD_TO_PARENT_COMPONENT_NAME;
+         sActivityName = "MyTestActivity";
+         sPackageName = "test.package.name";
+-        Settings.Global.putInt(mContext.getContentResolver(), Settings.Global.DEVICE_PROVISIONED,
+-                /* value= */ 1);
+-        when(mApplicationInfo.isSystemApp()).thenReturn(true);
+-        // Managed profile exists.
++
++        // Intent can be forwarded. profile exists.
+         List<UserInfo> profiles = new ArrayList<>();
+         profiles.add(CURRENT_USER_INFO);
+         profiles.add(MANAGED_PROFILE_INFO);
+         when(mUserManager.getProfiles(anyInt())).thenReturn(profiles);
+         when(mUserManager.getProfileParent(anyInt())).thenReturn(CURRENT_USER_INFO);
++        when(mApplicationInfo.isSystemApp()).thenReturn(true);
+         // Intent can be forwarded.
+         when(mIPm.canForwardTo(
+                 any(Intent.class), nullable(String.class), anyInt(), anyInt())).thenReturn(true);
+@@ -722,11 +711,6 @@ public class IntentForwarderActivityTest {
+         public void onCreate(@Nullable Bundle savedInstanceState) {
+             getIntent().setComponent(sComponentName);
+             super.onCreate(savedInstanceState);
+-            try {
+-                mExecutorService.awaitTermination(/* timeout= */ 30, TimeUnit.SECONDS);
+-            } catch (InterruptedException e) {
+-                e.printStackTrace();
+-            }
+         }
+ 
+         @Override
+@@ -798,6 +782,50 @@ public class IntentForwarderActivityTest {
+         }
+ 
+         @Override
+-        public void showToast(String message, int duration) {}
++        public void showToast(String message, int duration) {
++        }
++
++        @Override
++        public ExecutorService getExecutorService() {
++            return new AbstractExecutorService() {
++                private boolean mShutDown = false;
++
++                @Override
++                public void shutdown() {
++                    mShutDown = true;
++                }
++
++                @Override
++                public List<Runnable> shutdownNow() {
++                    mShutDown = true;
++                    return new ArrayList<>();
++                }
++
++                @Override
++                public boolean isShutdown() {
++                    return mShutDown;
++                }
++
++                @Override
++                public boolean isTerminated() {
++                    return mShutDown;
++                }
++
++                @Override
++                public boolean awaitTermination(long timeout, TimeUnit unit) {
++                    return true;
++                }
++
++                @Override
++                public void execute(Runnable command) {
++                    command.run();
++                }
++            };
++        }
++
++        @Override
++        public boolean isDeviceProvisioned() {
++            return true;
++        }
+     }
+ }
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

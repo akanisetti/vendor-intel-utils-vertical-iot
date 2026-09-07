@@ -1,0 +1,64 @@
+From e26dda735b99edd974444462ce5b333dbbd3aa6a Mon Sep 17 00:00:00 2001
+From: Achim Thesmann <achim@google.com>
+Date: Thu, 7 May 2026 01:00:14 +0000
+Subject: [PATCH] Fix FGS mode in test
+
+Corrects testBoundByForegroundFgs to use mFgsCheckConfiguration, aligning the test with its intended purpose of testing Foreground Service (FGS) scenarios.
+
+Removes the obsolete testBoundByForegroundOld test method (as thethe BAL codes changed to BLOCKED for this case)
+
+Flag: EXEMPT CVE_FIX
+Test: atest BackgroundActivityLaunchProcessorTest
+Bug: 508112183
+Bug: 464526458
+Change-Id: Iab1fe3b66e73e057d4410dff93a44c13be5bfc76
+---
+ ...BackgroundLaunchProcessControllerTests.java | 18 +-----------------
+ 1 file changed, 1 insertion(+), 17 deletions(-)
+
+diff --git a/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java b/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java
+index 0b4f52fe5071..0d13e2a74562 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java
+@@ -24,7 +24,6 @@ import static com.android.server.wm.BackgroundActivityStartController.BAL_ALLOW_
+ import static com.android.server.wm.BackgroundActivityStartController.BAL_ALLOW_GRACE_PERIOD;
+ import static com.android.server.wm.BackgroundActivityStartController.BAL_ALLOW_PERMISSION;
+ import static com.android.server.wm.BackgroundActivityStartController.BAL_ALLOW_TOKEN;
+-import static com.android.server.wm.BackgroundActivityStartController.BAL_ALLOW_VISIBLE_WINDOW;
+ import static com.android.server.wm.BackgroundActivityStartController.BAL_BLOCK;
+ 
+ import static com.google.common.truth.Truth.assertThat;
+@@ -212,21 +211,6 @@ public class BackgroundLaunchProcessControllerTests {
+         assertThat(balVerdict.getCode()).isEqualTo(BAL_ALLOW_TOKEN);
+     }
+ 
+-    @Test
+-    @DisableFlags(Flags.FLAG_BAL_IMPROVED_METRICS)
+-    public void testBoundByForegroundOld() {
+-        mAppSwitchState = APP_SWITCH_ALLOW;
+-        mController.addBoundClientUid(999, "visible.package", Context.BIND_ALLOW_ACTIVITY_STARTS);
+-        mHasActiveVisibleWindow.add(999);
+-        BalVerdict balVerdict = mController.areBackgroundActivityStartsAllowed(
+-                mPid, mUid, mPackageName,
+-                mAppSwitchState, mBalCheckConfiguration, mInPinnedWindoMode,
+-                mHasActivityInVisibleTask, mHasBackgroundActivityStartPrivileges,
+-                mLastStopAppSwitchesTime, mLastActivityLaunchTime,
+-                mLastActivityFinishTime);
+-        assertThat(balVerdict.getCode()).isEqualTo(BAL_ALLOW_VISIBLE_WINDOW);
+-    }
+-
+     @Test
+     public void testBoundByForegroundFgs() {
+         mAppSwitchState = APP_SWITCH_ALLOW;
+@@ -234,7 +218,7 @@ public class BackgroundLaunchProcessControllerTests {
+         mHasActiveVisibleWindow.add(999);
+         BalVerdict balVerdict = mController.areBackgroundActivityStartsAllowed(
+                 mPid, mUid, mPackageName,
+-                mAppSwitchState, mBalCheckConfiguration, mInPinnedWindoMode,
++                mAppSwitchState, mFgsCheckConfiguration, mInPinnedWindoMode,
+                 mHasActivityInVisibleTask, mHasBackgroundActivityStartPrivileges,
+                 mLastStopAppSwitchesTime, mLastActivityLaunchTime,
+                 mLastActivityFinishTime);
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

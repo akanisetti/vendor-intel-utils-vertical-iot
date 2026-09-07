@@ -1,0 +1,39 @@
+From 28622a8174204e332b17da89683a0385d7cda857 Mon Sep 17 00:00:00 2001
+From: Preston Cody <codeman@google.com>
+Date: Sun, 19 Apr 2026 16:35:35 -0700
+Subject: [PATCH] [libopenapv] Add dimension validation in dec_frm_prepare
+
+Validates that the provided image buffer (imgb) has sufficient
+dimensions to accommodate the frame being decoded as specified in the
+Frame PBU header. This prevents a heap buffer overflow when Frame PBU
+dimensions are larger than those in AU_INFO (which are used for buffer
+allocation).
+
+Bug: 492492028
+Test: oapv_repro (local test program)
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:cf05ca54cffdb52567dbdc30ebc7eeff46b75e05
+Merged-In: I7d3f778d519343d6d20f00ea84346e7dd4d984a7
+Change-Id: I7d3f778d519343d6d20f00ea84346e7dd4d984a7
+---
+ src/oapv.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/oapv.c b/src/oapv.c
+index 432592f..b2c0b41 100644
+--- a/src/oapv.c
++++ b/src/oapv.c
+@@ -1554,6 +1554,10 @@ static int dec_set_tile_info(oapvd_tile_t* tile, int w_pel, int h_pel, int tile_
+ 
+ static int dec_frm_prepare(oapvd_ctx_t *ctx, oapv_imgb_t *imgb)
+ {
++    if (imgb->w[0] < ctx->fh.fi.frame_width || imgb->h[0] < ctx->fh.fi.frame_height) {
++        return OAPV_ERR_INVALID_ARGUMENT;
++    }
++
+     ctx->imgb = imgb;
+     imgb_addref(ctx->imgb); // increase reference count
+ 
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

@@ -1,0 +1,187 @@
+From 146d9a1f2dd90e9f259f92955a660f705c5d5f87 Mon Sep 17 00:00:00 2001
+From: Achim Thesmann <achim@google.com>
+Date: Fri, 9 Jan 2026 03:48:10 +0000
+Subject: [PATCH] RESTRICT AUTOMERGE Require to be bound with non-pinned
+ visible window
+
+The original check only required any non-toast window, which means a PiP (pinned) window was sufficent to allow BAL.
+To be consistent with regular BAL behavior the BAL check now requires a non-pinned visible window, while FGS starts are still allowed with PiP windows.
+
+Flag: EXEMPT CVE_FIX
+Test: atest android.server.wm.BackgroundActivityLaunchTest
+Test: https://android-build.corp.google.com/builds/abtd/run/L20700030060843304
+Bug: 464526458
+Merged-In: I1a8d17e1656d6484ad1eb9a5e28ab0cc2403324f
+Change-Id: I334c6774729745efbe04a4cb943cfb323bfd53ad
+---
+ .../server/wm/ActivityTaskManagerService.java |  9 ++++++
+ .../wm/BackgroundLaunchProcessController.java | 13 ++++++--
+ .../server/wm/WindowProcessController.java    |  3 +-
+ ...ackgroundLaunchProcessControllerTests.java | 31 ++++++++++++++++---
+ 4 files changed, 47 insertions(+), 9 deletions(-)
+
+diff --git a/services/core/java/com/android/server/wm/ActivityTaskManagerService.java b/services/core/java/com/android/server/wm/ActivityTaskManagerService.java
+index d11d63329692..3c32806ad179 100644
+--- a/services/core/java/com/android/server/wm/ActivityTaskManagerService.java
++++ b/services/core/java/com/android/server/wm/ActivityTaskManagerService.java
+@@ -5750,6 +5750,15 @@ public class ActivityTaskManagerService extends IActivityTaskManager.Stub {
+         return mActiveUids.hasNonAppVisibleWindow(uid);
+     }
+ 
++    /** Similar to {@link #hasActiveVisibleWindow(int)}, but only considers non pinned app
++     * windows */
++    boolean hasActiveVisibleNotPinnedWindow(int uid) {
++        if (mVisibleActivityProcessTracker.hasVisibleNotPinnedActivity(uid)) {
++            return true;
++        }
++        return mActiveUids.hasNonAppVisibleWindow(uid);
++    }
++
+     boolean isDeviceOwner(int uid) {
+         return uid >= 0 && mDeviceOwnerUid == uid;
+     }
+diff --git a/services/core/java/com/android/server/wm/BackgroundLaunchProcessController.java b/services/core/java/com/android/server/wm/BackgroundLaunchProcessController.java
+index d9d638604df3..87a251544603 100644
+--- a/services/core/java/com/android/server/wm/BackgroundLaunchProcessController.java
++++ b/services/core/java/com/android/server/wm/BackgroundLaunchProcessController.java
+@@ -75,6 +75,9 @@ class BackgroundLaunchProcessController {
+     /** It is {@link ActivityTaskManagerService#hasActiveVisibleWindow(int)}. */
+     private final IntPredicate mUidHasActiveVisibleWindowPredicate;
+ 
++    /** It is {@link ActivityTaskManagerService#hasActiveVisibleNotPinnedWindow(int)}. */
++    private final IntPredicate mUidHasActiveVisibleNotPinnedWindowPredicate;
++
+     private final @Nullable BackgroundActivityStartCallback mBackgroundActivityStartCallback;
+ 
+     /**
+@@ -92,8 +95,10 @@ class BackgroundLaunchProcessController {
+     private @Nullable IntArray mBalOptInBoundClientUids;
+ 
+     BackgroundLaunchProcessController(@NonNull IntPredicate uidHasActiveVisibleWindowPredicate,
++            @NonNull IntPredicate uidHasActiveVisibleNotPinnedWindowPredicate,
+             @Nullable BackgroundActivityStartCallback callback) {
+         mUidHasActiveVisibleWindowPredicate = uidHasActiveVisibleWindowPredicate;
++        mUidHasActiveVisibleNotPinnedWindowPredicate = uidHasActiveVisibleNotPinnedWindowPredicate;
+         mBackgroundActivityStartCallback = callback;
+     }
+ 
+@@ -143,7 +148,9 @@ class BackgroundLaunchProcessController {
+         // Allow if the caller is bound by a UID that's currently foreground.
+         // But still respect the appSwitchState.
+         if (checkConfiguration.checkVisibility && appSwitchState != APP_SWITCH_DISALLOW
+-                && isBoundByForegroundUid()) {
++                && isBoundByForegroundUid(checkConfiguration.isCheckingForFgsStart
++                ? mUidHasActiveVisibleWindowPredicate
++                : mUidHasActiveVisibleNotPinnedWindowPredicate)) {
+             return new BalVerdict(balImprovedMetrics() ? BAL_ALLOW_BOUND_BY_FOREGROUND
+                     : BAL_ALLOW_VISIBLE_WINDOW, /*background*/
+                     "process bound by foreground uid");
+@@ -244,11 +251,11 @@ class BackgroundLaunchProcessController {
+         return originatingTokens;
+     }
+ 
+-    private boolean isBoundByForegroundUid() {
++    private boolean isBoundByForegroundUid(IntPredicate uidVisibilityPredicate) {
+         synchronized (this) {
+             if (mBalOptInBoundClientUids != null) {
+                 for (int i = mBalOptInBoundClientUids.size() - 1; i >= 0; i--) {
+-                    if (mUidHasActiveVisibleWindowPredicate.test(mBalOptInBoundClientUids.get(i))) {
++                    if (uidVisibilityPredicate.test(mBalOptInBoundClientUids.get(i))) {
+                         return true;
+                     }
+                 }
+diff --git a/services/core/java/com/android/server/wm/WindowProcessController.java b/services/core/java/com/android/server/wm/WindowProcessController.java
+index 4f79b9e86033..76207b921536 100644
+--- a/services/core/java/com/android/server/wm/WindowProcessController.java
++++ b/services/core/java/com/android/server/wm/WindowProcessController.java
+@@ -366,7 +366,8 @@ public class WindowProcessController extends ConfigurationContainer<Configuratio
+         mListener = listener;
+         mAtm = atm;
+         mBgLaunchController = new BackgroundLaunchProcessController(
+-                atm::hasActiveVisibleWindow, atm.getBackgroundActivityStartCallback());
++                atm::hasActiveVisibleWindow, atm::hasActiveVisibleNotPinnedWindow,
++                atm.getBackgroundActivityStartCallback());
+ 
+         boolean isSysUiPackage = info.packageName.equals(
+                 mAtm.getSysUiServiceComponentLocked().getPackageName());
+diff --git a/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java b/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java
+index a439178600ba..0b4f52fe5071 100644
+--- a/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java
++++ b/services/tests/wmtests/src/com/android/server/wm/BackgroundLaunchProcessControllerTests.java
+@@ -71,6 +71,7 @@ public class BackgroundLaunchProcessControllerTests {
+ 
+     Set<IBinder> mActivityStartAllowed = new HashSet<>();
+     Set<Integer> mHasActiveVisibleWindow = new HashSet<>();
++    Set<Integer> mHasActiveNotPinnedVisibleWindow = new HashSet<>();
+ 
+     BackgroundActivityStartCallback mCallback = new BackgroundActivityStartCallback() {
+         @Override
+@@ -90,12 +91,19 @@ public class BackgroundLaunchProcessControllerTests {
+         }
+     };
+     BackgroundLaunchProcessController mController = new BackgroundLaunchProcessController(
+-            mHasActiveVisibleWindow::contains, mCallback);
++            mHasActiveVisibleWindow::contains, mHasActiveNotPinnedVisibleWindow::contains,
++            mCallback);
+ 
+     int mPid = 123;
+     int mUid = 234;
+     String mPackageName = "package.name";
+     int mAppSwitchState = APP_SWITCH_DISALLOW;
++    BackgroundLaunchProcessController.BalCheckConfiguration mFgsCheckConfiguration =
++            new BackgroundLaunchProcessController.BalCheckConfiguration(
++                    /* isCheckingForFgsStarts */ true,
++                    /* checkVisibility */ true,
++                    /* checkOtherExemptions */ true,
++                    ACTIVITY_BG_START_GRACE_PERIOD_MS);
+     BackgroundLaunchProcessController.BalCheckConfiguration mBalCheckConfiguration =
+             new BackgroundLaunchProcessController.BalCheckConfiguration(
+                     /* isCheckingForFgsStarts */ false,
+@@ -138,7 +146,7 @@ public class BackgroundLaunchProcessControllerTests {
+     @DisableFlags(Flags.FLAG_BAL_IMPROVED_METRICS)
+     public void testAllowedByTokenNoCallbackOld() {
+         mController = new BackgroundLaunchProcessController(mHasActiveVisibleWindow::contains,
+-                null);
++                mHasActiveNotPinnedVisibleWindow::contains, null);
+         Binder token = new Binder();
+         mActivityStartAllowed.add(token);
+         mController.addOrUpdateAllowBackgroundStartPrivileges(token,
+@@ -156,7 +164,7 @@ public class BackgroundLaunchProcessControllerTests {
+     @EnableFlags(Flags.FLAG_BAL_IMPROVED_METRICS)
+     public void testAllowedByTokenNoCallback() {
+         mController = new BackgroundLaunchProcessController(mHasActiveVisibleWindow::contains,
+-                null);
++                mHasActiveNotPinnedVisibleWindow::contains, null);
+         Binder token = new Binder();
+         mActivityStartAllowed.add(token);
+         mController.addOrUpdateAllowBackgroundStartPrivileges(token,
+@@ -220,11 +228,24 @@ public class BackgroundLaunchProcessControllerTests {
+     }
+ 
+     @Test
+-    @EnableFlags(Flags.FLAG_BAL_IMPROVED_METRICS)
+-    public void testBoundByForeground() {
++    public void testBoundByForegroundFgs() {
+         mAppSwitchState = APP_SWITCH_ALLOW;
+         mController.addBoundClientUid(999, "visible.package", Context.BIND_ALLOW_ACTIVITY_STARTS);
+         mHasActiveVisibleWindow.add(999);
++        BalVerdict balVerdict = mController.areBackgroundActivityStartsAllowed(
++                mPid, mUid, mPackageName,
++                mAppSwitchState, mBalCheckConfiguration, mInPinnedWindoMode,
++                mHasActivityInVisibleTask, mHasBackgroundActivityStartPrivileges,
++                mLastStopAppSwitchesTime, mLastActivityLaunchTime,
++                mLastActivityFinishTime);
++        assertThat(balVerdict.getCode()).isEqualTo(BAL_ALLOW_BOUND_BY_FOREGROUND);
++    }
++
++    @Test
++    public void testBoundByForeground() {
++        mAppSwitchState = APP_SWITCH_ALLOW;
++        mController.addBoundClientUid(999, "visible.package", Context.BIND_ALLOW_ACTIVITY_STARTS);
++        mHasActiveNotPinnedVisibleWindow.add(999);
+         BalVerdict balVerdict = mController.areBackgroundActivityStartsAllowed(
+                 mPid, mUid, mPackageName,
+                 mAppSwitchState, mBalCheckConfiguration,
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

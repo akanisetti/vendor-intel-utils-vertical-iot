@@ -1,0 +1,46 @@
+From 5572625867bc3f4bc375129df666bc6d2000053f Mon Sep 17 00:00:00 2001
+From: Evan Severson <evanseverson@google.com>
+Date: Thu, 9 Apr 2026 08:40:44 -0700
+Subject: [PATCH] DO NOT MERGE: [ClipboardService] Check notification setting
+ for given user
+
+Test: Manual
+Bug: 466379087
+Flag: EXEMPT CVE_FIX
+
+Change-Id: Iff63d51c5b269649589c45a8aab0bb9f75b7254a
+---
+ .../com/android/server/clipboard/ClipboardService.java   | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/services/core/java/com/android/server/clipboard/ClipboardService.java b/services/core/java/com/android/server/clipboard/ClipboardService.java
+index 40136c3e03ec..e00a06168d16 100644
+--- a/services/core/java/com/android/server/clipboard/ClipboardService.java
++++ b/services/core/java/com/android/server/clipboard/ClipboardService.java
+@@ -553,8 +553,9 @@ public class ClipboardService extends SystemService {
+             try {
+                 ContentResolver resolver = getContext()
+                         .createContextAsUser(UserHandle.of(userId), 0).getContentResolver();
+-                Settings.Secure.putInt(resolver,
+-                        Settings.Secure.CLIPBOARD_SHOW_ACCESS_NOTIFICATIONS, (enable ? 1 : 0));
++                Settings.Secure.putIntForUser(resolver,
++                        Settings.Secure.CLIPBOARD_SHOW_ACCESS_NOTIFICATIONS, (enable ? 1 : 0),
++                        userId);
+             } finally {
+                 Binder.restoreCallingIdentity(callingId);
+             }
+@@ -1438,9 +1439,9 @@ public class ClipboardService extends SystemService {
+         if (clipboard.primaryClip == null) {
+             return;
+         }
+-        if (Settings.Secure.getInt(getContext().getContentResolver(),
++        if (Settings.Secure.getIntForUser(getContext().getContentResolver(),
+                 Settings.Secure.CLIPBOARD_SHOW_ACCESS_NOTIFICATIONS,
+-                (mShowAccessNotifications ? 1 : 0)) == 0) {
++                (mShowAccessNotifications ? 1 : 0), userId) == 0) {
+             return;
+         }
+         // Don't notify if the app accessing the clipboard is the same as the current owner.
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

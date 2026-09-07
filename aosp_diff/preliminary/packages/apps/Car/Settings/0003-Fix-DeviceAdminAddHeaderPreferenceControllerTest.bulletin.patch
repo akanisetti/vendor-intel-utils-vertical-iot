@@ -1,0 +1,120 @@
+From 75907e6ef09a3ad290fd565ea315867ad2b0c5c9 Mon Sep 17 00:00:00 2001
+From: Charles Chen <charlesccchen@google.com>
+Date: Mon, 23 Mar 2026 06:54:51 +0000
+Subject: [PATCH] Fix DeviceAdminAddHeaderPreferenceControllerTest
+
+As we remove AppOpsManager usages in production code,
+we should remove the usages in tests as well.
+
+Bug: 463364901
+Fixes: 494531001
+Test: atest CarSettingsMultivalentDeviceTests com.android.car.settings.enterprise.DeviceAdminAddHeaderPreferenceControllerTest
+Flag: EXEMPT TEST_ONLY
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:3db89f187b25c9094463df38e7f71a4d5dd8a235
+Merged-In: I0702ac9029fad3c42f647e92a5bcbb308da5083c
+Change-Id: I0702ac9029fad3c42f647e92a5bcbb308da5083c
+---
+ .../settings/enterprise/BaseEnterpriseTestCase.java |  8 --------
+ ...eviceAdminAddHeaderPreferenceControllerTest.java | 13 -------------
+ 2 files changed, 21 deletions(-)
+
+diff --git a/tests/multivalent/src/com/android/car/settings/enterprise/BaseEnterpriseTestCase.java b/tests/multivalent/src/com/android/car/settings/enterprise/BaseEnterpriseTestCase.java
+index f3a83a77b..c63413c92 100644
+--- a/tests/multivalent/src/com/android/car/settings/enterprise/BaseEnterpriseTestCase.java
++++ b/tests/multivalent/src/com/android/car/settings/enterprise/BaseEnterpriseTestCase.java
+@@ -29,7 +29,6 @@ import static org.mockito.Mockito.verify;
+ import static org.mockito.Mockito.when;
+ 
+ import android.annotation.UserIdInt;
+-import android.app.AppOpsManager;
+ import android.app.admin.DeviceAdminInfo;
+ import android.app.admin.DevicePolicyManager;
+ import android.content.ComponentName;
+@@ -39,7 +38,6 @@ import android.content.pm.ActivityInfo;
+ import android.content.pm.PackageManager;
+ import android.content.pm.ResolveInfo;
+ import android.content.pm.UserInfo;
+-import android.os.IBinder;
+ import android.os.UserHandle;
+ import android.os.UserManager;
+ 
+@@ -84,8 +82,6 @@ public abstract class BaseEnterpriseTestCase {
+     protected DeviceAdminInfo mDefaultDeviceAdminInfo;
+     protected DeviceAdminInfo mFancyDeviceAdminInfo;
+ 
+-    @Mock
+-    protected AppOpsManager mAppOpsMgr;
+ 
+     @Mock
+     protected DevicePolicyManager mDpm;
+@@ -111,7 +107,6 @@ public abstract class BaseEnterpriseTestCase {
+         assertWithMessage("mDpm").that(mDpm).isNotNull();
+         assertWithMessage("mUm").that(mUm).isNotNull();
+ 
+-        when(mSpiedContext.getSystemService(AppOpsManager.class)).thenReturn(mAppOpsMgr);
+         when(mSpiedContext.getSystemService(DevicePolicyManager.class)).thenReturn(mDpm);
+         when(mSpiedContext.getSystemService(PackageManager.class)).thenReturn(mSpiedPm);
+         when(mSpiedContext.getPackageManager()).thenReturn(mSpiedPm);
+@@ -277,7 +272,4 @@ public abstract class BaseEnterpriseTestCase {
+         verify(mDpm, never()).removeActiveAdmin(any());
+     }
+ 
+-    protected final void verifyAppOpsMgrSetUserRestriction(int code, boolean restricted) {
+-        verify(mAppOpsMgr).setUserRestriction(eq(code), eq(restricted), any(IBinder.class));
+-    }
+ }
+diff --git a/tests/multivalent/src/com/android/car/settings/enterprise/DeviceAdminAddHeaderPreferenceControllerTest.java b/tests/multivalent/src/com/android/car/settings/enterprise/DeviceAdminAddHeaderPreferenceControllerTest.java
+index 8bb50d1fa..432a63a8f 100644
+--- a/tests/multivalent/src/com/android/car/settings/enterprise/DeviceAdminAddHeaderPreferenceControllerTest.java
++++ b/tests/multivalent/src/com/android/car/settings/enterprise/DeviceAdminAddHeaderPreferenceControllerTest.java
+@@ -19,7 +19,6 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
+ import static org.mockito.Mockito.never;
+ import static org.mockito.Mockito.verify;
+ 
+-import android.app.AppOpsManager;
+ 
+ import androidx.preference.TwoStatePreference;
+ 
+@@ -127,9 +126,6 @@ public final class DeviceAdminAddHeaderPreferenceControllerTest extends
+ 
+         verifyPreferenceSetChecked(mPreference, false);
+         verifyPreferenceEnabled(mPreference);
+-        verifyAppOpsMgrSetUserRestriction(AppOpsManager.OP_SYSTEM_ALERT_WINDOW,
+-                /* restricted= */ true);
+-        verifyAppOpsMgrSetUserRestriction(AppOpsManager.OP_TOAST_WINDOW, /* restricted= */ true);
+     }
+ 
+     @Test
+@@ -140,9 +136,6 @@ public final class DeviceAdminAddHeaderPreferenceControllerTest extends
+ 
+         verifyPreferenceSetChecked(mPreference, true);
+         verifyPreferenceEnabled(mPreference);
+-        verifyAppOpsMgrSetUserRestriction(AppOpsManager.OP_SYSTEM_ALERT_WINDOW,
+-                /* restricted= */ true);
+-        verifyAppOpsMgrSetUserRestriction(AppOpsManager.OP_TOAST_WINDOW, /* restricted= */ true);
+     }
+ 
+     @Test
+@@ -153,9 +146,6 @@ public final class DeviceAdminAddHeaderPreferenceControllerTest extends
+ 
+         verifyPreferenceSetChecked(mPreference, true);
+         verifyPreferenceDisabled(mPreference);
+-        verifyAppOpsMgrSetUserRestriction(AppOpsManager.OP_SYSTEM_ALERT_WINDOW,
+-                /* restricted= */ true);
+-        verifyAppOpsMgrSetUserRestriction(AppOpsManager.OP_TOAST_WINDOW, /* restricted= */ true);
+     }
+ 
+     @Test
+@@ -163,9 +153,6 @@ public final class DeviceAdminAddHeaderPreferenceControllerTest extends
+         mController.onPauseInternal(mPreference);
+ 
+         verifyPreferenceDisabled(mPreference);
+-        verifyAppOpsMgrSetUserRestriction(AppOpsManager.OP_SYSTEM_ALERT_WINDOW,
+-                /* restricted= */ false);
+-        verifyAppOpsMgrSetUserRestriction(AppOpsManager.OP_TOAST_WINDOW, /* restricted= */ false);
+     }
+ 
+     @Test
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

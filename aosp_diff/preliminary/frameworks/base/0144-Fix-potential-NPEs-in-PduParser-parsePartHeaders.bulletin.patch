@@ -1,0 +1,61 @@
+From cc7b079413126dd57cf57efeb61d3c2c1f0df08c Mon Sep 17 00:00:00 2001
+From: Soumyadeep Paul <paulsoumyadeep@google.com>
+Date: Thu, 18 Jun 2026 00:52:14 -0700
+Subject: [PATCH] Fix potential NPEs in PduParser.parsePartHeaders
+
+Add null checks for contentDisposition, filename, and
+Content-Transfer-Encoding headers to prevent NullPointerExceptions.
+
+Bug: 513581389
+Test: m framework-minus-apex
+Flag: EXEMPT BUGFIX
+Change-Id: I4cad171d30b14f3b6fd9dd2a0ef6bb1e5320665d
+Merged-In: I4cad171d30b14f3b6fd9dd2a0ef6bb1e5320665d
+---
+ .../com/google/android/mms/pdu/PduParser.java    | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/telephony/common/com/google/android/mms/pdu/PduParser.java b/telephony/common/com/google/android/mms/pdu/PduParser.java
+index 62eac7ac942a..0919382c7b40 100644
+--- a/telephony/common/com/google/android/mms/pdu/PduParser.java
++++ b/telephony/common/com/google/android/mms/pdu/PduParser.java
+@@ -1696,8 +1696,11 @@ public class PduParser {
+                             } else {
+                                 pduDataStream.reset();
+                                 /* Token-text */
+-                                part.setContentDisposition(parseWapString(pduDataStream
+-                                        , TYPE_TEXT_STRING));
++                                byte[] contentDisposition = parseWapString(pduDataStream
++                                        , TYPE_TEXT_STRING);
++                                if (null != contentDisposition) {
++                                    part.setContentDisposition(contentDisposition);
++                                }
+                             }
+ 
+                             /* get filename parameter and skip other parameters */
+@@ -1705,8 +1708,11 @@ public class PduParser {
+                             if (thisStartPos - thisEndPos < len) {
+                                 value = pduDataStream.read();
+                                 if (value == PduPart.P_FILENAME) { //filename is text-string
+-                                    part.setFilename(parseWapString(pduDataStream
+-                                            , TYPE_TEXT_STRING));
++                                    byte[] filename = parseWapString(pduDataStream
++                                            , TYPE_TEXT_STRING);
++                                    if (null != filename) {
++                                        part.setFilename(filename);
++                                    }
+                                 }
+ 
+                                 /* skip other parameters */
+@@ -1739,7 +1745,7 @@ public class PduParser {
+                 byte[] tempValue = parseWapString(pduDataStream, TYPE_TEXT_STRING);
+ 
+                 // Check the header whether it is "Content-Transfer-Encoding".
+-                if (true ==
++                if (null != tempHeader && null != tempValue &&
+                     PduPart.CONTENT_TRANSFER_ENCODING.equalsIgnoreCase(new String(tempHeader))) {
+                     part.setContentTransferEncoding(tempValue);
+                 }
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

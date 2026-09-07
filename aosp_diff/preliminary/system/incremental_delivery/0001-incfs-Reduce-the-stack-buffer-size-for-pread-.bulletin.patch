@@ -1,0 +1,56 @@
+From 71c3c0252b97e29cefda24bee4f598b925a4d605 Mon Sep 17 00:00:00 2001
+From: Yurii Zubrytskyi <zyy@google.com>
+Date: Thu, 15 Jan 2026 10:12:32 -0800
+Subject: [PATCH] [incfs] Reduce the stack buffer size for pread()
+
+128k is nice and all, but it may cause stack overflow if
+we're already nearing the limit. 32k should be enough for
+everyone.
+
+Bug: 466091304
+Test: build + unit tests
+Flag: EXEMPT BUGFIX
+Merged-In: I8ac5de734544efff523b2014a7d11c9f9beb9e4a
+Change-Id: I8ac5de734544efff523b2014a7d11c9f9beb9e4a
+---
+ incfs/MountRegistry.cpp | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/incfs/MountRegistry.cpp b/incfs/MountRegistry.cpp
+index 376eaf2..eaf97dc 100644
+--- a/incfs/MountRegistry.cpp
++++ b/incfs/MountRegistry.cpp
+@@ -258,10 +258,16 @@ std::unique_lock<std::mutex> MountRegistry::ensureUpToDate() {
+     return lock;
+ }
+ 
+-template <class Callback>
++template <size_t maxLineLength, class Callback>
+ static bool forEachLine(base::borrowed_fd fd, Callback&& cb) {
+-    static constexpr auto kBufSize = 128 * 1024;
+-    char buffer[kBufSize];
++    // Make sure we don't use too large buffer and not overrun the stack space if it's already close
++    // to full.
++    constexpr auto kBufSize = 32 * 1024;
++
++    static_assert(maxLineLength < kBufSize,
++                  "Stack-allocated buffer is too small for the requested line size, "
++                  "time to rewrite with a vector");
++    char buffer[kBufSize] __attribute__((uninitialized));
+     const char* nextLine = buffer;
+     char* nextRead = buffer;
+     int64_t pos = 0;
+@@ -329,7 +335,9 @@ bool MountRegistry::Mounts::loadFrom(base::borrowed_fd fd, std::string_view file
+     };
+     std::unordered_map<std::string, MountInfo> mountsByGroup(16);
+     std::vector<std::string_view> items(12);
+-    const auto parsed = forEachLine(fd, [&](std::string_view line) {
++    // Each line contains 3 paths + some shorter fields.
++    constexpr auto maxLineSize = 3 * PATH_MAX + 1024;
++    const auto parsed = forEachLine<maxLineSize>(fd, [&](std::string_view line) {
+         if (line.empty()) {
+             return;
+         }
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

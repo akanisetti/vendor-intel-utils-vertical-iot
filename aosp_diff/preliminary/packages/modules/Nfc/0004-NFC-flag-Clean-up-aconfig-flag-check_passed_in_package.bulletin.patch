@@ -1,0 +1,137 @@
+From c2982b70ee1c81ab5bb5a7a653a4196fe1a4be89 Mon Sep 17 00:00:00 2001
+From: Bob Wang <ziyiw@google.com>
+Date: Wed, 11 Jun 2025 15:51:53 -0700
+Subject: [PATCH] [NFC flag] Clean up aconfig flag check_passed_in_package
+
+Test: compile
+Bug: 423945497
+Bug: 497544808
+Flag: EXEMPT removing com.android.nfc.flags.check_passed_in_package
+Change-Id: I39cde16cd0b4602e8cefdd7ce6dfeed936d9d628
+Merged-In: I39cde16cd0b4602e8cefdd7ce6dfeed936d9d628
+(cherry picked from commit 7b40ea922150f05b3ea067005a53400f2a313040)
+---
+ NfcNci/flags/nfc_flags.aconfig                |  7 ------
+ NfcNci/src/com/android/nfc/NfcService.java    | 24 +++++--------------
+ .../src/com/android/nfc/NfcServiceTest.java   |  3 +++
+ 3 files changed, 9 insertions(+), 25 deletions(-)
+
+diff --git a/NfcNci/flags/nfc_flags.aconfig b/NfcNci/flags/nfc_flags.aconfig
+index fb6c8e8e1..7ff7d8cff 100644
+--- a/NfcNci/flags/nfc_flags.aconfig
++++ b/NfcNci/flags/nfc_flags.aconfig
+@@ -68,13 +68,6 @@ flag {
+     bug: "323440961"
+ }
+ 
+-flag {
+-    name: "check_passed_in_package"
+-    namespace: "nfc"
+-    description: "Enable checking package name in nfc service"
+-    bug: "364020298"
+-}
+-
+ flag {
+     name: "nfc_alert_tag_app_launch"
+     namespace: "nfc"
+diff --git a/NfcNci/src/com/android/nfc/NfcService.java b/NfcNci/src/com/android/nfc/NfcService.java
+index 6072e7506..182a5dbff 100644
+--- a/NfcNci/src/com/android/nfc/NfcService.java
++++ b/NfcNci/src/com/android/nfc/NfcService.java
+@@ -2267,9 +2267,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback
+     final class NfcAdapterService extends INfcAdapter.Stub {
+         @Override
+         public boolean enable(String pkg) throws RemoteException {
+-            if (Flags.checkPassedInPackage()) {
+-                mNfcPermissions.checkPackage(Binder.getCallingUid(), pkg);
+-            }
++            mNfcPermissions.checkPackage(Binder.getCallingUid(), pkg);
+             boolean isDeviceOrProfileOwner = isDeviceOrProfileOwner(Binder.getCallingUid(), pkg);
+             if (!NfcPermissions.checkAdminPermissions(mContext)
+                     && !isDeviceOrProfileOwner) {
+@@ -2320,9 +2318,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback
+ 
+         @Override
+         public boolean disable(boolean saveState, String pkg) throws RemoteException {
+-            if (Flags.checkPassedInPackage()) {
+-                mNfcPermissions.checkPackage(Binder.getCallingUid(), pkg);
+-            }
++            mNfcPermissions.checkPackage(Binder.getCallingUid(), pkg);
+ 
+             boolean isDeviceOrProfileOwner = isDeviceOrProfileOwner(Binder.getCallingUid(), pkg);
+             if (!NfcPermissions.checkAdminPermissions(mContext)
+@@ -2391,9 +2387,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback
+         @Override
+         public boolean setObserveMode(boolean enable, String packageName) {
+             synchronized (NfcService.this) {
+-                if (Flags.checkPassedInPackage()) {
+-                    mNfcPermissions.checkPackage(Binder.getCallingUid(), packageName);
+-                }
++                mNfcPermissions.checkPackage(Binder.getCallingUid(), packageName);
+                 if (!isNfcEnabled()) {
+                     Log.e(TAG, "setObserveMode: NFC must be enabled but is: " + mState);
+                     return false;
+@@ -2727,9 +2721,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback
+         public void updateDiscoveryTechnology(
+                 IBinder binder, int pollTech, int listenTech, String packageName)
+                 throws RemoteException {
+-            if (Flags.checkPassedInPackage()) {
+-                mNfcPermissions.checkPackage(Binder.getCallingUid(), packageName);
+-            }
++            mNfcPermissions.checkPackage(Binder.getCallingUid(), packageName);
+             NfcPermissions.enforceUserPermissions(mContext);
+             int callingUid = Binder.getCallingUid();
+             boolean privilegedCaller = NfcInjector.isPrivileged(callingUid)
+@@ -2860,9 +2852,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback
+         public void setReaderMode(
+                 IBinder binder, IAppCallback callback, int flags, Bundle extras, String packageName)
+                 throws RemoteException {
+-            if (Flags.checkPassedInPackage()) {
+-                mNfcPermissions.checkPackage(Binder.getCallingUid(), packageName);
+-            }
++            mNfcPermissions.checkPackage(Binder.getCallingUid(), packageName);
+             int callingUid = Binder.getCallingUid();
+             int callingPid = Binder.getCallingPid();
+             boolean privilegedCaller = NfcInjector.isPrivileged(callingUid)
+@@ -3614,9 +3604,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback
+ 
+         @Override
+         public void indicateDataMigration(boolean inProgress, String pkg) throws RemoteException {
+-            if (Flags.checkPassedInPackage()) {
+-                mNfcPermissions.checkPackage(Binder.getCallingUid(), pkg);
+-            }
++            mNfcPermissions.checkPackage(Binder.getCallingUid(), pkg);
+             if (DBG) Log.i(TAG, "indicateDataMigration: inProgress: " + inProgress);
+             NfcPermissions.enforceAdminPermissions(mContext);
+             mNfcEventLog.logEvent(
+diff --git a/NfcNci/tests/unit/src/com/android/nfc/NfcServiceTest.java b/NfcNci/tests/unit/src/com/android/nfc/NfcServiceTest.java
+index 40c0eddcf..e909d7ec8 100644
+--- a/NfcNci/tests/unit/src/com/android/nfc/NfcServiceTest.java
++++ b/NfcNci/tests/unit/src/com/android/nfc/NfcServiceTest.java
+@@ -55,6 +55,7 @@ import static org.mockito.Mockito.when;
+ import android.app.ActivityManager;
+ import android.app.AlarmManager;
+ import android.app.Application;
++import android.app.AppOpsManager;
+ import android.app.KeyguardManager;
+ import android.app.VrManager;
+ import android.app.backup.BackupManager;
+@@ -190,6 +191,7 @@ public final class NfcServiceTest {
+     @Mock NfcCharging mNfcCharging;
+     @Mock VrManager mVrManager;
+     @Mock RoleManager mRoleManager;
++    @Mock AppOpsManager mAppOpsManager;
+     @Captor ArgumentCaptor<DeviceHost.DeviceHostListener> mDeviceHostListener;
+     @Captor ArgumentCaptor<BroadcastReceiver> mGlobalReceiver;
+     @Captor ArgumentCaptor<IBinder> mIBinderArgumentCaptor;
+@@ -262,6 +264,7 @@ public final class NfcServiceTest {
+         when(mApplication.getSystemService(DisplayManager.class)).thenReturn(mDisplayManager);
+         when(mApplication.getSystemService(VrManager.class)).thenReturn(mVrManager);
+         when(mApplication.getSystemService(RoleManager.class)).thenReturn(mRoleManager);
++        when(mApplication.getSystemService(AppOpsManager.class)).thenReturn(mAppOpsManager);
+         when(mUserManager.getUserRestrictions()).thenReturn(mUserRestrictions);
+         when(mResources.getStringArray(R.array.nfc_allow_list)).thenReturn(new String[0]);
+         when(mResources.getBoolean(R.bool.tag_intent_app_pref_supported)).thenReturn(true);
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

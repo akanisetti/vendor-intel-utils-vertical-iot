@@ -1,0 +1,278 @@
+From 92143d3e5ee352208511dff16728c16b0ec299bb Mon Sep 17 00:00:00 2001
+From: Aishwarya Mallampati <amallampati@google.com>
+Date: Thu, 5 Feb 2026 10:22:05 -0800
+Subject: [PATCH] Add subscription-user association check.
+
+Bug:459460458
+Bug:459460951
+Test: atest
+Flag: EXEMPT BUGFIX
+Change-Id: I25806bf830a36ad8c1621ae67230183d381d9a28
+(cherry picked from commit 6cffd2ed55767990357cf11ab54718954ac6d961)
+---
+ .../telephony/IccSmsInterfaceManager.java     |  2 +-
+ .../internal/telephony/SmsController.java     | 50 +++++++++++++-
+ .../telephony/SmsController_fixed_methods.txt | 68 +++++++++++++++++++
+ .../internal/telephony/SmsControllerTest.java | 61 ++++++++++++++++-
+ 4 files changed, 176 insertions(+), 5 deletions(-)
+ create mode 100644 src/java/com/android/internal/telephony/SmsController_fixed_methods.txt
+
+diff --git a/src/java/com/android/internal/telephony/IccSmsInterfaceManager.java b/src/java/com/android/internal/telephony/IccSmsInterfaceManager.java
+index 4a3e7b0e00..45cde5e462 100644
+--- a/src/java/com/android/internal/telephony/IccSmsInterfaceManager.java
++++ b/src/java/com/android/internal/telephony/IccSmsInterfaceManager.java
+@@ -1471,7 +1471,7 @@ public class IccSmsInterfaceManager {
+     }
+ 
+     // Return an array including both the SMS text (0) and address (1)
+-    private String[] loadTextAndAddress(ContentResolver resolver, Uri messageUri) {
++    public String[] loadTextAndAddress(ContentResolver resolver, Uri messageUri) {
+         // Clear the calling identity and query the database using the phone user id
+         // Otherwise the AppOps check in TelephonyProvider would complain about mismatch
+         // between the calling uid and the package uid
+diff --git a/src/java/com/android/internal/telephony/SmsController.java b/src/java/com/android/internal/telephony/SmsController.java
+index ab1eb318ac..6eeb88b2a2 100644
+--- a/src/java/com/android/internal/telephony/SmsController.java
++++ b/src/java/com/android/internal/telephony/SmsController.java
+@@ -31,6 +31,7 @@ import android.app.AppOpsManager;
+ import android.app.PendingIntent;
+ import android.app.compat.CompatChanges;
+ import android.compat.annotation.UnsupportedAppUsage;
++import android.content.ContentResolver;
+ import android.content.Context;
+ import android.content.pm.PackageManager;
+ import android.net.Uri;
+@@ -739,12 +740,25 @@ public class SmsController extends ISmsImplBase {
+             PendingIntent deliveryIntent) {
+         IccSmsInterfaceManager iccSmsIntMgr = getIccSmsInterfaceManager(subId);
+         UserHandle callingUser = Binder.getCallingUserHandle();
++        int uid = Binder.getCallingUid();
+         if (!getCallingPackage().equals(callingPkg)) {
+             throw new SecurityException("sendStoredText: Package " + callingPkg
+-                    + "does not belong to " + Binder.getCallingUid());
++                    + "does not belong to " + uid);
+         }
+         Rlog.d(LOG_TAG, "sendStoredText caller=" + callingPkg);
+ 
++        String destAddr = getDestAddress(iccSmsIntMgr, messageUri);
++        // Check if user is associated with the subscription
++        if (!TelephonyPermissions.checkSubscriptionAssociatedWithUser(mContext, subId,
++            callingUser, destAddr)) {
++            TelephonyUtils.showSwitchToManagedProfileDialogIfAppropriate(mContext, subId,
++                uid, callingPkg);
++            Rlog.d(LOG_TAG, "sendStoredText: user is not associated with subscription subId="
++                + subId + " callingUser=" + callingUser);
++            sendErrorInPendingIntent(sentIntent, SmsManager.RESULT_USER_NOT_ALLOWED);
++            return;
++        }
++
+         if (iccSmsIntMgr != null) {
+             iccSmsIntMgr.sendStoredText(callingPkg, callingUser.getIdentifier(),
+                     callingAttributionTag, messageUri, scAddress, sentIntent, deliveryIntent);
+@@ -760,13 +774,25 @@ public class SmsController extends ISmsImplBase {
+             List<PendingIntent> deliveryIntents) {
+         IccSmsInterfaceManager iccSmsIntMgr = getIccSmsInterfaceManager(subId);
+         UserHandle callingUser = Binder.getCallingUserHandle();
+-
++        int uid = Binder.getCallingUid();
+         if (!getCallingPackage().equals(callingPkg)) {
+             throw new SecurityException("sendStoredMultipartText: Package " + callingPkg
+-                    + " does not belong to " + Binder.getCallingUid());
++                    + " does not belong to " + uid);
+         }
+         Rlog.d(LOG_TAG, "sendStoredMultipartText caller=" + callingPkg);
+ 
++        String destAddr = getDestAddress(iccSmsIntMgr, messageUri);
++        // Check if user is associated with the subscription
++        if (!TelephonyPermissions.checkSubscriptionAssociatedWithUser(mContext, subId,
++            callingUser, destAddr)) {
++            TelephonyUtils.showSwitchToManagedProfileDialogIfAppropriate(mContext, subId,
++                uid, callingPkg);
++            Rlog.d(LOG_TAG, "sendStoredMultipartText: user is not associated with subscription"
++                + " subId=" + subId + " callingUser=" + callingUser);
++            sendErrorInPendingIntents(sentIntents, SmsManager.RESULT_USER_NOT_ALLOWED);
++            return;
++        }
++
+         if (iccSmsIntMgr != null) {
+             iccSmsIntMgr.sendStoredMultipartText(callingPkg, callingUser.getIdentifier(),
+                     callingAttributionTag, messageUri, scAddress, sentIntents, deliveryIntents);
+@@ -777,6 +803,24 @@ public class SmsController extends ISmsImplBase {
+         }
+     }
+ 
++    @Nullable
++    private String getDestAddress(IccSmsInterfaceManager iccSmsIntMgr, Uri messageUri) {
++        if (iccSmsIntMgr == null) {
++            Rlog.d(LOG_TAG, "getDestAddress - iccSmsIntMgr is null");
++            return null;
++        }
++
++        ContentResolver resolver = mContext.getContentResolver();
++        String[] textAndAddress = iccSmsIntMgr.loadTextAndAddress(resolver, messageUri);
++
++        if (textAndAddress == null) {
++            Rlog.d(LOG_TAG, "getDestAddress - textAndAddress is null");
++            return null;
++        }
++
++        return textAndAddress[1];
++    }
++
+     @Override
+     public Bundle getCarrierConfigValuesForSubscriber(int subId) {
+         enforceTelephonyFeatureWithException(getCallingPackage(),
+diff --git a/src/java/com/android/internal/telephony/SmsController_fixed_methods.txt b/src/java/com/android/internal/telephony/SmsController_fixed_methods.txt
+new file mode 100644
+index 0000000000..612617d915
+--- /dev/null
++++ b/src/java/com/android/internal/telephony/SmsController_fixed_methods.txt
+@@ -0,0 +1,68 @@
++    @Override
++    public void sendStoredText(int subId, String callingPkg, String callingAttributionTag,
++            Uri messageUri, String scAddress, PendingIntent sentIntent,
++            PendingIntent deliveryIntent) {
++        IccSmsInterfaceManager iccSmsIntMgr = getIccSmsInterfaceManager(subId);
++        UserHandle callingUser = Binder.getCallingUserHandle();
++        int uid = Binder.getCallingUid();
++        if (!getCallingPackage().equals(callingPkg)) {
++            throw new SecurityException("sendStoredText: Package " + callingPkg
++                    + "does not belong to " + uid);
++        }
++        Rlog.d(LOG_TAG, "sendStoredText caller=" + callingPkg);
++
++        String destAddr = getDestAddress(iccSmsIntMgr, messageUri);
++        // Check if user is associated with the subscription
++        if (!TelephonyPermissions.checkSubscriptionAssociatedWithUser(mContext, subId,
++            callingUser, destAddr)) {
++            TelephonyUtils.showSwitchToManagedProfileDialogIfAppropriate(mContext, subId,
++                uid, callingPkg);
++            Rlog.d(LOG_TAG, "sendStoredText: user is not associated with subscription subId="
++                + subId + " callingUser=" + callingUser);
++            sendErrorInPendingIntent(sentIntent, SmsManager.RESULT_USER_NOT_ALLOWED);
++            return;
++        }
++
++        if (iccSmsIntMgr != null) {
++            iccSmsIntMgr.sendStoredText(callingPkg, callingUser.getIdentifier(),
++                    callingAttributionTag, messageUri, scAddress, sentIntent, deliveryIntent);
++        } else {
++            Rlog.e(LOG_TAG, "sendStoredText iccSmsIntMgr is null for subscription: " + subId);
++            sendErrorInPendingIntent(sentIntent, SmsManager.RESULT_ERROR_GENERIC_FAILURE);
++        }
++    }
++
++    @Override
++    public void sendStoredMultipartText(int subId, String callingPkg, String callingAttributionTag,
++            Uri messageUri, String scAddress, List<PendingIntent> sentIntents,
++            List<PendingIntent> deliveryIntents) {
++        IccSmsInterfaceManager iccSmsIntMgr = getIccSmsInterfaceManager(subId);
++        UserHandle callingUser = Binder.getCallingUserHandle();
++        int uid = Binder.getCallingUid();
++        if (!getCallingPackage().equals(callingPkg)) {
++            throw new SecurityException("sendStoredMultipartText: Package " + callingPkg
++                    + " does not belong to " + uid);
++        }
++        Rlog.d(LOG_TAG, "sendStoredMultipartText caller=" + callingPkg);
++
++        String destAddr = getDestAddress(iccSmsIntMgr, messageUri);
++        // Check if user is associated with the subscription
++        if (!TelephonyPermissions.checkSubscriptionAssociatedWithUser(mContext, subId,
++            callingUser, destAddr)) {
++            TelephonyUtils.showSwitchToManagedProfileDialogIfAppropriate(mContext, subId,
++                uid, callingPkg);
++            Rlog.d(LOG_TAG, "sendStoredMultipartText: user is not associated with subscription"
++                + " subId=" + subId + " callingUser=" + callingUser);
++            sendErrorInPendingIntents(sentIntents, SmsManager.RESULT_USER_NOT_ALLOWED);
++            return;
++        }
++
++        if (iccSmsIntMgr != null) {
++            iccSmsIntMgr.sendStoredMultipartText(callingPkg, callingUser.getIdentifier(),
++                    callingAttributionTag, messageUri, scAddress, sentIntents, deliveryIntents);
++        } else {
++            Rlog.e(LOG_TAG, "sendStoredMultipartText iccSmsIntMgr is null for subscription: "
++                    + subId);
++            sendErrorInPendingIntents(sentIntents, SmsManager.RESULT_ERROR_GENERIC_FAILURE);
++        }
++    }
+diff --git a/tests/telephonytests/src/com/android/internal/telephony/SmsControllerTest.java b/tests/telephonytests/src/com/android/internal/telephony/SmsControllerTest.java
+index 0f4f3d5ab6..52cafbcff4 100644
+--- a/tests/telephonytests/src/com/android/internal/telephony/SmsControllerTest.java
++++ b/tests/telephonytests/src/com/android/internal/telephony/SmsControllerTest.java
+@@ -22,6 +22,7 @@ import static org.junit.Assert.assertFalse;
+ import static org.junit.Assert.assertThrows;
+ import static org.junit.Assert.assertTrue;
+ import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.isNull;
+ import static org.mockito.Mockito.anyInt;
+ import static org.mockito.Mockito.anyString;
+ import static org.mockito.Mockito.doReturn;
+@@ -331,4 +332,62 @@ public class SmsControllerTest extends TelephonyTest {
+                 .sendText(mCallingPackage, mCallingUserId,
+                         "1234", null, "text", null, null, false, 0L, true);
+     }
+-}
+\ No newline at end of file
++
++    @Test
++    public void sendStoredText_associatedUser_sendsSms() {
++        int subId = 1;
++        doReturn(new String[]{"hi", "1234"}).when(mIccSmsInterfaceManager).loadTextAndAddress(
++            any(), any());
++        doReturn(true).when(mSubscriptionManager)
++            .isSubscriptionAssociatedWithUser(eq(subId), any());
++
++        mSmsControllerUT.sendStoredText(subId, mCallingPackage, null, null, null, null, null);
++
++        verify(mIccSmsInterfaceManager).sendStoredText(eq(mCallingPackage),
++            eq(mCallingUserId), isNull(), any(), isNull(), isNull(), isNull());
++    }
++
++    @Test
++    public void sendStoredText_notAssociatedUser_fails() {
++        int subId = 1;
++        doReturn(new String[]{"hi", "1234"}).when(mIccSmsInterfaceManager).loadTextAndAddress(
++            any(), any());
++        doReturn(false).when(mSubscriptionManager)
++            .isSubscriptionAssociatedWithUser(eq(subId), any());
++
++        mSmsControllerUT.sendStoredText(subId, mCallingPackage, null, null, null, null, null);
++
++        verify(mIccSmsInterfaceManager, never()).sendStoredText(any(), anyInt(), any(),
++            any(), any(), any(), any());
++    }
++
++    @Test
++    public void sendStoredMultipartText_associatedUser_sendsSms() {
++        int subId = 1;
++        doReturn(new String[]{"hi", "1234"}).when(mIccSmsInterfaceManager).loadTextAndAddress(
++            any(), any());
++        doReturn(true).when(mSubscriptionManager)
++            .isSubscriptionAssociatedWithUser(eq(subId), any());
++
++        mSmsControllerUT.sendStoredMultipartText(subId, mCallingPackage, null,
++            null, null, null, null);
++
++        verify(mIccSmsInterfaceManager).sendStoredMultipartText(eq(mCallingPackage),
++            eq(mCallingUserId), isNull(), any(), isNull(), isNull(), isNull());
++    }
++
++    @Test
++    public void sendStoredMultipartText_notAssociatedUser_fails() {
++        int subId = 1;
++        doReturn(new String[]{"hi", "1234"}).when(mIccSmsInterfaceManager).loadTextAndAddress(
++            any(), any());
++        doReturn(false).when(mSubscriptionManager)
++            .isSubscriptionAssociatedWithUser(eq(subId), any());
++
++        mSmsControllerUT.sendStoredMultipartText(subId, mCallingPackage, null,
++            null, null, null, null);
++
++        verify(mIccSmsInterfaceManager, never()).sendStoredMultipartText(any(), anyInt(), any(),
++            any(), any(), any(), any());
++    }
++}
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

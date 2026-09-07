@@ -1,0 +1,197 @@
+From cac72dd3406cc845caf10e06d8821be2c5c899ca Mon Sep 17 00:00:00 2001
+From: Brian Delwiche <delwiche@google.com>
+Date: Wed, 15 Apr 2026 16:56:13 -0700
+Subject: [PATCH] Reject unsafe LE encryption key sizes
+
+Encryption key sizes smaller than 7 octet are forbidden by the Core specification. Minimum encryption key size is enforced for BR/EDR but not for LE.
+This change ensures that SMP also enforces the minimum key size security requirement.
+
+Test: mmm packages/modules/Bluetooth
+Flag: EXEMPT BUGFIX
+Bug: 483126552
+Change-Id: Id8801344217de992db6dd306ee975dd55992d505
+(cherry picked from commit 55c96018e4b47ef96f52d8a5696922e406228051)
+---
+ system/stack/btm/btm_sec.cc            | 23 ++++++++++-------------
+ system/stack/btm/btm_sec.h             | 15 +++++++++++++++
+ system/stack/smp/smp_act.cc            | 18 +++++++++++++++---
+ system/test/mock/mock_stack_btm_sec.cc |  7 +++++++
+ system/test/mock/mock_stack_btm_sec.h  | 10 ++++++++++
+ 5 files changed, 57 insertions(+), 16 deletions(-)
+
+diff --git a/system/stack/btm/btm_sec.cc b/system/stack/btm/btm_sec.cc
+index 0523cbbbe3..96c2b30b6a 100644
+--- a/system/stack/btm/btm_sec.cc
++++ b/system/stack/btm/btm_sec.cc
+@@ -3401,17 +3401,6 @@ void btm_sec_encrypt_change(uint16_t handle, tHCI_STATUS status, uint8_t encr_en
+   }
+ }
+ 
+-constexpr int MIN_KEY_SIZE = 7;
+-constexpr int MIN_KEY_SIZE_DEFAULT = MIN_KEY_SIZE;
+-constexpr int MAX_KEY_SIZE = 16;
+-static uint8_t get_min_enc_key_size() {
+-  static uint8_t min_key_size = (uint8_t)std::min(
+-          std::max(android::sysprop::bluetooth::Gap::min_key_size().value_or(MIN_KEY_SIZE_DEFAULT),
+-                   MIN_KEY_SIZE),
+-          MAX_KEY_SIZE);
+-  return min_key_size;
+-}
+-
+ static void read_encryption_key_size_complete_after_encryption_change(uint8_t status,
+                                                                       uint16_t handle,
+                                                                       uint8_t key_size) {
+@@ -3431,7 +3420,7 @@ static void read_encryption_key_size_complete_after_encryption_change(uint8_t st
+     return;
+   }
+ 
+-  if (key_size < get_min_enc_key_size()) {
++  if (key_size < btm_sec_get_min_enc_key_size()) {
+     log::error("encryption key too short, disconnecting. handle:0x{:x},key_size:{}", handle,
+                key_size);
+ 
+@@ -4018,7 +4007,7 @@ static void read_encryption_key_size_complete_after_key_refresh(uint8_t status,
+     return;
+   }
+ 
+-  if (key_size < get_min_enc_key_size()) {
++  if (key_size < btm_sec_get_min_enc_key_size()) {
+     log::error("encryption key too short, disconnecting. handle: 0x{:x} key_size {}", handle,
+                key_size);
+ 
+@@ -5204,3 +5193,11 @@ void BTM_update_version_info(const RawAddress& bd_addr,
+ 
+   p_dev_rec->remote_version_info = remote_version_info;
+ }
++
++uint8_t btm_sec_get_min_enc_key_size() {
++  static uint8_t min_key_size = (uint8_t)std::min(
++          std::max(android::sysprop::bluetooth::Gap::min_key_size().value_or(MIN_KEY_SIZE_DEFAULT),
++                   MIN_KEY_SIZE),
++          MAX_KEY_SIZE);
++  return min_key_size;
++}
+diff --git a/system/stack/btm/btm_sec.h b/system/stack/btm/btm_sec.h
+index 05bafc40d5..84fa87228b 100644
+--- a/system/stack/btm/btm_sec.h
++++ b/system/stack/btm/btm_sec.h
+@@ -41,6 +41,10 @@
+ 
+ #define BTM_SEC_MAX_COLLISION_DELAY (5000)
+ 
++constexpr int MIN_KEY_SIZE = 7;
++constexpr int MIN_KEY_SIZE_DEFAULT = MIN_KEY_SIZE;
++constexpr int MAX_KEY_SIZE = 16;
++
+ /*******************************************************************************
+  *
+  * Function         BTM_SecRegister
+@@ -717,5 +721,16 @@ void btm_sec_set_peer_sec_caps(uint16_t hci_handle, bool ssp_supported, bool sc_
+  ******************************************************************************/
+ void btm_sec_cr_loc_oob_data_cback_event(const RawAddress& address, tSMP_LOC_OOB_DATA loc_oob_data);
+ 
++/*******************************************************************************
++ *
++ * Function         btm_sec_get_min_enc_key_size
++ *
++ * Description      Get the minimum encryption key size allowed by the system.
++ *
++ * Returns          The minimum encryption key size.
++ *
++ ******************************************************************************/
++uint8_t btm_sec_get_min_enc_key_size();
++
+ // Return DEV_CLASS of bda. If record doesn't exist, create one.
+ DEV_CLASS btm_get_dev_class(const RawAddress& bda);
+diff --git a/system/stack/smp/smp_act.cc b/system/stack/smp/smp_act.cc
+index b9faeea6ca..943603e16b 100644
+--- a/system/stack/smp/smp_act.cc
++++ b/system/stack/smp/smp_act.cc
+@@ -584,10 +584,12 @@ void smp_proc_pair_cmd(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
+   STREAM_TO_UINT8(p_cb->peer_i_key, p);
+   STREAM_TO_UINT8(p_cb->peer_r_key, p);
+ 
+-  tSMP_STATUS reason = p_cb->cert_failure;
+-  if (reason == SMP_ENC_KEY_SIZE) {
++  int min_key_size = btm_sec_get_min_enc_key_size();
++  if (p_cb->cert_failure == SMP_ENC_KEY_SIZE || p_cb->peer_enc_size < min_key_size) {
++    log::warn("Encryption key size {} smaller than the minimum {}", p_cb->peer_enc_size,
++              min_key_size);
+     tSMP_INT_DATA smp_int_data;
+-    smp_int_data.status = reason;
++    smp_int_data.status = SMP_ENC_KEY_SIZE;
+     smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &smp_int_data);
+     return;
+   }
+@@ -871,6 +873,16 @@ void smp_br_process_pairing_command(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
+   STREAM_TO_UINT8(p_cb->peer_i_key, p);
+   STREAM_TO_UINT8(p_cb->peer_r_key, p);
+ 
++  int min_key_size = btm_sec_get_min_enc_key_size();
++  if (p_cb->peer_enc_size < min_key_size) {
++    log::warn("Encryption key size {} smaller than the minimum {}", p_cb->peer_enc_size,
++              min_key_size);
++    tSMP_INT_DATA smp_int_data;
++    smp_int_data.status = SMP_ENC_KEY_SIZE;
++    smp_br_state_machine_event(p_cb, SMP_BR_AUTH_CMPL_EVT, &smp_int_data);
++    return;
++  }
++
+   if (smp_command_has_invalid_parameters(p_cb)) {
+     tSMP_INT_DATA smp_int_data;
+     smp_int_data.status = SMP_INVALID_PARAMETERS;
+diff --git a/system/test/mock/mock_stack_btm_sec.cc b/system/test/mock/mock_stack_btm_sec.cc
+index ca53fb0040..c12838ecad 100644
+--- a/system/test/mock/mock_stack_btm_sec.cc
++++ b/system/test/mock/mock_stack_btm_sec.cc
+@@ -97,6 +97,7 @@ struct btm_sec_role_changed btm_sec_role_changed;
+ struct btm_sec_set_peer_sec_caps btm_sec_set_peer_sec_caps;
+ struct btm_sec_update_clock_offset btm_sec_update_clock_offset;
+ struct btm_simple_pair_complete btm_simple_pair_complete;
++struct btm_sec_get_min_enc_key_size btm_sec_get_min_enc_key_size;
+ 
+ }  // namespace stack_btm_sec
+ }  // namespace mock
+@@ -129,6 +130,7 @@ bool btm_sec_is_a_bonded_dev::return_value = false;
+ tBTM_STATUS btm_sec_l2cap_access_req::return_value = tBTM_STATUS::BTM_SUCCESS;
+ tBTM_STATUS btm_sec_l2cap_access_req_by_requirement::return_value = tBTM_STATUS::BTM_SUCCESS;
+ tBTM_STATUS btm_sec_mx_access_request::return_value = tBTM_STATUS::BTM_SUCCESS;
++uint8_t btm_sec_get_min_enc_key_size::return_value = MIN_KEY_SIZE_DEFAULT;
+ 
+ }  // namespace stack_btm_sec
+ }  // namespace mock
+@@ -390,5 +392,10 @@ void btm_simple_pair_complete(const RawAddress bd_addr, uint8_t status) {
+   inc_func_call_count(__func__);
+   test::mock::stack_btm_sec::btm_simple_pair_complete(bd_addr, status);
+ }
++
++uint8_t btm_sec_get_min_enc_key_size() {
++  inc_func_call_count(__func__);
++  return test::mock::stack_btm_sec::btm_sec_get_min_enc_key_size();
++}
+ // Mocked functions complete
+ // END mockcify generation
+diff --git a/system/test/mock/mock_stack_btm_sec.h b/system/test/mock/mock_stack_btm_sec.h
+index 3ae397be41..3d2ded00e5 100644
+--- a/system/test/mock/mock_stack_btm_sec.h
++++ b/system/test/mock/mock_stack_btm_sec.h
+@@ -757,6 +757,16 @@ struct BTM_IsRemoteNameKnown {
+ };
+ extern struct BTM_IsRemoteNameKnown BTM_IsRemoteNameKnown;
+ 
++// Name: btm_sec_get_min_enc_key_size
++// Params: void
++// Return: uint8_t
++struct btm_sec_get_min_enc_key_size {
++  static uint8_t return_value;
++  std::function<uint8_t(void)> body{[](void) { return return_value; }};
++  uint8_t operator()(void) { return body(); }
++};
++extern struct btm_sec_get_min_enc_key_size btm_sec_get_min_enc_key_size;
++
+ }  // namespace stack_btm_sec
+ }  // namespace mock
+ }  // namespace test
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

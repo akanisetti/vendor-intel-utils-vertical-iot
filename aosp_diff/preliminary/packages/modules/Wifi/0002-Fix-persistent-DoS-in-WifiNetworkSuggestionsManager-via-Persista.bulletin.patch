@@ -1,0 +1,48 @@
+From 43c3b15c1773cc2533c755b87b9faeaf38a6e66a Mon Sep 17 00:00:00 2001
+From: Nate Jiang <qiangjiang@google.com>
+Date: Mon, 20 Apr 2026 18:02:54 -0700
+Subject: [PATCH] Fix persistent DoS in WifiNetworkSuggestionsManager via
+ PersistableBundle depth bomb
+
+Vulnerability in XmlUtil.writeOuiKeyedDataToXml / readPersistableBundleFromBytes where it serializes/deserializes PersistableBundle without depth bounding.
+
+Remove the vendor data from the WifiNetworkSuggestion as we never allow to set it.
+
+Bug: 498792914
+Test: m FrameworksWifiTests
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:d32cb69e573194158d2789a6ffab6df4f35481aa
+Merged-In: I2627b713a31be0864d2b1a78088e6b2eda9c1b57
+Change-Id: I2627b713a31be0864d2b1a78088e6b2eda9c1b57
+---
+ .../android/server/wifi/WifiNetworkSuggestionsManager.java | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/service/java/com/android/server/wifi/WifiNetworkSuggestionsManager.java b/service/java/com/android/server/wifi/WifiNetworkSuggestionsManager.java
+index be384213a3..44a14acc50 100644
+--- a/service/java/com/android/server/wifi/WifiNetworkSuggestionsManager.java
++++ b/service/java/com/android/server/wifi/WifiNetworkSuggestionsManager.java
+@@ -76,6 +76,7 @@ import java.lang.annotation.RetentionPolicy;
+ import java.util.ArrayList;
+ import java.util.BitSet;
+ import java.util.Collection;
++import java.util.Collections;
+ import java.util.Comparator;
+ import java.util.HashMap;
+ import java.util.HashSet;
+@@ -925,6 +926,12 @@ public class WifiNetworkSuggestionsManager {
+             Log.e(TAG, "bad wifi suggestion from app: " + packageName);
+             return WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_ADD_NOT_ALLOWED;
+         }
++        // Clear vendor data from the suggestions as no API to set it.
++        if (SdkLevel.isAtLeastV()) {
++            for (WifiNetworkSuggestion wns : networkSuggestions) {
++                wns.wifiConfiguration.setVendorData(Collections.emptyList());
++            }
++        }
+         for (WifiNetworkSuggestion wns : networkSuggestions) {
+             wns.wifiConfiguration.convertLegacyFieldsToSecurityParamsIfNeeded();
+             if (!WifiConfigurationUtil.addUpgradableSecurityTypeIfNecessary(
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

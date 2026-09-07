@@ -1,0 +1,35 @@
+From 44f9a3b107be2185f366e85ef0215606e3b57f16 Mon Sep 17 00:00:00 2001
+From: Kyle Hsiao <kylehsiao@google.com>
+Date: Wed, 29 Apr 2026 20:30:42 -0700
+Subject: [PATCH] Force unbind service on binding died
+
+When a service connection's binding dies, always force the unbinding of the service to ensure proper cleanup.
+
+Bug: 473814675
+Flag: EXEMPT BUGFIX
+Test: Manual verification to ensure the service is unbound
+when the app moves to the background
+Test: atest CtsNfcHceMultiDeviceTestCases  -- --testparam
+pn532_serial_path=/dev/ttyUSB0
+Change-Id: I06eecd4f38e21e91e5f4827ed499bb18fd67b4fa
+Merged-In: I06eecd4f38e21e91e5f4827ed499bb18fd67b4fa
+---
+ .../src/com/android/nfc/cardemulation/HostEmulationManager.java | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java b/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java
+index c926cd84d..cfec6c3bc 100644
+--- a/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java
++++ b/NfcNci/src/com/android/nfc/cardemulation/HostEmulationManager.java
+@@ -1770,7 +1770,7 @@ public class HostEmulationManager {
+         @Override
+         public void onBindingDied(ComponentName name) {
+             Log.i(TAG, "onBindingDied: " + name);
+-            unbindServiceIfNeededLocked();
++            unbindServiceIfNeededLocked(/* force */ true);
+         }
+ 
+         @Override
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

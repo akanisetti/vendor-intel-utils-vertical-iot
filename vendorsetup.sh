@@ -51,8 +51,25 @@ function lunch
     # check if product configuration files are out of date
     if [[ $(find device/intel -path "*mixins*" -prune -o -name ${TARGET_PRODUCT}.mk -print) ]]; then
         product_dir=$(dirname $(find device/intel -path "*mixins*" -prune -o -name ${TARGET_PRODUCT}.mk -print))
-	echo "Executing mixin update..."
-        mixinup -s $product_dir/mixins.spec
+        # Trusty is disabled by default; export ENABLE_TRUSTY=true before lunch
+        # to enable it. Any other value falls back to the safe tee: false mode.
+        local mixin_tee_opt=""
+        local enable_trusty="${ENABLE_TRUSTY:-false}"
+        case "${enable_trusty,,}" in
+            true)
+                mixin_tee_opt="trusty"
+                ;;
+            false)
+                mixin_tee_opt="false"
+                ;;
+            *)
+                echo "WARN: Invalid ENABLE_TRUSTY='${ENABLE_TRUSTY}'. Supported values: true | false; defaulting to false"
+                mixin_tee_opt="false"
+                ;;
+        esac
+
+        echo "Executing mixin update (ENABLE_TRUSTY=${enable_trusty} -> tee=${mixin_tee_opt})..."
+        mixinup -s $product_dir/mixins.spec --tee-option "${mixin_tee_opt}"
     fi
 }
 

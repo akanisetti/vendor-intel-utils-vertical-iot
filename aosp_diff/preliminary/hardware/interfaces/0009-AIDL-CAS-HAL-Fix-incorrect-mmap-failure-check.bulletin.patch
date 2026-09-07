@@ -1,0 +1,51 @@
+From 50498aaede1d4817ce5f37031080647759a8cf90 Mon Sep 17 00:00:00 2001
+From: Haofan Wang <haofanw@google.com>
+Date: Mon, 1 Jun 2026 15:53:47 -0700
+Subject: [PATCH] AIDL CAS HAL: Fix incorrect mmap failure check
+
+mmap() returns MAP_FAILED on failure, not NULL. Checking against
+NULL allowed execution to proceed with an invalid pointer (MAP_FAILED),
+leading to an arbitrary-address memory access.
+This change corrects the failure check to use MAP_FAILED and adds
+munmap() cleanup using ScopeGuard to prevent memory leaks.
+
+Bug: 505452999
+Test: atest VtsHalCasAidlTargetTest
+Flag: EXEMPT BUGFIX
+Change-Id: I4805ee90ae1705070b0c43fb9152f666d90963d7
+(cherry picked from commit fde26328df1ff7b0c2efad0c3c71b7826701a913)
+---
+ cas/aidl/default/DescramblerImpl.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/cas/aidl/default/DescramblerImpl.cpp b/cas/aidl/default/DescramblerImpl.cpp
+index 0f4e99b315..53ea6ce43d 100644
+--- a/cas/aidl/default/DescramblerImpl.cpp
++++ b/cas/aidl/default/DescramblerImpl.cpp
+@@ -17,6 +17,7 @@
+ #define LOG_TAG "android.hardware.cas-DescramblerImpl"
+ 
+ #include <aidlcommonsupport/NativeHandle.h>
++#include <android-base/scopeguard.h>
+ #include <inttypes.h>
+ #include <media/cas/DescramblerAPI.h>
+ #include <media/hardware/CryptoAPI.h>
+@@ -100,10 +101,14 @@ ScopedAStatus DescramblerImpl::descramble(ScramblingControl scramblingControl,
+ 
+     // Validate if the offset and size in the SharedBuffer is consistent with the
+     // mapped heapbase, since the offset and size is controlled by client.
+-    if (srcPtr == NULL) {
++    if (srcPtr == MAP_FAILED) {
+         ALOGE("Failed to map src buffer.");
+         return toStatus(BAD_VALUE);
+     }
++
++    auto sg = ::android::base::make_scope_guard(
++            [srcPtr, size = srcBuffer.heapBase.size]() { munmap(srcPtr, size); });
++
+     if (!validateRangeForSize(srcBuffer.offset, srcBuffer.size, srcBuffer.heapBase.size)) {
+         ALOGE("Invalid src buffer range: offset %" PRIu64 ", size %" PRIu64
+               ", srcMem"
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

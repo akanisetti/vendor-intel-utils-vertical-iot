@@ -1,0 +1,45 @@
+From 954c78b3edc56df8c9e78f61727d5484cd569697 Mon Sep 17 00:00:00 2001
+From: Brian Delwiche <delwiche@google.com>
+Date: Tue, 14 Apr 2026 16:23:13 -0700
+Subject: [PATCH] Remove bond caller info when bonding concludes
+
+The caller info associated with a device's bonding attempt is removed from the internal map once the bond state transitions out of the BOND_BONDING state. This ensures that stale caller information is not retained after the bonding process has completed or failed.
+
+Test: mmm packages/modules/Bluetooth
+Flag: com.android.bluetooth.flags.remove_bond_caller_info
+Bug: 495543559
+Change-Id: I69f2a9732dc865603a84520fe7685e9d9047cfe3
+(cherry picked from commit cb84e50dfff3de0fd9ef1a035f1d30ac0e2da615)
+---
+ .../com/android/bluetooth/btservice/AdapterService.java   | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/android/app/src/com/android/bluetooth/btservice/AdapterService.java b/android/app/src/com/android/bluetooth/btservice/AdapterService.java
+index 67cc7201af..5a14975233 100644
+--- a/android/app/src/com/android/bluetooth/btservice/AdapterService.java
++++ b/android/app/src/com/android/bluetooth/btservice/AdapterService.java
+@@ -26,6 +26,7 @@ import static android.bluetooth.BluetoothAdapter.SCAN_MODE_NONE;
+ import static android.bluetooth.BluetoothAdapter.nameForState;
+ import static android.bluetooth.BluetoothDevice.BATTERY_LEVEL_UNKNOWN;
+ import static android.bluetooth.BluetoothDevice.BOND_BONDED;
++import static android.bluetooth.BluetoothDevice.BOND_BONDING;
+ import static android.bluetooth.BluetoothDevice.BOND_NONE;
+ import static android.bluetooth.BluetoothProfile.CONNECTION_POLICY_ALLOWED;
+ import static android.bluetooth.BluetoothProfile.CONNECTION_POLICY_FORBIDDEN;
+@@ -4233,6 +4234,13 @@ public class AdapterService extends Service {
+             setPhonebookAccessPermission(device, BluetoothDevice.ACCESS_UNKNOWN);
+             setSimAccessPermission(device, BluetoothDevice.ACCESS_UNKNOWN);
+         }
++
++      if (toState != BOND_BONDING) {
++            CallerInfo callerInfo = mBondAttemptCallerInfo.remove(device.getAddress());
++            if (callerInfo != null) {
++                Log.d(TAG, "Removed bond caller info for device: " + device);
++            }
++        }
+     }
+ 
+     static int convertScanModeToHal(int mode) {
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

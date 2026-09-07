@@ -1,0 +1,134 @@
+From 5bbb1d01fff709247feb0ba009858b3f171eda33 Mon Sep 17 00:00:00 2001
+From: Aishwarya Mallampati <amallampati@google.com>
+Date: Thu, 7 May 2026 10:24:15 -0700
+Subject: [PATCH] Restrict USSD requests to the subscription's associated user.
+
+Add a permission check in handleUssdRequest to ensure that the calling user is associated with the provided subscription ID.
+
+Bug: 471796626
+Test: atest
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:b76670f3c5ba3d8ad156de232aff09289fe49e26
+Merged-In: I7c24f69688b36e815972b0269f88e1a40059238b
+Change-Id: I7c24f69688b36e815972b0269f88e1a40059238b
+---
+ .../android/phone/PhoneInterfaceManager.java  |  5 ++
+ .../phone/PhoneInterfaceManagerTest.java      | 54 ++++++++++++++++++-
+ 2 files changed, 57 insertions(+), 2 deletions(-)
+
+diff --git a/src/com/android/phone/PhoneInterfaceManager.java b/src/com/android/phone/PhoneInterfaceManager.java
+index d24487ccc..4e58c3fe1 100644
+--- a/src/com/android/phone/PhoneInterfaceManager.java
++++ b/src/com/android/phone/PhoneInterfaceManager.java
+@@ -3286,6 +3286,11 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
+         enforceTelephonyFeatureWithException(getCurrentPackageName(),
+                 PackageManager.FEATURE_TELEPHONY_RADIO_ACCESS, "handleUssdRequest");
+ 
++        if (!TelephonyPermissions.checkSubscriptionAssociatedWithUser(
++                mApp, subId, Binder.getCallingUserHandle())) {
++            throw new SecurityException(
++                    "The subscription " + subId + " is not associated " + "with the calling user");
++        }
+         final long identity = Binder.clearCallingIdentity();
+         try {
+             if (!SubscriptionManager.isValidSubscriptionId(subId)) {
+diff --git a/tests/src/com/android/phone/PhoneInterfaceManagerTest.java b/tests/src/com/android/phone/PhoneInterfaceManagerTest.java
+index 266481e56..f076a9ce3 100644
+--- a/tests/src/com/android/phone/PhoneInterfaceManagerTest.java
++++ b/tests/src/com/android/phone/PhoneInterfaceManagerTest.java
+@@ -21,6 +21,7 @@ import static org.junit.Assert.assertFalse;
+ import static org.junit.Assert.assertThrows;
+ import static org.junit.Assert.assertTrue;
+ import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.anyBoolean;
+ import static org.mockito.ArgumentMatchers.anyInt;
+ import static org.mockito.ArgumentMatchers.anyString;
+ import static org.mockito.ArgumentMatchers.eq;
+@@ -41,12 +42,15 @@ import android.content.SharedPreferences;
+ import android.content.pm.PackageManager;
+ import android.content.res.Resources;
+ import android.os.Build;
++import android.os.ResultReceiver;
+ import android.os.UserHandle;
+ import android.permission.flags.Flags;
+ import android.platform.test.flag.junit.SetFlagsRule;
+ import android.preference.PreferenceManager;
+ import android.telephony.RadioAccessFamily;
+ import android.telephony.Rlog;
++import android.telephony.SubscriptionInfo;
++import android.telephony.SubscriptionManager;
+ import android.telephony.TelephonyManager;
+ import android.testing.AndroidTestingRunner;
+ import android.testing.TestableLooper;
+@@ -96,8 +100,6 @@ public class PhoneInterfaceManagerTest extends TelephonyTestBase {
+     private static final String sDebugPackageName =
+             PhoneInterfaceManagerTest.class.getPackageName();
+ 
+-    @Mock
+-    Phone mPhone;
+     @Mock
+     FeatureFlags mFeatureFlags;
+     @Mock
+@@ -142,6 +144,9 @@ public class PhoneInterfaceManagerTest extends TelephonyTestBase {
+         doReturn(mSubscriptionManagerService).when(mPhoneInterfaceManager)
+                 .getSubscriptionManagerService();
+         TelephonyManager.setupISubForTest(mSubscriptionManagerService);
++        replaceInstance(SubscriptionManagerService.class, "sInstance", null,
++                mSubscriptionManagerService);
++        doReturn(new int[0]).when(mSubscriptionManagerService).getActiveSubIdList(anyBoolean());
+ 
+         // In order not to affect the existing implementation, define a telephony features
+         // and disabled enforce_telephony_feature_mapping_for_public_apis feature flag
+@@ -580,4 +585,49 @@ public class PhoneInterfaceManagerTest extends TelephonyTestBase {
+         assertFalse(containsCtsApp);
+     }
+ 
++    @Test
++    public void testHandleUssdRequest_SubscriptionNotAssociatedWithUser_ThrowsSecurityException() {
++        int subId = 1;
++        String ussdRequest = "*121#";
++        ResultReceiver callback = mock(ResultReceiver.class);
++
++        // Mock subscription NOT associated with user
++        doReturn(false)
++                .when(mSubscriptionManagerService)
++                .isSubscriptionAssociatedWithUser(eq(subId), any(UserHandle.class));
++
++        assertThrows(
++                SecurityException.class,
++                () -> mPhoneInterfaceManager.handleUssdRequest(subId, ussdRequest, callback));
++    }
++
++    @Test
++    public void testHandleUssdRequest_ValidSubscription_Success() {
++        int subId = 1;
++        String ussdRequest = "*121#";
++        ResultReceiver callback = mock(ResultReceiver.class);
++
++        // Mock subscription IS associated with user
++        doReturn(true)
++                .when(mSubscriptionManagerService)
++                .isSubscriptionAssociatedWithUser(eq(subId), any(UserHandle.class));
++        SubscriptionManager sm = (SubscriptionManager) mContext.getSystemService(
++                Context.TELEPHONY_SUBSCRIPTION_SERVICE);
++        doReturn(true).when(sm).isSubscriptionAssociatedWithUser(eq(subId), any(UserHandle.class));
++
++        doReturn(true)
++                .when(mPackageManager)
++                .hasSystemFeature(PackageManager.FEATURE_TELEPHONY_RADIO_ACCESS);
++
++        // Should not throw SecurityException. It will throw RuntimeException because of deadlock
++        // since we are calling it from the main thread. Reaching that point means the security
++        // check passed.
++        try {
++            mPhoneInterfaceManager.handleUssdRequest(subId, ussdRequest, callback);
++        } catch (RuntimeException e) {
++            if (!e.getMessage().contains("deadlock")) {
++                throw e;
++            }
++        }
++    }
+ }
+-- 
+2.55.0.897.gb25b4bd76c-goog
+

@@ -1,0 +1,30 @@
+From da0e8bcdd7faefd6a20db1084f4548f879ff709b Mon Sep 17 00:00:00 2001
+From: Oli Thompson <olit@google.com>
+Date: Wed, 4 Feb 2026 11:20:31 +0000
+Subject: [PATCH] Set hide overlays on mini resolver
+
+Bug: 461500706
+Test: manually tested
+Flag: EXEMPT bugfix
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:426df92120398800fc185c7540f6263a58cbea2d
+Merged-In: I3051c130ec8e6f437dab0ead28ef588e63cd3524
+Change-Id: I3051c130ec8e6f437dab0ead28ef588e63cd3524
+---
+ core/java/com/android/internal/app/IntentForwarderActivity.java | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/core/java/com/android/internal/app/IntentForwarderActivity.java b/core/java/com/android/internal/app/IntentForwarderActivity.java
+index cbd94c229537..525fde5d0592 100644
+--- a/core/java/com/android/internal/app/IntentForwarderActivity.java
++++ b/core/java/com/android/internal/app/IntentForwarderActivity.java
+@@ -340,6 +340,7 @@ public class IntentForwarderActivity extends Activity  {
+             String resolverTitle, PackageManager pmForTargetUser) {
+         int layoutId = R.layout.miniresolver;
+         setContentView(layoutId);
++        getWindow().setHideOverlayWindows(true);
+ 
+         findViewById(R.id.title_container).setElevation(0);
+ 
+-- 
+2.55.0.897.gb25b4bd76c-goog
+
