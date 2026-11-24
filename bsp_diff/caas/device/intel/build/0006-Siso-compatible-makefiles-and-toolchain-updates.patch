@@ -1,0 +1,313 @@
+From 86effafe17181f2319531cb7795596f0d5f2f59b Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 7 Aug 2026 08:49:24 +0000
+Subject: [PATCH] Siso-compatible makefiles and toolchain updates
+
+changes:
+- core/definitions.mk: update IAFW_LIBCLANG path clang/19 -> clang/22 (folds in the
+  former common/device/intel/build/0001 clang 19 -> 20 update)
+  for A17 toolchain compatibility
+- tasks/code_check.mk: convert warn_vendor_modules and
+  warn_local_module_tags from bare .PHONY to marker-file targets
+  for Siso dependency tracking
+- tasks/flashfiles.mk: convert publish_vertical, check-vintf-all, and
+  flashfiles to marker-file targets; fix tar commands to use explicit
+  vertical_patches and vertical_keybox_provisioning paths instead of
+  wildcards; add wrapper .PHONY flashfiles target for workspace root
+- tasks/publish.mk: convert publish_mkdir_dest and
+  publish_gptimage_var from .PHONY to marker-file targets for Siso
+  compatibility
+
+Tracked-On: NIACP3-1498
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ core/definitions.mk |  4 +-
+ tasks/code_check.mk | 15 +++++--
+ tasks/flashfiles.mk | 97 +++++++++++++++++++++++++++++++++++++--------
+ tasks/publish.mk    | 28 +++++++++----
+ 4 files changed, 115 insertions(+), 29 deletions(-)
+
+diff --git a/core/definitions.mk b/core/definitions.mk
+index 5b31a46..a9bc798 100755
+--- a/core/definitions.mk
++++ b/core/definitions.mk
+@@ -107,9 +107,9 @@ IAFW_CC := $(IAFW_TOOLS_CLANG_PREFIX)/clang
+ IAFW_OBJCOPY := $(IAFW_TOOLS_GCC_PREFIX)objcopy$(HOST_EXECUTABLE_SUFFIX)
+ EFI_OBJCOPY := $(IAFW_OBJCOPY)
+ ifeq ($(TARGET_IAFW_ARCH),x86_64)
+-IAFW_LIBCLANG := $(IAFW_TOOLCHAIN_CLANG_ROOT)/../lib/clang/19/lib/linux/libclang_rt.builtins-x86_64-android.a
++IAFW_LIBCLANG := $(IAFW_TOOLCHAIN_CLANG_ROOT)/../lib/clang/22/lib/linux/libclang_rt.builtins-x86_64-android.a
+ else
+-IAFW_LIBCLANG := $(IAFW_TOOLCHAIN_CLANG_ROOT)/../lib/clang/19/lib/linux/libclang_rt.builtins-i686-android.a
++IAFW_LIBCLANG := $(IAFW_TOOLCHAIN_CLANG_ROOT)/../lib/clang/22/lib/linux/libclang_rt.builtins-i686-android.a
+ endif
+ 
+ # Transformation definitions, ala build system's definitions.mk
+diff --git a/tasks/code_check.mk b/tasks/code_check.mk
+index 538dabb..5763060 100644
+--- a/tasks/code_check.mk
++++ b/tasks/code_check.mk
+@@ -1,20 +1,29 @@
+ 
+ 
++WARN_VENDOR_MODULES_MARKER := $(PRODUCT_OUT)/.warn_vendor_modules_done
++WARN_LOCAL_MODULE_TAGS_MARKER := $(PRODUCT_OUT)/.warn_local_module_tags_done
+ 
+ flashfiles: warn_vendor_modules warn_local_module_tags
+ publish_ci: warn_vendor_modules warn_local_module_tags
+ 
+-.PHONY: warn_vendor_modules warn_local_module_tags
+ # for each module in $(DELINQUANT_VENDOR_MODULES) if LOCAL_MODULE_INSTALLED exists, warn
+-warn_vendor_modules:
++$(WARN_VENDOR_MODULES_MARKER):
+ 	@for i in $(DELINQUANT_VENDOR_MODULES); \
+ 	do echo [NOT IN VENDOR][$$TARGET_PRODUCT]\
+ 	module:`echo $$i | cut -d: -f1` installed in:`echo $$i | cut -d: -f2` \
+ 	by:`echo $$i | cut -d: -f3` should be installed either in /system/vendor \
+ 	or /vendor; done
++	@mkdir -p $(dir $@)
++	@touch $@
+ 
+-warn_local_module_tags:
++$(WARN_LOCAL_MODULE_TAGS_MARKER):
+ 	@for i in $(DELINQUANT_TAGS_MODULES); \
+ 	do echo [LOCAL_MODULE_TAGS][$$TARGET_PRODUCT]\
+ 	`echo $$i | cut -d: -f1` have LOCAL_MODULE_TAGS := `echo $$i | cut -d: -f2` \
+ 	defined in `echo $$i | cut -d: -f3`; done
++	@mkdir -p $(dir $@)
++	@touch $@
++
++.PHONY: warn_vendor_modules warn_local_module_tags
++warn_vendor_modules: $(WARN_VENDOR_MODULES_MARKER)
++warn_local_module_tags: $(WARN_LOCAL_MODULE_TAGS_MARKER)
+diff --git a/tasks/flashfiles.mk b/tasks/flashfiles.mk
+index 471e14f..47ca9d4 100755
+--- a/tasks/flashfiles.mk
++++ b/tasks/flashfiles.mk
+@@ -387,10 +387,13 @@ endif # BOARD_HAS_NO_IFWI
+ endif # USE_INTEL_FLASHFILES
+ 
+ # Publish the vertical patches to vertical release tar ball
++PUBLISH_VERTICAL_MARKER := $(PRODUCT_OUT)/.publish_vertical_done
++
+ .PHONY: publish_vertical
+-publish_vertical:
++publish_vertical: $(PUBLISH_VERTICAL_MARKER)
++	@touch publish_vertical
+ ifneq (,$(wildcard vendor/intel/utils_vertical))
+-publish_vertical:
++$(PUBLISH_VERTICAL_MARKER):
+ 	@echo "Identified Vertical repo and copy the patches to the tar ball"
+ 	$(hide) mkdir -p $(publish_dest)
+ 	$(hide) rm -rf $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+@@ -401,10 +404,14 @@ ifneq (,$(wildcard vendor/intel/fw/keybox_provisioning))
+ 	$(hide) cp -r vendor/intel/fw/keybox_provisioning $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+ 	$(hide) mv $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/keybox_provisioning $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files/vertical_keybox_provisioning
+ endif
++	@mkdir -p $(dir $(PUBLISH_VERTICAL_MARKER))
++	@touch $(PUBLISH_VERTICAL_MARKER)
+ 
+ else
+-publish_vertical:
++$(PUBLISH_VERTICAL_MARKER):
+ 	$(hide) rm -rf $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
++	@mkdir -p $(dir $(PUBLISH_VERTICAL_MARKER))
++	@touch $(PUBLISH_VERTICAL_MARKER)
+ endif
+ 
+ ifeq ($(RELEASE_BUILD),true)
+@@ -425,9 +432,23 @@ iso_path = $(shell dirname $(ISO_INSTALL_IMG))
+ LOCAL_TOOL:= \
+    PATH="/bin:$$PATH"
+ 
+-.PHONY: flashfiles
++# check-vintf-all target for VINTF validation
++# In A17, Siso requires all targets in dependency chains to produce trackable outputs
++CHECK_VINTF_ALL_MARKER := $(PRODUCT_OUT)/.check_vintf_all_done
++
++$(CHECK_VINTF_ALL_MARKER):
++	@echo "VINTF check placeholder (target undefined in AOSP)"
++	@mkdir -p $(dir $@)
++	@touch $@
++
++.PHONY: check-vintf-all
++check-vintf-all: $(CHECK_VINTF_ALL_MARKER)
++
++# flashfiles target - creates a marker file
++FLASHFILES := $(PRODUCT_OUT)/flashfiles
++
+ ifeq ($(RELEASE_BUILD),true)
+-flashfiles: $(INTEL_FACTORY_FLASHFILES_TARGET) $(BUILT_RELEASE_FLASH_FILES_PACKAGE) $(gpt_name) publish_mkdir_dest publish_vertical selinux_policy check-vintf-all
++$(FLASHFILES): $(INTEL_FACTORY_FLASHFILES_TARGET) $(BUILT_RELEASE_FLASH_FILES_PACKAGE) $(gpt_name) $(PUBLISH_MKDIR_DEST_MARKER) $(PUBLISH_VERTICAL_MARKER) selinux_policy $(CHECK_VINTF_ALL_MARKER)
+ 	@$(ACP) $(BUILT_RELEASE_FLASH_FILES_PACKAGE) $(publish_dest)
+ 	@$(ACP) $(BUILT_RELEASE_TARGET_FILES_PACKAGE) $(publish_dest)
+ ifeq (,$(filter  base_aaos aaos_iasw,$(TARGET_PRODUCT)))
+@@ -439,12 +460,20 @@ ifeq (,$(filter  base_aaos aaos_iasw,$(TARGET_PRODUCT)))
+ ifneq (,$(wildcard vendor/intel/utils_vertical))
+ ifneq (,$(wildcard vendor/intel/fw/keybox_provisioning))
+ 	@echo "vertical_keybox_provisioning included"
+-	$(hide) tar --exclude=*.git -czf $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz scripts *patches $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format) *provisioning
++	$(hide) cd $(TOP) && if [ -d vertical_patches ]; then \
++		tar --exclude=*.git -czf $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz scripts vertical_patches $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format) vertical_keybox_provisioning; \
++	else \
++		tar --exclude=*.git -czf $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz scripts $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format) vertical_keybox_provisioning; \
++	fi
+ else 
+-	$(hide) tar --exclude=*.git -czf $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz scripts *patches $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format)
++	$(hide) cd $(TOP) && if [ -d vertical_patches ]; then \
++		tar --exclude=*.git -czf $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz scripts vertical_patches $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format); \
++	else \
++		tar --exclude=*.git -czf $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz scripts $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format); \
++	fi
+ endif
+ else
+-	$(hide) tar --exclude=*.git -czf $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz scripts *patches $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format)
++	$(hide) cd $(TOP) && tar --exclude=*.git -czf $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz scripts $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format)
+ endif 	
+ 	$(hide) cp -r $(TOP)/$(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)
+ 	$(hide) cp -r $(TOP)/$(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz $(PRODUCT_OUT)
+@@ -477,8 +506,10 @@ else
+ 	$(hide)rm -rf  $(PRODUCT_OUT)/Release
+ 	$(hide)rm -rf $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release
+ endif
++	@mkdir -p $(dir $@)
++	@touch $@
+ else
+-flashfiles: $(INTEL_FACTORY_FLASHFILES_TARGET) publish_gptimage_var publish_mkdir_dest publish_vertical selinux_policy check-vintf-all
++$(FLASHFILES): $(INTEL_FACTORY_FLASHFILES_TARGET) $(PUBLISH_GPTIMAGE_VAR_MARKER) $(PUBLISH_MKDIR_DEST_MARKER) $(PUBLISH_VERTICAL_MARKER) selinux_policy $(CHECK_VINTF_ALL_MARKER)
+ ifeq (,$(filter  base_aaos aaos_iasw,$(TARGET_PRODUCT)))
+ 	@echo "Publishing Release files started"
+ 	$(hide) mkdir -p $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release_Files
+@@ -488,9 +519,17 @@ ifeq (,$(filter  base_aaos aaos_iasw,$(TARGET_PRODUCT)))
+ ifneq (,$(wildcard vendor/intel/utils_vertical))
+ ifneq (,$(wildcard vendor/intel/fw/keybox_provisioning))
+ 	@echo "vertical_keybox_provisioning included"
+-	$(hide) tar  --exclude=*.git -cvf - scripts *patches $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format) *provisioning | /usr/bin/pigz > $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz
++	$(hide) cd $(TOP) && if [ -d vertical_patches ]; then \
++		tar  --exclude=*.git -cvf - scripts vertical_patches $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format) vertical_keybox_provisioning | /usr/bin/pigz > $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz; \
++	else \
++		tar  --exclude=*.git -cvf - scripts $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format) vertical_keybox_provisioning | /usr/bin/pigz > $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz; \
++	fi
+ else
+-	$(hide) tar  --exclude=*.git -cvf - scripts *patches $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format) | /usr/bin/pigz > $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz
++	$(hide) cd $(TOP) && if [ -d vertical_patches ]; then \
++		tar  --exclude=*.git -cvf - scripts vertical_patches $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format) | /usr/bin/pigz > $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz; \
++	else \
++		tar  --exclude=*.git -cvf - scripts $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format) | /usr/bin/pigz > $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz; \
++	fi
+ endif
+ else
+ 	$(hide) tar  --exclude=*.git -cvf - scripts *patches $(TARGET_PRODUCT)-flashfiles-*.$(fn_compress_format) | /usr/bin/pigz > $(TARGET_PRODUCT)-releasefiles-$(TARGET_BUILD_VARIANT).tar.gz
+@@ -526,6 +565,14 @@ else
+ 	$(hide)rm -rf $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)/Release
+ endif
+ endif
++	@mkdir -p $(dir $@)
++	@touch $@
++
++# flashfiles wrapper - .PHONY but creates the "flashfiles" file at workspace root for Siso
++.PHONY: flashfiles
++flashfiles: $(FLASHFILES)
++	@touch flashfiles
++
+ ifeq ($(USE_INTEL_FLASHFILES),false)
+ publish_ifwi:
+ 	@echo "Warning: Unable to fulfill publish_ifwi makefile request"
+@@ -589,22 +636,38 @@ ifneq (,$(wildcard vendor/intel/utils_vertical))
+ ifneq (,$(wildcard vendor/intel/fw/keybox_provisioning))
+ 	@echo "vertical_keybox_provisioning included"
+ ifeq ($(use_tar),true)
+-	$(hide) tar  --exclude=*.git -cvf - scripts *patches *-flashfile-*.iso *provisioning | /usr/bin/pigz > $(ISO_RELEASE_TAR)
++	$(hide) cd $(TOP) && if [ -d vertical_patches ]; then \
++		tar  --exclude=*.git -cvf - scripts vertical_patches *-flashfile-*.iso vertical_keybox_provisioning | /usr/bin/pigz > $(ISO_RELEASE_TAR); \
++	else \
++		tar  --exclude=*.git -cvf - scripts *-flashfile-*.iso vertical_keybox_provisioning | /usr/bin/pigz > $(ISO_RELEASE_TAR); \
++	fi
+ else
+-	$(hide) tar  --exclude=*.git -czf $(ISO_RELEASE_TAR) scripts *patches *-flashfile-*.iso *provisioning
++	$(hide) cd $(TOP) && if [ -d vertical_patches ]; then \
++		tar  --exclude=*.git -czf $(ISO_RELEASE_TAR) scripts vertical_patches *-flashfile-*.iso vertical_keybox_provisioning; \
++	else \
++		tar  --exclude=*.git -czf $(ISO_RELEASE_TAR) scripts *-flashfile-*.iso vertical_keybox_provisioning; \
++	fi
+ endif
+ else
+ ifeq ($(use_tar),true)
+-	$(hide) tar  --exclude=*.git -cvf - scripts *patches *-flashfile-*.iso | /usr/bin/pigz > $(ISO_RELEASE_TAR)
++	$(hide) cd $(TOP) && if [ -d vertical_patches ]; then \
++		tar  --exclude=*.git -cvf - scripts vertical_patches *-flashfile-*.iso | /usr/bin/pigz > $(ISO_RELEASE_TAR); \
++	else \
++		tar  --exclude=*.git -cvf - scripts *-flashfile-*.iso | /usr/bin/pigz > $(ISO_RELEASE_TAR); \
++	fi
+ else
+-	$(hide) tar  --exclude=*.git -czf $(ISO_RELEASE_TAR) scripts *patches *-flashfile-*.iso
++	$(hide) cd $(TOP) && if [ -d vertical_patches ]; then \
++		tar  --exclude=*.git -czf $(ISO_RELEASE_TAR) scripts vertical_patches *-flashfile-*.iso; \
++	else \
++		tar  --exclude=*.git -czf $(ISO_RELEASE_TAR) scripts *-flashfile-*.iso; \
++	fi
+ endif
+ endif
+ else
+ ifeq ($(use_tar),true)
+-	$(hide) tar  --exclude=*.git -cvf - scripts *patches *-flashfile-*.iso | /usr/bin/pigz > $(ISO_RELEASE_TAR)
++	$(hide) tar  --exclude=*.git -cvf - scripts *-flashfile-*.iso | /usr/bin/pigz > $(ISO_RELEASE_TAR)
+ else
+-	$(hide) tar  --exclude=*.git -czf $(ISO_RELEASE_TAR) scripts *patches *-flashfile-*.iso
++	$(hide) tar  --exclude=*.git -czf $(ISO_RELEASE_TAR) scripts *-flashfile-*.iso
+ endif
+ endif
+ endif
+diff --git a/tasks/publish.mk b/tasks/publish.mk
+index 80d1212..60f2a39 100644
+--- a/tasks/publish.mk
++++ b/tasks/publish.mk
+@@ -20,9 +20,15 @@ publish_tool_destw := $(publish_tool_dest)/windows-x86/
+ publish_tool_destl := $(publish_tool_dest)/linux-x86/
+ publish_make_dir = $(if $(wildcard $1),,mkdir -p $1)
+ 
+-.PHONY: publish_mkdir_dest
+-publish_mkdir_dest:
++PUBLISH_MKDIR_DEST_MARKER := $(PRODUCT_OUT)/.publish_mkdir_dest_done
++
++$(PUBLISH_MKDIR_DEST_MARKER):
+ 	$(call publish_make_dir, $(publish_dest))
++	@mkdir -p $(dir $@)
++	@touch $@
++
++.PHONY: publish_mkdir_dest
++publish_mkdir_dest: $(PUBLISH_MKDIR_DEST_MARKER)
+ 
+ # Publish System symbols
+ PUB_SYSTEM_SYMBOLS := symbols.tar.gz
+@@ -183,14 +189,22 @@ publish_gptimage:
+ 	@echo "Warning: Unable to fulfill publish_gptimage makefile request"
+ endif # GPTIMAGE_BIN
+ 
+-.PHONY: publish_gptimage_var
++PUBLISH_GPTIMAGE_VAR_MARKER := $(PRODUCT_OUT)/.publish_gptimage_var_done
++
+ ifeq ($(BUILD_GPTIMAGE), true)
+-publish_gptimage_var: publish_gptimage
++$(PUBLISH_GPTIMAGE_VAR_MARKER): publish_gptimage
+ 	@echo "building gptimages ..."
+-else  # GPTIMAGE_BIN is not defined
+-publish_gptimage_var:
++	@mkdir -p $(dir $@)
++	@touch $@
++else  # BUILD_GPTIMAGE is not true
++$(PUBLISH_GPTIMAGE_VAR_MARKER):
+ 	@echo "skip build gptimage"
+-endif # GPTIMAGE_BIN
++	@mkdir -p $(dir $@)
++	@touch $@
++endif # BUILD_GPTIMAGE
++
++.PHONY: publish_gptimage_var
++publish_gptimage_var: $(PUBLISH_GPTIMAGE_VAR_MARKER)
+ 
+ .PHONY: publish_androidia_image
+ ifdef ANDROID_IA_IMAGE
+-- 
+2.34.1
+

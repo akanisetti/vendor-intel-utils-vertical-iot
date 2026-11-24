@@ -1,0 +1,213 @@
+From 8f1922506233814d686f0a78ed0851fbb55ebfe3 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 05:29:11 +0000
+Subject: [PATCH] media-driver: Restore 3 fork-local functional fixes discarded
+ by overlay
+
+Found via audit of fork-local commits not reachable from upstream/master,
+excluding glue files. All three predate this version bump and were
+silently dropped by the intel-media-26.2.3 overlay since they touch
+real source files, not Android.bp/Tools/MediaDriverTools/Android glue:
+
+1. media_sku_wa_xe.cpp: restore missing DG2 device ID 0x56AF in
+   InitDg2MediaSku's tile-config check (commit 4928886ea).
+
+2. mos_utilities_specific.h: fix USER_FEATURE_FILE* path selection.
+   The existing "#if ANDROID_VERSION >= 800" is dead code --
+   ANDROID_VERSION is never defined anywhere in this Android.mk build
+   -- so the build always fell through to the non-Android /etc/...
+   paths, meaning a GPU-hang CTS workaround
+   (igfx_user_feature_next.txt, see Enable HCP Scalability
+   Decode=0 / Disable Media Encode Scalability=1) would never be
+   found at its real /vendor/etc/... location. Restored the fork's
+   "#ifdef ANDROID" gate pointing at /vendor/etc/igfx_user_feature*.txt
+   (commit 701044217).
+
+3. media_libva.cpp: restore DdiMedia_SelectIntelDevice/
+   DdiMedia_IsIntelDgpu device-selection logic (replacing a hardcoded
+   DEVICE_NAME), the same dGPU/iGPU selection fix family already found
+   and restored in libva's va_android.cpp and (pending) vpl-gpu-rt's
+   libmfxsw.cpp. Restored from the final combined state at this fork's
+   pre-upgrade HEAD (two commits, 463ae5922 + c5c99e3b4, applied
+   sequentially upstream) rather than replaying each commit
+   individually, since the second fixes an off-by-128 bug in the first.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ .../linux/Xe_M/ddi/media_sku_wa_xe.cpp        |   1 +
+ media_driver/linux/common/ddi/media_libva.cpp | 107 +++++++++++++++++-
+ .../os/osservice/mos_utilities_specific.h     |   6 +-
+ 3 files changed, 111 insertions(+), 3 deletions(-)
+
+diff --git a/media_driver/linux/Xe_M/ddi/media_sku_wa_xe.cpp b/media_driver/linux/Xe_M/ddi/media_sku_wa_xe.cpp
+index 65e1295cb..de6616879 100644
+--- a/media_driver/linux/Xe_M/ddi/media_sku_wa_xe.cpp
++++ b/media_driver/linux/Xe_M/ddi/media_sku_wa_xe.cpp
+@@ -818,6 +818,7 @@ static bool InitDg2MediaSku(struct GfxDeviceInfo *devInfo,
+          drvInfo->devId == 0x56A7 ||
+          drvInfo->devId == 0x56A8 ||
+          drvInfo->devId == 0x56A9 ||
++         drvInfo->devId == 0x56AF ||
+          drvInfo->devId == 0x56C0))
+     {
+         MEDIA_WR_SKU(skuTable, FtrTileY, 0);
+diff --git a/media_driver/linux/common/ddi/media_libva.cpp b/media_driver/linux/common/ddi/media_libva.cpp
+index 0f76f3f29..f4f2a88d7 100755
+--- a/media_driver/linux/common/ddi/media_libva.cpp
++++ b/media_driver/linux/common/ddi/media_libva.cpp
+@@ -37,6 +37,7 @@
+ #endif
+ 
+ #include <linux/fb.h>
++#include <xf86drm.h>
+ 
+ #include "media_libva.h"
+ 
+@@ -72,6 +73,10 @@
+ #include "media_interfaces_hwinfo_device.h"
+ #include "media_libva_caps_next.h"
+ 
++#if defined(ANDROID)
++#include <cutils/properties.h>
++#endif
++
+ #define BO_BUSY_TIMEOUT_LIMIT 100
+ 
+ #ifdef __cplusplus
+@@ -1553,6 +1558,99 @@ void DestroyMediaContextMutex(PDDI_MEDIA_CONTEXT mediaCtx)
+     return;
+ }
+ 
++static int DdiMedia_IsIntelDgpu(int fd)
++{
++    struct drm_i915_query_item item = {
++        .query_id = DRM_I915_QUERY_MEMORY_REGIONS,
++    };
++
++    struct drm_i915_query query = {
++        .num_items = 1, .items_ptr = (uintptr_t)&item,
++    };
++    if (drmIoctl(fd, DRM_IOCTL_I915_QUERY, &query)) {
++        DDI_NORMALMESSAGE("drv: Failed to DRM_IOCTL_I915_QUERY");
++        return 0;
++    }
++
++    struct drm_i915_query_memory_regions *meminfo = (struct drm_i915_query_memory_regions *)calloc(1, item.length);
++    if (!meminfo) {
++        DDI_NORMALMESSAGE("drv: %s Exit due to memory allocation failure", __func__);
++        return 0;
++    }
++
++    item.data_ptr = (uintptr_t)meminfo;
++    if (drmIoctl(fd, DRM_IOCTL_I915_QUERY, &query) || item.length <= 0) {
++        free(meminfo);
++        DDI_NORMALMESSAGE("%s:%d DRM_IOCTL_I915_QUERY error", __FUNCTION__, __LINE__);
++        return 0;
++    }
++
++    int has_sys = 0, has_local = 0;
++    for (uint32_t i = 0; i < meminfo->num_regions; i++) {
++        const struct drm_i915_memory_region_info *mem = &meminfo->regions[i];
++        switch (mem->region.memory_class) {
++        case I915_MEMORY_CLASS_SYSTEM:
++            has_sys = 1;
++            break;
++        case I915_MEMORY_CLASS_DEVICE:
++            has_local = 1;
++            break;
++        default:
++            break;
++        }
++    }
++
++    free(meminfo);
++    return has_local;
++}
++
++static int DdiMedia_SelectIntelDevice()
++{
++    int use_dgpu = 1;
++#if defined(ANDROID)
++    char value[PROPERTY_VALUE_MAX] = {};
++
++    property_get("video.hw.dgpu", value, "1");
++    use_dgpu = atoi(value);
++#endif
++
++    int intel_gpu_index = -1;
++    for (int i = 0; i < 16; ++i) {
++        char device_path[64];
++        sprintf(device_path, "/dev/dri/renderD%d", 128 + i);
++        int temp = open(device_path, O_RDWR | O_CLOEXEC);
++        if (temp == -1) {
++            continue;
++        }
++        drmVersionPtr version = drmGetVersion(temp);
++        if (version == nullptr) {
++            close(temp);
++            continue;
++        }
++        if (strncmp(version->name, "i915", strlen("i915")) == 0) {
++            intel_gpu_index = i;
++            // If specify to use dgpu and found dgpu, return the first found dgpu,
++            // else if specify to use igpu and found igpu, return the first found igpu,
++            // otherwise use the last available intel node for codec
++            if (use_dgpu && DdiMedia_IsIntelDgpu(temp)) {
++                DDI_NORMALMESSAGE("%s:%d find dgpu", __FUNCTION__, __LINE__);
++                drmFreeVersion(version);
++                close(temp);
++                break;
++            }
++            if (!use_dgpu && !DdiMedia_IsIntelDgpu(temp)) {
++                DDI_NORMALMESSAGE("%s:%d find igpu", __FUNCTION__, __LINE__);
++                drmFreeVersion(version);
++                close(temp);
++                break;
++            }
++        }
++        drmFreeVersion(version);
++        close(temp);
++    }
++    return intel_gpu_index;
++}
++
+ VAStatus DdiMedia_GetDeviceFD (
+     VADriverContextP ctx,
+     int32_t         *pDevicefd
+@@ -1566,7 +1664,14 @@ VAStatus DdiMedia_GetDeviceFD (
+     if(pDRMState->fd < 0)
+     {
+         DDI_ASSERTMESSAGE("DDI:LIBVA Wrapper doesn't pass file descriptor for graphics adaptor, trying to open the graphics... ");
+-        pDRMState->fd = DdiMediaUtil_OpenGraphicsAdaptor((char *)DEVICE_NAME);
++        int device_id = DdiMedia_SelectIntelDevice();
++        if (device_id < 0) {
++            DDI_ASSERTMESSAGE("DDI: Cannot find candidate DRM device, return failure");
++            return VA_STATUS_ERROR_INVALID_PARAMETER;
++        }
++        char device_name[64];
++        sprintf(device_name, "/dev/dri/renderD%d\n", device_id + 128);
++        pDRMState->fd = DdiMediaUtil_OpenGraphicsAdaptor((char *)device_name);
+         if (pDRMState->fd < 0) {
+             DDI_ASSERTMESSAGE("DDI: Still failed to open the graphic adaptor, return failure");
+             return VA_STATUS_ERROR_INVALID_PARAMETER;
+diff --git a/media_softlet/linux/common/os/osservice/mos_utilities_specific.h b/media_softlet/linux/common/os/osservice/mos_utilities_specific.h
+index 05054757b..9ef727288 100644
+--- a/media_softlet/linux/common/os/osservice/mos_utilities_specific.h
++++ b/media_softlet/linux/common/os/osservice/mos_utilities_specific.h
+@@ -47,8 +47,10 @@ class MosMutex;
+ #define USER_FEATURE_KEY_EXTERNAL            "UFKEY_EXTERNAL\\"
+ 
+ //user feature
+-#if ANDROID_VERSION >= 800
+-#define USER_FEATURE_FILE                   "/data/igfx_user_feature.txt"
++#ifdef ANDROID
++#define USER_FEATURE_FILE                   "/vendor/etc/igfx_user_feature.txt"
++#define USER_FEATURE_FILE_NEXT              "/vendor/etc/igfx_user_feature_next.txt"
++#define USER_FEATURE_FILE_REPORT            "/vendor/etc/igfx_user_feature_report.txt"
+ #else
+ #define USER_FEATURE_FILE                   "/etc/igfx_user_feature.txt"
+ #define USER_FEATURE_FILE_NEXT              "/etc/igfx_user_feature_next.txt"
+-- 
+2.34.1
+

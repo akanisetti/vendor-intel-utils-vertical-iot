@@ -1,0 +1,36 @@
+From 5f7b8f6bb890d39ed3370599048b4c117a74d6f3 Mon Sep 17 00:00:00 2001
+From: Andrey Yepin <ayepin@google.com>
+Date: Thu, 27 Aug 2026 12:29:36 -0700
+Subject: [PATCH] Update CallerUriReadAccessValidator to use the launching
+ package name.
+
+This is, essentially, asking the Framework whether the calling package
+is able to grant the permission for the URI to itself. It aligns with
+how the method is used by System UI in other places. This is also a more
+stable way to perform the check.
+
+Bug: b/435188844
+Test: `sts-tradefed run sts-dynamic-develop -m CtsSecurityBulletinHostTestCases -t android.security.cts.Bug_435188844`
+Flag: EXEMPT CVE_FIX
+Change-Id: I287cb5a32e24d4d6cbecf65271ae5159695ab477
+---
+ .../intentresolver/domain/UriCallerReadAccessValidator.kt      | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/java/src/com/android/intentresolver/domain/UriCallerReadAccessValidator.kt b/java/src/com/android/intentresolver/domain/UriCallerReadAccessValidator.kt
+index 28a50f68..9a4a6bbc 100644
+--- a/java/src/com/android/intentresolver/domain/UriCallerReadAccessValidator.kt
++++ b/java/src/com/android/intentresolver/domain/UriCallerReadAccessValidator.kt
+@@ -71,7 +71,8 @@ constructor(
+ object CallerUriReadAccessValidatorModule {
+     @Provides
+     @PackageName
+-    fun packageName(@ApplicationContext context: Context): String = context.packageName
++    fun packageName(activityModelRepository: ActivityModelRepository): String =
++        activityModelRepository.value.launchedFromPackage
+ 
+     @Provides
+     @LaunchedFromUid
+-- 
+2.56.0.385.gac671c819a-goog
+

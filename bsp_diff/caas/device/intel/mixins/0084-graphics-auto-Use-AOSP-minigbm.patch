@@ -1,0 +1,61 @@
+From 5eebb1b9906e5f60f31a0c38a6165327ae5bb055 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 13 Oct 2026 02:26:49 +0000
+Subject: [PATCH] graphics/auto: Use AOSP minigbm
+
+Gralloc moved from hardware/intel/external/minigbm-intel to AOSP
+external/minigbm.
+
+ - Select the Intel platform for AOSP minigbm (soong config
+   minigbm.platform=intel), which builds libminigbm_gralloc with the
+   i915 and xe backends.
+ - Drop the gralloc1 HAL gralloc.$(TARGET_GFX_INTEL),
+   libminigbm_gralloc_intel and ro.hardware.gralloc; the allocator and
+   mapper.minigbm link libminigbm_gralloc and Mesa uses IMapper5.
+ - Drop the unused INTEL_MINIGBM path.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ groups/graphics/auto/BoardConfig.mk | 3 ++-
+ groups/graphics/auto/product.mk     | 9 ++-------
+ 2 files changed, 4 insertions(+), 8 deletions(-)
+
+diff --git a/groups/graphics/auto/BoardConfig.mk b/groups/graphics/auto/BoardConfig.mk
+index 620df17..e6766ed 100755
+--- a/groups/graphics/auto/BoardConfig.mk
++++ b/groups/graphics/auto/BoardConfig.mk
+@@ -34,7 +34,8 @@ endif
+ {{#minigbm}}
+ BOARD_USES_MINIGBM := true
+ BOARD_ENABLE_EXPLICIT_SYNC := true
+-INTEL_MINIGBM := $(INTEL_PATH_HARDWARE)/external/minigbm-intel
++# Build AOSP minigbm with the i915 and xe backends
++$(call soong_config_set,minigbm,platform,intel)
+ {{/minigbm}}
+ 
+ {{^minigbm}}
+diff --git a/groups/graphics/auto/product.mk b/groups/graphics/auto/product.mk
+index 6e9862a..e981744 100755
+--- a/groups/graphics/auto/product.mk
++++ b/groups/graphics/auto/product.mk
+@@ -84,14 +84,9 @@ PRODUCT_PROPERTY_OVERRIDES += \
+     ro.hardware.hwcomposer=drm_minigbm
+ 
+ {{#minigbm}}
+-# Mini gbm
++# Mini gbm (AOSP external/minigbm, IMapper stable-C v5)
+ PRODUCT_PACKAGES += \
+-    gralloc.$(TARGET_GFX_INTEL) \
+-    mapper.minigbm \
+-    libminigbm_gralloc_intel
+-
+-PRODUCT_PROPERTY_OVERRIDES += \
+-    ro.hardware.gralloc=$(TARGET_GFX_INTEL)
++    mapper.minigbm
+ {{/minigbm}}
+ 
+ {{^minigbm}}
+-- 
+2.34.1
+

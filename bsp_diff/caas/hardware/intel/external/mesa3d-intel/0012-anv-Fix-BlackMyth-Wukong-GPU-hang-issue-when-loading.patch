@@ -1,0 +1,131 @@
+From 56bd71adc00472da786dce5bad33880f5b2f84e3 Mon Sep 17 00:00:00 2001
+From: "Mi, Yanfeng" <yanfeng.mi@intel.com>
+Date: Tue, 31 Dec 2024 10:21:58 +0800
+Subject: [PATCH 12/19] anv:Fix BlackMyth: Wukong GPU hang issue when loading
+ chapter 2/3/4
+
+The culprit computer shader with barrier in divergent control flow,
+so we force the shader to SIMD32 to avoid the hang issue.
+
+Signed-off-by: Mi, Yanfeng <yanfeng.mi@intel.com>
+(cherry picked from commit 4a3f6786253e1b6375c5b636e2c04102dcd8b175)
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ src/intel/vulkan/anv_instance.c       |  3 +++
+ src/intel/vulkan/anv_private.h        |  1 +
+ src/intel/vulkan/anv_shader_compile.c | 27 +++++++++++++++++++++++++++
+ src/util/00-mesa-defaults.conf        |  3 +++
+ src/util/driconf.h                    |  4 ++++
+ 5 files changed, 38 insertions(+)
+
+diff --git a/src/intel/vulkan/anv_instance.c b/src/intel/vulkan/anv_instance.c
+index 285b6daacfb6..6c68af7584cb 100644
+--- a/src/intel/vulkan/anv_instance.c
++++ b/src/intel/vulkan/anv_instance.c
+@@ -51,6 +51,7 @@ static const driOptionDescription anv_dri_options[] = {
+                      DRI_CONF_ENUM(1024, "1024 stackids")
+                      DRI_CONF_ENUM(2048, "2048 stackids"))
+       DRI_CONF_ANV_UPPER_BOUND_DESCRIPTOR_POOL_SAMPLER(false)
++      DRI_CONF_ANV_FORCE_CS_SIMD32(false)
+    DRI_CONF_SECTION_END
+ 
+    DRI_CONF_SECTION_DEBUG
+@@ -219,6 +220,8 @@ anv_init_dri_options(struct anv_instance *instance)
+     instance->anv_upper_bound_descriptor_pool_sampler =
+        driQueryOptionb(&instance->dri_options,
+                        "anv_upper_bound_descriptor_pool_sampler");
++    instance->force_cs_simd32 =
++          driQueryOptionb(&instance->dri_options, "force_cs_simd32");
+     instance->custom_border_colors_without_format =
+        driQueryOptionb(&instance->dri_options,
+                        "custom_border_colors_without_format");
+diff --git a/src/intel/vulkan/anv_private.h b/src/intel/vulkan/anv_private.h
+index d6bf61fed78f..f3cd86e86199 100644
+--- a/src/intel/vulkan/anv_private.h
++++ b/src/intel/vulkan/anv_private.h
+@@ -1801,6 +1801,7 @@ struct anv_instance {
+     bool                                        compression_control_enabled;
+     bool                                        anv_fake_nonlocal_memory;
+     bool                                        anv_upper_bound_descriptor_pool_sampler;
++    bool                                        force_cs_simd32;
+     bool                                        custom_border_colors_without_format;
+     bool                                        vf_component_packing;
+     bool                                        large_workgroup_non_coherent_image_workaround;
+diff --git a/src/intel/vulkan/anv_shader_compile.c b/src/intel/vulkan/anv_shader_compile.c
+index acbdcc51b785..ca8545a0f3e4 100644
+--- a/src/intel/vulkan/anv_shader_compile.c
++++ b/src/intel/vulkan/anv_shader_compile.c
+@@ -833,6 +833,22 @@ lookup_ycbcr_conversion(const void *_stage, uint32_t set,
+           &sampler->ycbcr_conversion_state : NULL;
+ }
+ 
++static bool
++should_apply_simd32_wa(const struct shader_info *info)
++{
++   static const uint32_t shader_blake3s[][BLAKE3_OUT_LEN32] = {
++      /* Black Myth: Wukong CS */
++      {0x7946db0c, 0x3cc2f4a3, 0x44a5ae9b, 0x4924ba6e, 0x385c195d, 0xda218f3c, 0xf7e76af1, 0xb5d2bdfa},
++   };
++
++   for (unsigned i = 0; i < ARRAY_SIZE(shader_blake3s); i++) {
++      if (_mesa_printed_blake3_equal(info->source_blake3, shader_blake3s[i]))
++         return true;
++   }
++
++   return false;
++}
++
+ static void
+ anv_fixup_subgroup_size(struct anv_device *device, nir_shader *shader)
+ {
+@@ -870,6 +886,17 @@ anv_fixup_subgroup_size(struct anv_device *device, nir_shader *shader)
+       info->min_subgroup_size = BRW_SUBGROUP_SIZE;
+    }
+ 
++   /* The culprit compute shader uses a barrier in divergent control flow
++    * and hangs the GPU unless it runs in SIMD32.
++    */
++   if (device->info->verx10 == 125 &&
++       instance->force_cs_simd32 &&
++       info->stage == MESA_SHADER_COMPUTE &&
++       should_apply_simd32_wa(info)) {
++      info->max_subgroup_size = BRW_SUBGROUP_SIZE;
++      info->min_subgroup_size = BRW_SUBGROUP_SIZE;
++   }
++
+    /* Similarly, sometimes games rely on the implicit synchronization of
+     * the shared memory accesses, and choosing smaller subgroups than the game
+     * expects will cause bugs. */
+diff --git a/src/util/00-mesa-defaults.conf b/src/util/00-mesa-defaults.conf
+index 78e674f47683..56de59b90926 100644
+--- a/src/util/00-mesa-defaults.conf
++++ b/src/util/00-mesa-defaults.conf
+@@ -983,6 +983,9 @@ TODO: document the other workarounds.
+         </application>
+     </device>
+     <device driver="anv">
++        <application name="Black Myth: Wukong" executable="b1-Win64-Shipping.exe">
++            <option name="force_cs_simd32" value="true" />
++        </application>
+         <application name="Aperture Desk Job" executable="deskjob">
+             <option name="anv_assume_full_subgroups" value="32" />
+         </application>
+diff --git a/src/util/driconf.h b/src/util/driconf.h
+index 72b47cd3b7ac..6453135fa1c1 100644
+--- a/src/util/driconf.h
++++ b/src/util/driconf.h
+@@ -874,6 +874,10 @@
+    DRI_CONF_OPT_B(anv_emulate_read_without_format, def, \
+                   "Emulate shaderStorageImageReadWithoutFormat with shader conversions")
+ 
++#define DRI_CONF_ANV_FORCE_CS_SIMD32(def) \
++   DRI_CONF_OPT_B(force_cs_simd32, def, \
++                  "Force specific compute shader to use SIMD32 for WA hang issue")
++
+ #define DRI_CONF_ANV_SAMPLE_MASK_OUT_OPENGL_BEHAVIOUR(def) \
+    DRI_CONF_OPT_B(anv_sample_mask_out_opengl_behaviour, def, \
+                   "Ignore sample mask out when having single sampled target")
+-- 
+2.34.1
+

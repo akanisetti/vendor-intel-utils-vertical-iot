@@ -1,0 +1,60 @@
+From 03c2cf9d4845b6870238e632b704f0160b129da6 Mon Sep 17 00:00:00 2001
+From: Gabriel Biren <gbiren@google.com>
+Date: Thu, 28 May 2026 14:08:52 -0700
+Subject: [PATCH] Fix the IPv6 flow label size check when converting QoS
+ policies from AIDL.
+
+The IPv6 flow label must be exactly 3 bytes.
+
+Bug: 511543870
+Test: m
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:0952320b1419da4296bd6435fdbc46e8e88e2a0a
+Merged-In: I788f7aa9c992f5114c74537e8a668fb44995d691
+Change-Id: I788f7aa9c992f5114c74537e8a668fb44995d691
+---
+ wpa_supplicant/aidl/sta_iface.cpp | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/wpa_supplicant/aidl/sta_iface.cpp b/wpa_supplicant/aidl/sta_iface.cpp
+index 75f664b..8b785ee 100644
+--- a/wpa_supplicant/aidl/sta_iface.cpp
++++ b/wpa_supplicant/aidl/sta_iface.cpp
+@@ -884,7 +884,7 @@ bool StaIface::isValid()
+ {
+ 	return validateAndCall(
+ 		this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+-		&StaIface::generateDppBootstrapInfoForResponderInternal, _aidl_return, 
++		&StaIface::generateDppBootstrapInfoForResponderInternal, _aidl_return,
+ 		in_macAddress, in_deviceInfo, in_curve);
+ }
+ 
+@@ -1853,7 +1853,7 @@ ndk::ScopedAStatus StaIface::stopDppInitiatorInternal()
+ 
+ std::pair<DppResponderBootstrapInfo, ndk::ScopedAStatus>
+ StaIface::generateDppBootstrapInfoForResponderInternal(
+-	const std::vector<uint8_t> &mac_address, 
++	const std::vector<uint8_t> &mac_address,
+ 	const std::string& device_info, DppCurve curve)
+ {
+ #ifdef CONFIG_DPP
+@@ -2430,13 +2430,15 @@ static int set_type4_frame_classifier(QosPolicyScsData qos_policy_data,
+ 	}
+ 
+ 	if (inMask & static_cast<uint32_t>(QosPolicyClassifierParamsMask::FLOW_LABEL)) {
++		// Flow label is expected to have a length of 3 bytes.
+ 		if (qos_policy_data.classifierParams.flowLabelIpv6.size() !=
+ 		    sizeof(param->ip_params.v6.flow_label)) {
+ 			wpa_printf(MSG_ERROR, "Invalid flow label");
+ 			return -1;
+ 		}
+-		os_memcpy(param->ip_params.v6.flow_label, qos_policy_data.classifierParams.flowLabelIpv6.data(),
+-			  sizeof(qos_policy_data.classifierParams.flowLabelIpv6));
++		os_memcpy(param->ip_params.v6.flow_label,
++			qos_policy_data.classifierParams.flowLabelIpv6.data(),
++			sizeof(param->ip_params.v6.flow_label));
+ 
+ 		/* Classifier Mask - bit 7 = flow level */
+ 		classifier_mask |= BIT(7);
+-- 
+2.56.0.385.gac671c819a-goog
+

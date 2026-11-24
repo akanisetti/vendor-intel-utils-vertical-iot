@@ -1,0 +1,31 @@
+From 27d853381628772829e1a4fa68ac6507431d6eb6 Mon Sep 17 00:00:00 2001
+From: John Reck <jreck@google.com>
+Date: Tue, 2 Jun 2026 16:53:40 -0400
+Subject: [PATCH] Add rowBytes=0 handling
+
+Fixes: 513648011
+Test: android.security.cts.BitmapTest#test_513648011
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:67ef036b9060552258b8caaf8e49c85f48da5db1
+Merged-In: Id8044c7518f51569128f890833ba3beef929bb9a
+Change-Id: Id8044c7518f51569128f890833ba3beef929bb9a
+---
+ libs/hwui/jni/Bitmap.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libs/hwui/jni/Bitmap.cpp b/libs/hwui/jni/Bitmap.cpp
+index d97d1bca4616..e01c42fadf7f 100644
+--- a/libs/hwui/jni/Bitmap.cpp
++++ b/libs/hwui/jni/Bitmap.cpp
+@@ -849,7 +849,7 @@ static constexpr auto BadParcelableException = "android/os/BadParcelableExceptio
+ 
+ static bool validateImageInfo(const SkImageInfo& info, int32_t rowBytes) {
+     // TODO: Can we avoid making a SkBitmap for this?
+-    return SkBitmap().setInfo(info, rowBytes);
++    return rowBytes > 0 && SkBitmap().setInfo(info, rowBytes);
+ }
+ 
+ static jobject Bitmap_createFromParcel(JNIEnv* env, jobject, jobject parcel) {
+-- 
+2.56.0.385.gac671c819a-goog
+

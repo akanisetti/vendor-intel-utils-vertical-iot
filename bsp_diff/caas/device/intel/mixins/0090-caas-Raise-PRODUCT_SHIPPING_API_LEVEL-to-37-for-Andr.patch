@@ -1,0 +1,52 @@
+From e198050f64bbcbc4d13b2c3abcccd2ce80c63016 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 17 Nov 2026 07:12:33 +0000
+Subject: [PATCH] caas: Raise PRODUCT_SHIPPING_API_LEVEL to 37 for Android 17
+
+With the 6.18.38 kernel there is no ashmem (CONFIG_ASHMEM now needs
+Rust) and no ashmem ioctl compatibility on memfds, and the device
+runs with sys.use_memfd=true.
+
+At PRODUCT_SHIPPING_API_LEVEL 35, ro.vendor.api_level is 202404.
+Chromium/WebView then creates and seals shared memory through
+libandroid ASharedMemory_*, which ends in libcutils. libcutils
+detects memfds with readlink(/proc/self/fd/N), which the Chromium
+renderer seccomp policy denies with EPERM. libcutils then falls
+back to the ashmem ioctls, which fail without kernel ashmem. The
+renderer spins on "Unable to stat ashmem device" and no web content
+renders in the browser (video or otherwise).
+
+Shipping level 37 makes ro.vendor.api_level 202604 (Android 17).
+Chromium then uses its own memfd_create/F_ADD_SEALS path and no
+longer goes through libcutils. sys.use_memfd=true is still needed
+so that apps targeting SDK < 37 get memfds.
+
+Also raise the BASE_LTS2024_ANDROID_KERNEL shipping level from 34
+to 35.
+
+Tracked-On: NIACP3-1704
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ groups/device-specific/caas/caas.mk | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/groups/device-specific/caas/caas.mk b/groups/device-specific/caas/caas.mk
+index 9950d73e..ff72579d 100644
+--- a/groups/device-specific/caas/caas.mk
++++ b/groups/device-specific/caas/caas.mk
+@@ -83,10 +83,10 @@ PRODUCT_SET_DEBUGFS_RESTRICTIONS := true
+ endif
+ {{^ota-update}}
+ ifeq ($(BASE_LTS2024_ANDROID_KERNEL), true)
+-PRODUCT_SHIPPING_API_LEVEL := 34
++PRODUCT_SHIPPING_API_LEVEL := 35
+ PRODUCT_OTA_ENFORCE_VINTF_KERNEL_REQUIREMENTS := false
+ else
+-PRODUCT_SHIPPING_API_LEVEL := 35
++PRODUCT_SHIPPING_API_LEVEL := 37
+ PRODUCT_OTA_ENFORCE_VINTF_KERNEL_REQUIREMENTS := true
+ endif
+ {{/ota-update}}
+-- 
+2.34.1
+

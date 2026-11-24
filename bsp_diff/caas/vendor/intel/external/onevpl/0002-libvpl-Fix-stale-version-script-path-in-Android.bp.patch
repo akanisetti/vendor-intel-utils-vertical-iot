@@ -1,0 +1,36 @@
+From bd868010ab2234b646a6657d38da517a5ad3ddec Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Fri, 16 Oct 2026 07:55:58 +0000
+Subject: [PATCH] libvpl: Fix stale version-script path in Android.bp
+
+The linker version-script cflag pointed at
+vendor/intel/external/onevpl/dispatcher/linux/libvpl.map, a path that
+predates upstream's "Rename dispatcher directory to libvpl" commit --
+this file did not exist even in our pre-upgrade HEAD, a pre-existing
+latent bug this version bump happened to surface while reconciling
+the glue. The real file lives at
+vendor/intel/external/onevpl/libvpl/src/linux/libvpl.map; update the
+reference accordingly.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ libvpl/Android.bp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libvpl/Android.bp b/libvpl/Android.bp
+index 79434aa..4d91c33 100644
+--- a/libvpl/Android.bp
++++ b/libvpl/Android.bp
+@@ -50,7 +50,7 @@ cc_library_shared {
+         "-Wno-missing-braces",
+         "-Wno-unused-parameter",
+         "-Wno-missing-field-initializers",
+-        "-Wl,--version-script=vendor/intel/external/onevpl/dispatcher/linux/libvpl.map",
++        "-Wl,--version-script=vendor/intel/external/onevpl/libvpl/src/linux/libvpl.map",
+     ],
+ 
+     arch: {
+-- 
+2.34.1
+

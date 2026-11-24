@@ -1,0 +1,48 @@
+From fdc307a2e0740a9ff95b2dd9e1d8e2aacacdac28 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Fri, 23 Oct 2026 04:03:19 +0000
+Subject: [PATCH 19/19] intel/ds: Initialize perfetto before registering render
+ stages on Android
+
+The Android port does not call util_perfetto_init() from
+util_cpu_trace_init(), because eglGetDisplay() runs in zygote's GL
+driver preload and the perfetto thread makes zygote hang before fork
+("Perfetto: Modify to make perfetto and AGI run ok").
+
+Mesa 26.0 no longer calls util_perfetto_init() in
+intel_driver_ds_init_once() either, so IntelRenderpassDataSource was
+registered on the fake tracing muxer and perfetto aborted
+(FailUninitialized -> SIGILL) in iris_screen_create(), crashing
+surfaceflinger in eglInitialize() and leaving the display blank.
+
+Initialize perfetto right before registering the data source, as the
+25.0.1 tree did. This runs at iris screen / anv device creation only.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ src/intel/ds/intel_driver_ds.cc | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/intel/ds/intel_driver_ds.cc b/src/intel/ds/intel_driver_ds.cc
+index d0cbd2032ba5..be41c9eec597 100644
+--- a/src/intel/ds/intel_driver_ds.cc
++++ b/src/intel/ds/intel_driver_ds.cc
+@@ -673,6 +673,14 @@ static void
+ intel_driver_ds_init_once(void)
+ {
+ #ifdef HAVE_PERFETTO
++#if DETECT_OS_ANDROID
++   /* util_cpu_trace_init() does not initialize perfetto on Android (see
++    * cpu_trace.h), so do it here: registering a data source before
++    * perfetto::Tracing::Initialize() is fatal. This runs at screen/device
++    * creation, not in the zygote GL driver preload.
++    */
++   util_perfetto_init();
++#endif
+    perfetto::DataSourceDescriptor dsd;
+ #if DETECT_OS_ANDROID
+    // Android tooling expects this data source name
+-- 
+2.34.1
+

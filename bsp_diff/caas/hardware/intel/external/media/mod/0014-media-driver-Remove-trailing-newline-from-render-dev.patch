@@ -1,0 +1,34 @@
+From de18604882d7fad43b4c1db5330deb8828a1c2b3 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Tue, 3 Nov 2026 15:40:48 +0000
+Subject: [PATCH] media-driver: Remove trailing newline from render device path
+
+DdiMedia_GetDeviceFD()'s no-FD fallback built the device path with
+sprintf(device_name, "/dev/dri/renderD%d\n", ...) -- a stray
+newline baked into the format string. open() is called with the
+literal path '/dev/dri/renderD128\n', which never exists, so
+DdiMediaUtil_OpenGraphicsAdaptor() always fails (ENOENT) even after
+DdiMedia_SelectIntelDevice() correctly found a candidate device.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ media_driver/linux/common/ddi/media_libva.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media_driver/linux/common/ddi/media_libva.cpp b/media_driver/linux/common/ddi/media_libva.cpp
+index 7c8fbff78..9d32c0355 100755
+--- a/media_driver/linux/common/ddi/media_libva.cpp
++++ b/media_driver/linux/common/ddi/media_libva.cpp
+@@ -1715,7 +1715,7 @@ VAStatus DdiMedia_GetDeviceFD (
+             return VA_STATUS_ERROR_INVALID_PARAMETER;
+         }
+         char device_name[64];
+-        sprintf(device_name, "/dev/dri/renderD%d\n", device_id + 128);
++        sprintf(device_name, "/dev/dri/renderD%d", device_id + 128);
+         pDRMState->fd = DdiMediaUtil_OpenGraphicsAdaptor((char *)device_name);
+         if (pDRMState->fd < 0) {
+             DDI_ASSERTMESSAGE("DDI: Still failed to open the graphic adaptor, return failure");
+-- 
+2.34.1
+

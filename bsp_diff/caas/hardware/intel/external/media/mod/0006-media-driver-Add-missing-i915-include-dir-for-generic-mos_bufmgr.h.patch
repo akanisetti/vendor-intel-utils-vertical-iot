@@ -1,0 +1,41 @@
+From 61e400b0f45841958acc429e0965564c1d8f97e1 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 07:17:22 +0000
+Subject: [PATCH] media-driver: Add missing i915/include dir for generic
+ mos_bufmgr.h
+
+A real flashfiles build failed with a fatal file-not-found error:
+media_common/linux/common/os/mos_os_specific.h unconditionally
+includes "mos_bufmgr.h" (the generic MOS_BUFMGR type used regardless
+of which KMD backend -- i915 or xe -- is active at runtime), but its
+containing directory, media_softlet/linux/common/os/i915/include, was
+never added to local_include_dirs. Only its uapi/ subdirectory was.
+
+This directory was previously assumed to be legacy-i915-only and
+therefore excluded from the Android.bp include-dirs sweep, but the
+header it provides is load-bearing for the generic (non-backend-
+specific) media_common code, not just the i915 backend itself.
+Confirmed collision-free against i915_production/include and
+xe/include (no shared header filenames).
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Android.bp b/Android.bp
+index 00049e070..05d96ae9e 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -2754,6 +2754,7 @@ cc_library_shared {
+         "media_softlet/linux/common/cp/ddi",
+         "media_softlet/linux/common/ddi",
+         "media_softlet/linux/common/os",
++        "media_softlet/linux/common/os/i915/include",
+         "media_softlet/linux/common/os/i915/include/uapi",
+         "media_softlet/linux/common/os/i915_production/include",
+         "media_softlet/linux/common/os/levelzero",
+-- 
+2.34.1
+

@@ -1,0 +1,317 @@
+From d8f19bd3ba84678ae638b5552a11dd9e6a9bbfff Mon Sep 17 00:00:00 2001
+From: Nathan Muggli <nmuggli@google.com>
+Date: Wed, 22 Jul 2026 16:11:32 -0600
+Subject: [PATCH] Add checks for results from pdf_renderer
+
+bips uses the results from pdf_renderer without any checks.  This can
+potentially result in allocating a buffer which is too small.
+
+Add some checks to make sure values returned don't cause an integer
+overflow.
+
+Bug: 511027559
+Test: atest libwfds_test
+Flag: EXEMPT CVE_FIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:b6713d1d8eb2ef1e849ffc1515a22060dfc0aa08
+Merged-In: Ie2c0f277dfd901f8fbe799ac5eae4e7d6c24de8b
+Change-Id: Ie2c0f277dfd901f8fbe799ac5eae4e7d6c24de8b
+---
+ jni/Android.bp                    |  10 +-
+ jni/plugins/wprint_mupdf.c        |  60 +++++++++++-
+ jni/plugins/wprint_mupdf_test.cpp | 156 ++++++++++++++++++++++++++++++
+ 3 files changed, 221 insertions(+), 5 deletions(-)
+ create mode 100644 jni/plugins/wprint_mupdf_test.cpp
+
+diff --git a/jni/Android.bp b/jni/Android.bp
+index d1fc7bd..863b414 100644
+--- a/jni/Android.bp
++++ b/jni/Android.bp
+@@ -81,7 +81,7 @@ cc_library_shared {
+ }
+ 
+ cc_test {
+-    name: "libwfds_ipphelper_test",
++    name: "libwfds_test",
+     gtest: true,
+     cflags: [
+         "-DINCLUDE_PDF=1",
+@@ -94,11 +94,17 @@ cc_test {
+     ],
+     srcs: [
+         "ipphelper/ipphelper_test.cpp",
+-        // Compile the source file directly into the test to access all JNI symbols
++        // Compile source files directly into the test to access all JNI symbols
+         "ipphelper/ipphelper.c",
+         "ipphelper/ipp_print.c",
+         "ipphelper/ippstatus_capabilities.c",
++
++        "plugins/wprint_mupdf_test.cpp",
++        "plugins/wprint_mupdf.c",
++        "plugins/wprint_image.c",
++        "plugins/wprint_image_platform.c",
+     ],
++    header_libs: ["jni_headers"],
+     local_include_dirs: [
+         "include",
+         "ipphelper",
+diff --git a/jni/plugins/wprint_mupdf.c b/jni/plugins/wprint_mupdf.c
+index 2a3b168..e7744e1 100644
+--- a/jni/plugins/wprint_mupdf.c
++++ b/jni/plugins/wprint_mupdf.c
+@@ -16,6 +16,8 @@
+  * limitations under the License.
+  */
+ 
++#include <math.h>
++#include <stdint.h>
+ #include <time.h>
+ #include "wprint_mupdf.h"
+ #include "lib_wprint.h"
+@@ -48,6 +50,26 @@ static status_t _mupdf_get_hdr(wprint_image_info_t *image_info) {
+     status_t result;
+     int pages;
+ 
++    if (image_info == NULL) {
++        LOGE("Invalid image_info");
++        return ERROR;
++    }
++
++    if (image_info->decoder_data.urlPath == NULL) {
++        LOGE("Invalid urlPath in image_info");
++        return ERROR;
++    }
++
++    if (image_info->pdf_render_resolution <= 0) {
++        LOGE("Invalid resolution");
++        return ERROR;
++    }
++
++    if (pdf_render == NULL) {
++        LOGE("Invalid pdf_render");
++        return ERROR;
++    }
++
+     pages = pdf_render->openDocument(pdf_render, image_info->decoder_data.urlPath);
+     if (pages < 1) return ERROR;
+ 
+@@ -58,13 +80,40 @@ static status_t _mupdf_get_hdr(wprint_image_info_t *image_info) {
+     const float POINTS_PER_INCH = MUPDF_DEFAULT_RESOLUTION;
+     zoom = (image_info->pdf_render_resolution) / POINTS_PER_INCH;
+ 
+-    imageWidth = (unsigned int) (pageWidth * zoom);
+-    imageHeight = (unsigned int) (pageHeight * zoom);
++    double scaledWidth = pageWidth * zoom;
++    double scaledHeight = pageHeight * zoom;
++
++    // Width is used later in malloc with RGB_NUMBER_PIXELS_NUM_COMPONENTS, so
++    // just make sure both dimensions are smaller than this.
++    const double MAX_DIMENSION = (double) (INT32_MAX / RGB_NUMBER_PIXELS_NUM_COMPONENTS);
++
++    if (!isfinite(scaledWidth) || !isfinite(scaledHeight) ||
++        scaledWidth <= 0.0 || scaledHeight <= 0.0 ||
++        scaledWidth > MAX_DIMENSION || scaledHeight > MAX_DIMENSION) {
++        LOGE("Invalid scaled image dimensions: w=%.2f h=%.2f", scaledWidth, scaledHeight);
++        return ERROR;
++    }
++
++    double maxBytes = scaledWidth * scaledHeight * (double) RGB_NUMBER_PIXELS_NUM_COMPONENTS;
++    if (maxBytes > (double) INT32_MAX) {
++        LOGE("Scaled image dimensions overflow max limit: w=%.2f h=%.2f (%.0f bytes)",
++             scaledWidth, scaledHeight, maxBytes);
++        return ERROR;
++    }
++
++    imageWidth = (unsigned int) scaledWidth;
++    imageHeight = (unsigned int) scaledHeight;
++
++    if (imageWidth == 0 || imageHeight == 0) {
++        LOGE("Invalid image dimensions: w=%u, h=%u",
++             imageWidth, imageHeight);
++        return ERROR;
++    }
+ 
+     image_info->width = imageWidth;
+     image_info->height = imageHeight;
+ 
+-    size = imageWidth * imageHeight * 3;
++    size = (int) (imageWidth * imageHeight * RGB_NUMBER_PIXELS_NUM_COMPONENTS);
+ 
+     rawBuffer = (char *) malloc((size_t) size);
+     if (!rawBuffer) return ERROR;
+@@ -88,6 +137,11 @@ static status_t _mupdf_get_hdr(wprint_image_info_t *image_info) {
+     image_info->decoder_data.pdf_info.fz_pixmap_ptr = rawBuffer;
+     image_info->decoder_data.pdf_info.bitmap_ptr = malloc(
+             image_info->width * RGB_NUMBER_PIXELS_NUM_COMPONENTS);
++    if (!image_info->decoder_data.pdf_info.bitmap_ptr) {
++        free(rawBuffer);
++        image_info->decoder_data.pdf_info.fz_pixmap_ptr = NULL;
++        return ERROR;
++    }
+     image_info->num_components = RGB_NUMBER_PIXELS_NUM_COMPONENTS;
+ 
+     return OK;
+diff --git a/jni/plugins/wprint_mupdf_test.cpp b/jni/plugins/wprint_mupdf_test.cpp
+new file mode 100644
+index 0000000..973fd94
+--- /dev/null
++++ b/jni/plugins/wprint_mupdf_test.cpp
+@@ -0,0 +1,156 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <gtest/gtest.h>
++#include <limits>
++#include <string.h>
++
++extern "C" {
++#include "wprint_mupdf.h"
++#include "lib_wprint.h"
++}
++
++constexpr int DEFAULT_DPI = 300;
++
++static double g_mockWidth = 612.0;
++static double g_mockHeight = 792.0;
++static pdf_render_ifc_t g_mock_ifc;
++
++static int mock_openDocument(pdf_render_ifc_t *obj, const char *fileName) {
++    return 1; // 1 page
++}
++
++static status_t mock_getPageAttributes(
++    pdf_render_ifc_t *obj, int page, double *width, double *height) {
++    *width = g_mockWidth;
++    *height = g_mockHeight;
++    return OK;
++}
++
++static status_t mock_renderPageStripe(
++    pdf_render_ifc_t *obj, int page, int width, int height, float zoom, char *buffer) {
++    return OK;
++}
++
++static void mock_destroy(pdf_render_ifc_t *obj) {
++}
++
++extern "C" pdf_render_ifc_t *create_pdf_render_ifc() {
++    return &g_mock_ifc;
++}
++
++class WprintMupdfTest : public ::testing::Test {
++ protected:
++  void SetUp() override {
++      g_mockWidth = 612.0;
++      g_mockHeight = 792.0;
++
++      memset(&g_mock_ifc, 0, sizeof(g_mock_ifc));
++      g_mock_ifc.openDocument = mock_openDocument;
++      g_mock_ifc.getPageAttributes = mock_getPageAttributes;
++      g_mock_ifc.renderPageStripe = mock_renderPageStripe;
++      g_mock_ifc.destroy = mock_destroy;
++
++      memset(&image_info_, 0, sizeof(image_info_));
++      image_info_.pdf_render_resolution = DEFAULT_DPI;
++      image_info_.decoder_data.page = 1;
++      image_info_.decoder_data.urlPath = "test.pdf";
++
++      plugin_ = wprint_mupdf_decode_ifc;
++      ASSERT_NE(plugin_, nullptr);
++      plugin_->init(&image_info_);
++  }
++
++  void TearDown() override {
++      if (plugin_) {
++          plugin_->cleanup(&image_info_);
++      }
++  }
++
++  const image_decode_ifc_t *plugin_ = nullptr;
++  wprint_image_info_t image_info_;
++};
++
++TEST_F(WprintMupdfTest, GetHdr_ValidDimensions_ReturnsOK) {
++    g_mockWidth = 612.0;
++    g_mockHeight = 792.0;
++
++    status_t result = plugin_->get_hdr(&image_info_);
++    EXPECT_EQ(result, OK);
++    // Single-precision float division (300.0f / 72.0f) truncated yields 2549 and 3299
++    EXPECT_EQ(image_info_.width, 2549u);
++    EXPECT_EQ(image_info_.height, 3299u);
++}
++
++TEST_F(WprintMupdfTest, GetHdr_OverflowDimensions_ReturnsError) {
++    // 9084pt x 9084pt at 300 DPI yields 37850x37850 pixels.
++    // In 32-bit int, 37850 * 37850 * 3 = 4,297,867,500 bytes which wraps to ~2.9 MB.
++    // Without the fix, malloc(2.9 MB) succeeds and returns OK, but allocates a
++    // buffer that is too small.
++    // With the fix, totalBytes > INT32_MAX returns ERROR (Fixed).
++    g_mockWidth = 9084.0;
++    g_mockHeight = 9084.0;
++
++    status_t result = plugin_->get_hdr(&image_info_);
++    EXPECT_EQ(result, ERROR);
++}
++
++TEST_F(WprintMupdfTest, GetHdr_NegativeDimensions_ReturnsError) {
++    g_mockWidth = -10.0;
++    g_mockHeight = 792.0;
++
++    status_t result = plugin_->get_hdr(&image_info_);
++    EXPECT_EQ(result, ERROR);
++}
++
++TEST_F(WprintMupdfTest, GetHdr_ZeroDimensions_ReturnsError) {
++    g_mockWidth = 0.0;
++    g_mockHeight = 0.0;
++
++    status_t result = plugin_->get_hdr(&image_info_);
++    EXPECT_EQ(result, ERROR);
++}
++
++TEST_F(WprintMupdfTest, GetHdr_ExtremeResolution_ReturnsError) {
++    // 3914 DPI on a 612pt x 792pt page yields 33269x43054 pixels.
++    // In 32-bit int, 33269 * 43054 * 3 = 4,297,060,578 bytes which wraps to ~2.09 MB.
++    // Without the fix, malloc(2.09 MB) succeeds and returns OK, but allocates a
++    // buffer that is too small.
++    // With the fix, totalBytes > INT32_MAX returns ERROR (Fixed).
++    g_mockWidth = 612.0;
++    g_mockHeight = 792.0;
++    image_info_.pdf_render_resolution = 3914;
++
++    status_t result = plugin_->get_hdr(&image_info_);
++    EXPECT_EQ(result, ERROR);
++}
++
++TEST_F(WprintMupdfTest, GetHdr_NegativeResolution_ReturnsError) {
++    g_mockWidth = 612.0;
++    g_mockHeight = 792.0;
++    image_info_.pdf_render_resolution = -300;
++
++    status_t result = plugin_->get_hdr(&image_info_);
++    EXPECT_EQ(result, ERROR);
++}
++
++TEST_F(WprintMupdfTest, GetHdr_NaNDimensions_ReturnsError) {
++    g_mockWidth = std::numeric_limits<double>::quiet_NaN();
++    g_mockHeight = 792.0;
++
++    status_t result = plugin_->get_hdr(&image_info_);
++    EXPECT_EQ(result, ERROR);
++}
+-- 
+2.56.0.385.gac671c819a-goog
+

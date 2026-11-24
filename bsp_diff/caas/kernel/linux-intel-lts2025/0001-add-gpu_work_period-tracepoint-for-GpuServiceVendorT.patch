@@ -1,0 +1,70 @@
+From bfa3f2919980be456beab44b6ec610928a6b3bec Mon Sep 17 00:00:00 2001
+From: preddycx <prashanthx.reddy.chintapally@intel.com>
+Date: Tue, 7 Jul 2026 09:08:03 +0000
+Subject: [PATCH] add gpu_work_period tracepoint for GpuServiceVendorTests
+
+GpuServiceVendorTests fails in
+com.android.tests.gpuservice.GpuWorkTracepointTest#testGpuWorkPeriodTracepointFormat
+because the kernel does not expose
+/sys/kernel/tracing/events/power/gpu_work_period/format.
+
+Add the gpu_work_period trace event definition so the tracefs format node is
+generated with the expected fields.
+
+Test: GpuServiceVendorTests
+Failure: Failed to cat the gpu_work_period tracepoint format
+Root cause: gpu_work_period trace event was not defined in the kernel
+Fix: add TRACE_EVENT(gpu_work_period) in include/trace/events/power.h
+
+Tracked-On: NIACP3-1483
+Signed-off-by: preddycx <prashanthx.reddy.chintapally@intel.com>
+---
+ include/trace/events/power.h | 32 ++++++++++++++++++++++++++++++++
+ 1 file changed, 32 insertions(+)
+
+diff --git a/include/trace/events/power.h b/include/trace/events/power.h
+index d2349b6b531a..026480aae42b 100644
+--- a/include/trace/events/power.h
++++ b/include/trace/events/power.h
+@@ -146,6 +146,38 @@ TRACE_EVENT(pstate_sample,
+ 
+ );
+ 
++TRACE_EVENT(gpu_work_period,
++
++    TP_PROTO(u32 gpu_id, u32 uid, u64 start_time_ns, u64 end_time_ns, u64 total_active_duration_ns),
++
++    TP_ARGS(gpu_id, uid, start_time_ns, end_time_ns, total_active_duration_ns),
++
++    TP_STRUCT__entry(
++        __field(u32, gpu_id)
++        __field(u32, uid)
++        __field(u64, start_time_ns)
++        __field(u64, end_time_ns)
++        __field(u64, total_active_duration_ns)
++
++    ),
++
++    TP_fast_assign(
++        __entry->gpu_id = gpu_id;
++        __entry->uid = uid;
++        __entry->start_time_ns = start_time_ns;
++        __entry->end_time_ns = end_time_ns;
++        __entry->total_active_duration_ns = total_active_duration_ns;
++    ),
++
++    TP_printk("gpu_id=%u uid=%u start_time_ns=%llu end_time_ns=%llu, total_active_duration_ns=%llu",
++        __entry->gpu_id,
++        __entry->uid,
++        __entry->start_time_ns,
++        __entry->end_time_ns,
++        __entry->total_active_duration_ns
++        )
++);
++
+ /* This file can get included multiple times, TRACE_HEADER_MULTI_READ at top */
+ #ifndef _PWR_EVENT_AVOID_DOUBLE_DEFINING
+ #define _PWR_EVENT_AVOID_DOUBLE_DEFINING
+-- 
+2.34.1
+

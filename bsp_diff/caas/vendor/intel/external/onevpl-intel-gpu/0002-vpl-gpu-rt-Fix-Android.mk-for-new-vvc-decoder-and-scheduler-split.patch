@@ -1,0 +1,58 @@
+From 806075f361efdbdc54facaf14437e68ad31df53b Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Fri, 16 Oct 2026 08:08:07 +0000
+Subject: [PATCH] vpl-gpu-rt: Fix Android.mk for new vvc decoder and scheduler
+ split
+
+Two gaps surfaced by the intel-onevpl-26.2.3 overlay (previous
+commit):
+
+1. New vvc decode support (_studio/mfx_lib/decode/vvc, a plain
+   src/*.cpp layout matching the existing glob pattern) was not wired
+   into MFX_LOCAL_DECODERS, so it would not have been compiled.
+
+2. Upstream split scheduler/linux into scheduler/linux (unchanged) +
+   a new scheduler/agnostic containing 3 previously-linux-housed
+   source files (mfx_scheduler_core_iunknown.cpp,
+   mfx_scheduler_core_task.cpp, mfx_scheduler_core_task_management.cpp)
+   and 4 headers. Without adding scheduler/agnostic to MFX_LOCAL_DIRS
+   and its include path, this would be a genuine build regression --
+   those files were being compiled before this version bump and
+   would silently stop being compiled after it.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ _studio/mfx_lib/Android.mk | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/_studio/mfx_lib/Android.mk b/_studio/mfx_lib/Android.mk
+index 5ab6b7c2..de706a40 100644
+--- a/_studio/mfx_lib/Android.mk
++++ b/_studio/mfx_lib/Android.mk
+@@ -3,12 +3,13 @@ LOCAL_PATH:= $(MFX_HOME)/_studio
+ 
+ # =============================================================================
+ 
+-MFX_LOCAL_DECODERS := h265 h264 vc1 mjpeg vp8 vp9 av1
++MFX_LOCAL_DECODERS := h265 h264 vc1 mjpeg vp8 vp9 av1 vvc
+ MFX_LOCAL_ENCODERS := h264 mpeg2 mjpeg vp9
+ 
+ # Setting subdirectories to march thru
+ MFX_LOCAL_DIRS := \
+     scheduler/linux \
++    scheduler/agnostic \
+ 
+ MFX_LOCAL_DIRS_IMPL := \
+     $(addprefix decode/, $(MFX_LOCAL_DECODERS)) \
+@@ -179,6 +180,7 @@ MFX_LOCAL_INCLUDES_HW := \
+     $(MFX_HOME)/_studio/mfx_lib/shared/include \
+     $(MFX_HOME)/_studio/mfx_lib/shared/include/feature_blocks \
+     $(MFX_HOME)/_studio/mfx_lib/scheduler/linux/include \
++    $(MFX_HOME)/_studio/mfx_lib/scheduler/agnostic/include \
+     $(MFX_HOME)/_studio/shared/asc/include
+ 
+ MFX_LOCAL_STATIC_LIBRARIES_HW := \
+-- 
+2.34.1
+

@@ -1,29 +1,33 @@
-From e3b1d9d5e723875ae673cd4e2d413fad1549fd41 Mon Sep 17 00:00:00 2001
-From: celadon <celadon@intel.com>
-Date: Fri, 1 Sep 2023 08:55:48 +0000
+From c1e1286873b586960760ad1816cbbc59e1031deb Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Wed, 22 Jul 2026 10:57:00 +0000
 Subject: [PATCH] WA - Revert "Handle zip64 extra fields better"
 
 This reverts commit 753c1468e2b5e051cf03870d0279dae588513124.
+
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
 ---
- .../check_target_files_signatures.py           |  5 ++---
+ .../check_target_files_signatures.py           |  7 ++-----
  tools/releasetools/common.py                   | 18 ++----------------
- 2 files changed, 4 insertions(+), 19 deletions(-)
+ 2 files changed, 4 insertions(+), 21 deletions(-)
 
 diff --git a/tools/releasetools/check_target_files_signatures.py b/tools/releasetools/check_target_files_signatures.py
-index a7b35230ea..d935607e43 100755
+index ec4f39b13b..45e3c9d96e 100755
 --- a/tools/releasetools/check_target_files_signatures.py
 +++ b/tools/releasetools/check_target_files_signatures.py
-@@ -241,8 +241,7 @@ class APK(object):
-     # Signer (minSdkVersion=24, maxSdkVersion=32) certificate SHA-1 digest: 19da94896ce4078c38ca695701f1dec741ec6d67
+@@ -237,10 +237,7 @@ class APK(object):
+     #
      # ...
      certs_info = {}
 -    certificate_regex = re.compile(
--        r"(Signer (?:#[0-9]+|\(.*\))) (certificate .*):(.*)")
+-        r"((?:V[0-9]+(?:\.\d+)? )?Signer:?(?: #[0-9]+| \(.*\)|.*)) (certificate"
+-        r" .*):(.*)"
+-    )
 +    certificate_regex = re.compile(r"(Signer (?:#[0-9]+|\(.*\))) (certificate .*):(.*)")
      for line in output.splitlines():
        m = certificate_regex.match(line)
        if not m:
-@@ -313,7 +312,7 @@ class TargetFiles(object):
+@@ -311,7 +308,7 @@ class TargetFiles(object):
      # This is the list of wildcards of files we extract from |filename|.
      apk_extensions = ['*.apk', '*.apex']
  
@@ -33,10 +37,10 @@ index a7b35230ea..d935607e43 100755
      if compressed_extension:
        apk_extensions.append('*.apk' + compressed_extension)
 diff --git a/tools/releasetools/common.py b/tools/releasetools/common.py
-index 160f976553..1c8914565f 100644
+index bfd091574c..d0f0f44013 100644
 --- a/tools/releasetools/common.py
 +++ b/tools/releasetools/common.py
-@@ -2122,23 +2122,9 @@ def UnzipToDir(filename, dirname, patterns=None):
+@@ -2215,23 +2215,9 @@ def UnzipToDir(filename, dirname, patterns=None):
      # to indicate the actual local header offset.
      # As of python3.11, python does not handle zip64 central directories
      # correctly, so we will manually do the parsing here.
@@ -63,5 +67,5 @@ index 160f976553..1c8914565f 100644
        filtered = [info for info in entries if any(
            [fnmatch.fnmatch(info.filename, p) for p in patterns])]
 -- 
-2.39.2
+2.34.1
 

@@ -1,0 +1,26 @@
+From c57c566d4043f77fc84cac1d7d5ca2e5cee097a2 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 7 Aug 2026 09:11:25 +0000
+Subject: [PATCH] Add stub to prevent AOSP module conflicts
+
+changes:
+- Android.bp: add stub build file documenting that libva is
+  ignored in favor of vendor/intel/external/drm-hwcomposer
+
+Tracked-On: NIACP3-1498
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 Android.bp
+
+diff --git a/Android.bp b/Android.bp
+new file mode 100644
+index 0000000..ae5ae42
+--- /dev/null
++++ b/Android.bp
+@@ -0,0 +1 @@
++// Ignored in favor of vendor/intel/external/drm-hwcomposer
+-- 
+2.34.1
+

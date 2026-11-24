@@ -1,0 +1,46 @@
+From 9dbe96bf79f7e7b24650899d2c2af82e6c796191 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Tue, 6 Oct 2026 09:05:48 +0000
+Subject: [PATCH] Enable iwlmld driver for WiFi 7 (MLD-firmware) card support
+
+- WiFi 7 (BE200/gl-c0-fm-c0) parts use the newer MLD firmware/op-mode
+  introduced for Multi-Link Operation on this kernel.
+- Set CONFIG_IWLMLD=m in the lts2025 defconfig.
+- insmod iwlmld.ko in load_iwl_modules.sh alongside iwlmvm.ko, so
+  both WiFi 6 (MVM) and WiFi 7 (MLD) cards work on the same image.
+
+Verified on device: wlan0 created, driver negotiates gl-c0-fm-c0-101
+firmware via iwlmld.
+
+Tracked-On: NIACP3-1661
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ .../gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig      | 2 +-
+ groups/wlan/iwlwifi/load_iwl_modules.sh                         | 1 +
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig b/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig
+index 652db54b..21eff3c8 100644
+--- a/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig
++++ b/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig
+@@ -2811,7 +2811,7 @@ CONFIG_IWLWIFI=m
+ CONFIG_IWLWIFI_LEDS=y
+ CONFIG_IWLDVM=m
+ CONFIG_IWLMVM=m
+-# CONFIG_IWLMLD is not set
++CONFIG_IWLMLD=m
+ CONFIG_IWLWIFI_OPMODE_MODULAR=y
+ 
+ #
+diff --git a/groups/wlan/iwlwifi/load_iwl_modules.sh b/groups/wlan/iwlwifi/load_iwl_modules.sh
+index 3d4144ea..3c582299 100644
+--- a/groups/wlan/iwlwifi/load_iwl_modules.sh
++++ b/groups/wlan/iwlwifi/load_iwl_modules.sh
+@@ -8,3 +8,4 @@ else
+ fi
+   insmod $modules/iwlwifi.ko
+   insmod $modules/iwlmvm.ko power_scheme=1
++  insmod $modules/iwlmld.ko
+-- 
+2.34.1
+

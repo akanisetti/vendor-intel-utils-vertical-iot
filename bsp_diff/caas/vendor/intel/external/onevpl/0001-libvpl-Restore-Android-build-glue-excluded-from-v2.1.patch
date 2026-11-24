@@ -1,0 +1,250 @@
+From a9668f2e4b8bf82c67728291165c8c35ffea5bf6 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 28 Oct 2026 07:34:42 +0000
+Subject: [PATCH] libvpl: Restore Android build glue excluded from v2.16.0
+ overlay
+
+The v2.16.0 release tag doesn't carry Android.bp files (api/, examples/,
+libvpl/) -- those are a fork-local addition for the Android build,
+deliberately excluded when overlaying the real upstream tag. Restores
+them verbatim from the prior Android-tracking state.
+
+This commit exists so the manifest can pin this project directly to
+the real v2.16.0 tag (778a66d6c6537f08eabb91955dbbf1bce3812894) instead
+of carrying the whole tag's tree as a single large patch -- only this
+Android-glue delta and the 3 follow-on fixes layered on top of it need
+to live in utils_vertical now.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ api/Android.bp      | 31 +++++++++++++++
+ examples/Android.bp | 92 +++++++++++++++++++++++++++++++++++++++++++++
+ libvpl/Android.bp   | 78 ++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 201 insertions(+)
+ create mode 100644 api/Android.bp
+ create mode 100644 examples/Android.bp
+ create mode 100644 libvpl/Android.bp
+
+diff --git a/api/Android.bp b/api/Android.bp
+new file mode 100644
+index 0000000..d30a859
+--- /dev/null
++++ b/api/Android.bp
+@@ -0,0 +1,31 @@
++// Copyright(c) 2023 Intel Corporation
++
++// Permission is hereby granted, free of charge, to any person obtaining a
++// copy of this software and associated documentation files(the "Software"),
++// to deal in the Software without restriction, including without limitation
++// the rights to use, copy, modify, merge, publish, distribute, sublicense,
++// and / or sell copies of the Software, and to permit persons to whom the
++// Software is furnished to do so, subject to the following conditions:
++
++// The above copyright notice and this permission notice shall be included
++// in all copies or substantial portions of the Software.
++
++// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
++// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
++// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++// OTHER DEALINGS IN THE SOFTWARE.
++
++cc_library_headers {
++
++    name: "libvpl_headers",
++    export_include_dirs: [
++        ".",
++        "vpl",
++    ],
++
++    vendor: true,
++}
++
+diff --git a/examples/Android.bp b/examples/Android.bp
+new file mode 100644
+index 0000000..e7ef14a
+--- /dev/null
++++ b/examples/Android.bp
+@@ -0,0 +1,92 @@
++// Copyright(c) 2023 Intel Corporation
++
++// Permission is hereby granted, free of charge, to any person obtaining a
++// copy of this software and associated documentation files(the "Software"),
++// to deal in the Software without restriction, including without limitation
++// the rights to use, copy, modify, merge, publish, distribute, sublicense,
++// and / or sell copies of the Software, and to permit persons to whom the
++// Software is furnished to do so, subject to the following conditions:
++
++// The above copyright notice and this permission notice shall be included
++// in all copies or substantial portions of the Software.
++
++// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
++// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
++// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++// OTHER DEALINGS IN THE SOFTWARE.
++
++mfx_cc_defaults {
++
++    name: "hello-defaults",
++
++    header_libs: [
++        "libvpl_headers",
++        "libva_headers",
++    ],
++
++    shared_libs: [
++        "libvpl",
++        "liblog",
++        "libva",
++    ],
++
++    cflags: [
++        "-std=c++14",
++        "-Wall",
++        "-fexceptions",
++        "-Wno-unused-variable",
++        "-Wmissing-field-initializers",
++        "-DLIBVA_SUPPORT",
++        "-DLIBVA_ANDROID_SUPPORT",
++        "-DONEVPL_EXPERIMENTAL",
++        "-D_FORTIFY_SOURCE=2",
++        "-Wno-error",
++        "-Wno-missing-braces",
++        "-Wno-missing-field-initializers",
++    ],
++
++    vendor: true,
++}
++
++cc_binary {
++
++    name: "hello-decode",
++
++    defaults: [
++        "hello-defaults",
++    ],
++
++    srcs: [
++        "api2x/hello-decode/src/hello-decode.cpp",
++    ],
++}
++
++cc_binary {
++
++    name: "hello-encode",
++
++    defaults: [
++        "hello-defaults",
++    ],
++
++    srcs: [
++        "api2x/hello-encode/src/hello-encode.cpp",
++    ],
++}
++
++cc_binary {
++
++    name: "hello-vpp",
++
++    defaults: [
++        "hello-defaults",
++    ],
++
++    srcs: [
++        "api2x/hello-vpp/src/hello-vpp.cpp",
++    ],
++}
++
+diff --git a/libvpl/Android.bp b/libvpl/Android.bp
+new file mode 100644
+index 0000000..79434aa
+--- /dev/null
++++ b/libvpl/Android.bp
+@@ -0,0 +1,78 @@
++// Copyright(c) 2023 Intel Corporation
++
++// Permission is hereby granted, free of charge, to any person obtaining a
++// copy of this software and associated documentation files(the "Software"),
++// to deal in the Software without restriction, including without limitation
++// the rights to use, copy, modify, merge, publish, distribute, sublicense,
++// and / or sell copies of the Software, and to permit persons to whom the
++// Software is furnished to do so, subject to the following conditions:
++
++// The above copyright notice and this permission notice shall be included
++// in all copies or substantial portions of the Software.
++
++// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
++// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
++// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++// OTHER DEALINGS IN THE SOFTWARE.
++
++cc_library_shared {
++
++    name: "libvpl",
++
++    header_libs: [
++        "libvpl_headers",
++    ],
++
++    shared_libs: [
++        "liblog",
++        "libutils",
++        "libcutils",
++    ],
++
++    srcs: [
++        "src/linux/mfxloader.cpp",
++        "src/*.cpp",
++        "src/mfx_config_interface/*.cpp",
++    ],
++
++    cflags: [
++        "-std=c++14",
++        "-fexceptions",
++        "-DANDROID",
++        "-DMFX_DEPRECATED_OFF",
++        "-DVPL_EXPORTS",
++        "-DONEVPL_EXPERIMENTAL",
++        "-D_FORTIFY_SOURCE=2",
++        "-Wno-error",
++        "-Wno-missing-braces",
++        "-Wno-unused-parameter",
++        "-Wno-missing-field-initializers",
++        "-Wl,--version-script=vendor/intel/external/onevpl/dispatcher/linux/libvpl.map",
++    ],
++
++    arch: {
++        x86: {
++            cflags: [
++                "-DONEVPL_SEARCH_PATH=\"/vendor/lib\"",
++                "-DMFX_MODULES_DIR=\"/vendor/lib\"",
++            ],
++        },
++        x86_64: {
++            cflags: [
++                "-DONEVPL_SEARCH_PATH=\"/vendor/lib64\"",
++                "-DMFX_MODULES_DIR=\"/vendor/lib64\"",
++            ],
++        },
++    },
++
++    local_include_dirs: [
++        "src",
++        "src/linux",
++        "src/mfx_config_interface",
++    ],
++
++    vendor: true,
++}
+-- 
+2.34.1
+

@@ -1,0 +1,87 @@
+From 2f20bc3a356a01677033962c9712f66bc2c38e4c Mon Sep 17 00:00:00 2001
+From: sunilravi <sunilravi@google.com>
+Date: Mon, 15 Jun 2026 08:16:10 +0000
+Subject: [PATCH] Summary: Fix permission bypass in WifiP2pServiceImpl
+
+Verify that the caller UID matches the system UID before allowing
+an internal message to bypass permission checks. This prevents
+unprivileged applications from bypassing the permission check by
+crafting and sending a message with internal message extra flags.
+
+(cherry picked from commit 4f7d1bd3af8c86e2395e4718c69c4e0458eb27cf)
+
+Bug: 500705928
+Test: atest FrameworksWifiTests:com.android.server.wifi.p2p.WifiP2pServiceImplTest#testAddLocalServiceFailureWithInternalMessageBypassAttempt
+Flag: EXEMPT BUGFIX
+Low-Coverage-Reason: The fix is covered by unit test.
+Merged-In: Ib15a4058a4b1cdcc7ec903d24a6cc0dc8f0e914b
+Change-Id: Ib15a4058a4b1cdcc7ec903d24a6cc0dc8f0e914b
+---
+ .../server/wifi/p2p/WifiP2pServiceImpl.java   |  3 +-
+ .../wifi/p2p/WifiP2pServiceImplTest.java      | 36 +++++++++++++++++++
+ 2 files changed, 38 insertions(+), 1 deletion(-)
+
+diff --git a/service/java/com/android/server/wifi/p2p/WifiP2pServiceImpl.java b/service/java/com/android/server/wifi/p2p/WifiP2pServiceImpl.java
+index ff1401bf55..f19a765c6e 100644
+--- a/service/java/com/android/server/wifi/p2p/WifiP2pServiceImpl.java
++++ b/service/java/com/android/server/wifi/p2p/WifiP2pServiceImpl.java
+@@ -6274,7 +6274,8 @@ public class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
+         private boolean checkNearbyDevicesPermission(int uid, String packageName, Bundle extras,
+                 String message, Object attributionSource) {
+             if (extras != null
+-                    && extras.getBoolean(WifiP2pManager.EXTRA_PARAM_KEY_INTERNAL_MESSAGE)) {
++                    && extras.getBoolean(WifiP2pManager.EXTRA_PARAM_KEY_INTERNAL_MESSAGE)
++                    && uid == Process.myUid()) {
+                 // bypass permission check for internal call.
+                 return true;
+             }
+diff --git a/service/tests/wifitests/src/com/android/server/wifi/p2p/WifiP2pServiceImplTest.java b/service/tests/wifitests/src/com/android/server/wifi/p2p/WifiP2pServiceImplTest.java
+index 5ef64f275c..ce0d8703a0 100644
+--- a/service/tests/wifitests/src/com/android/server/wifi/p2p/WifiP2pServiceImplTest.java
++++ b/service/tests/wifitests/src/com/android/server/wifi/p2p/WifiP2pServiceImplTest.java
+@@ -2091,6 +2091,42 @@ public class WifiP2pServiceImplTest extends WifiBaseTest {
+         }
+     }
+ 
++    @Test
++    public void testAddLocalServiceFailureWithInternalMessageBypassAttempt() throws Exception {
++        setTargetSdkGreaterThanT();
++        forceP2pEnabled(mClient1);
++        doNothing().when(mWifiPermissionsUtil).checkPackage(anyInt(), anyString());
++        if (SdkLevel.isAtLeastT()) {
++            when(mWifiPermissionsUtil.checkNearbyDevicesPermission(any(), anyBoolean(), any()))
++                    .thenReturn(false);
++        } else {
++            when(mWifiPermissionsUtil.checkCanAccessWifiDirect(any(), any(), anyInt(),
++                    anyBoolean())).thenReturn(false);
++        }
++
++        // Send AddLocalService message, but inject EXTRA_PARAM_KEY_INTERNAL_MESSAGE
++        Message msg = Message.obtain();
++        int untrustedUid = Process.myUid() + 10000; // Use a UID different from the service's UID
++        msg.sendingUid = untrustedUid;
++        Bundle extras = new Bundle();
++        extras.putParcelable(WifiP2pManager.EXTRA_PARAM_KEY_SERVICE_INFO, mTestWifiP2pServiceInfo);
++        extras.putBoolean(WifiP2pManager.EXTRA_PARAM_KEY_INTERNAL_MESSAGE, true);
++        msg.what = WifiP2pManager.ADD_LOCAL_SERVICE;
++        if (SdkLevel.isAtLeastS()) {
++            msg.obj = new AttributionSource(untrustedUid, TEST_PACKAGE_NAME, null);
++        }
++        msg.getData().putBundle(WifiP2pManager.EXTRA_PARAM_KEY_BUNDLE, extras);
++        msg.replyTo = mClientMessenger;
++        mP2pStateMachineMessenger.send(Message.obtain(msg));
++        mLooper.dispatchAll();
++
++        // The request should fail because the sender is not a system UID or privileged.
++        // But on unmodified code, it will bypass permission check and
++        // succeed (or try to call native).
++        assertTrue(mClientHandler.hasMessages(WifiP2pManager.ADD_LOCAL_SERVICE_FAILED));
++        verify(mWifiNative, never()).p2pServiceAdd(any());
++    }
++
+     private void verifyAddLocalService() throws Exception {
+         doNothing().when(mWifiPermissionsUtil).checkPackage(anyInt(), anyString());
+         when(mWifiNative.p2pServiceAdd(any())).thenReturn(true);
+-- 
+2.56.0.385.gac671c819a-goog
+

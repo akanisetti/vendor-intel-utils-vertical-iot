@@ -1,0 +1,41 @@
+From e5553730a5305921bb2f55d67db05081089baf07 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 13 Oct 2026 03:01:01 +0000
+Subject: [PATCH] graphics/auto: Ship libhwcservice
+
+The Intel hwc.info (HDCP) service is built from
+vendor/intel/hardware/interfaces (bsp_diff/caas 0004, graphic/hwcservice)
+and hooked into AOSP external/drm_hwcomposer (bsp_diff/caas 0004). The
+HWC dlopen()s /vendor/lib64/hw/libhwcservicelib.so, so install it
+together with libhwcservice, and hwcservice_test on debug builds.
+
+Drop this patch together with those two patches.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ groups/graphics/auto/product.mk | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/groups/graphics/auto/product.mk b/groups/graphics/auto/product.mk
+index 49cbefc..ded9ad9 100755
+--- a/groups/graphics/auto/product.mk
++++ b/groups/graphics/auto/product.mk
+@@ -35,6 +35,14 @@ PRODUCT_PACKAGES += \
+     libdrm_intel \
+     libsync
+ 
++# Intel hwc.info service (HDCP) for AOSP drm_hwcomposer
++PRODUCT_PACKAGES += \
++    libhwcservice \
++    libhwcservicelib
++
++PRODUCT_PACKAGES_DEBUG += \
++    hwcservice_test
++
+ PRODUCT_PACKAGES += \
+     gralloc.default
+ 
+-- 
+2.34.1
+

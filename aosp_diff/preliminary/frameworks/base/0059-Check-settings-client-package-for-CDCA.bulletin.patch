@@ -1,0 +1,68 @@
+From c37066ed3f6c99400853d36895102e7292ad23dc Mon Sep 17 00:00:00 2001
+From: Diya Bera <diyab@google.com>
+Date: Mon, 29 Jun 2026 18:01:11 +0000
+Subject: [PATCH] Check settings client package for CDCA
+
+Add an additional check for settings package to determine if the caller
+is CDCA
+
+Bug: 517378646
+NO_IFTTT=CDCA package check applies to SystemUI only; System Server Utils.isBackground does not track class names.
+Test: N/A
+Flag: EXEMPT CVE_FIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:76b15a24c4c674f96b38bdeaacceb33da3124dda
+Merged-In: I64189a73ba9028b67574496e4e2772387027459a
+Change-Id: I64189a73ba9028b67574496e4e2772387027459a
+---
+ .../java/android/hardware/biometrics/PromptInfo.java |  3 ++-
+ .../src/com/android/systemui/biometrics/Utils.kt     | 12 +++++++++++-
+ 2 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/core/java/android/hardware/biometrics/PromptInfo.java b/core/java/android/hardware/biometrics/PromptInfo.java
+index 0207f1db9306..0a16eeb0e670 100644
+--- a/core/java/android/hardware/biometrics/PromptInfo.java
++++ b/core/java/android/hardware/biometrics/PromptInfo.java
+@@ -177,7 +177,8 @@ public class PromptInfo implements Parcelable {
+             return true;
+         } else if (mShowEmergencyCallButton) {
+             return true;
+-        } else if (mRealCallerForConfirmDeviceCredentialActivity != null) {
++        } else if (mRealCallerForConfirmDeviceCredentialActivity != null
++                || mClassNameIfItIsConfirmDeviceCredentialActivity != null) {
+             return true;
+         }
+         return false;
+diff --git a/packages/SystemUI/shared/biometrics/src/com/android/systemui/biometrics/Utils.kt b/packages/SystemUI/shared/biometrics/src/com/android/systemui/biometrics/Utils.kt
+index 5d118f18729b..b53d556483df 100644
+--- a/packages/SystemUI/shared/biometrics/src/com/android/systemui/biometrics/Utils.kt
++++ b/packages/SystemUI/shared/biometrics/src/com/android/systemui/biometrics/Utils.kt
+@@ -121,6 +121,14 @@ object Utils {
+         return hasPermission && "android" == clientPackage
+     }
+ 
++    @JvmStatic
++    fun isSettings(context: Context, clientPackage: String?): Boolean {
++        val hasPermission =
++            (context.checkCallingOrSelfPermission(Manifest.permission.USE_BIOMETRIC_INTERNAL) ==
++                PackageManager.PERMISSION_GRANTED)
++        return hasPermission && "com.android.settings" == clientPackage
++    }
++
+     @JvmStatic
+     fun getNavbarInsets(context: Context) = getInsetsOf(context, WindowInsets.Type.navigationBars())
+ 
+@@ -184,8 +192,10 @@ object Utils {
+         val topActivity = tasks[0].topActivity
+         val isSystemApp = isSystem(context, clientPackage)
+         val topPackageEqualsToClient = topActivity!!.packageName == clientPackage
++
+         val isClientConfirmDeviceCredentialActivity =
+-            clientClassNameIfItIsConfirmDeviceCredentialActivity != null
++            clientClassNameIfItIsConfirmDeviceCredentialActivity != null &&
++                isSettings(context, clientPackage)
+ 
+         if (
+             !isClientInBackgroundOrNotVisible(
+-- 
+2.56.0.385.gac671c819a-goog
+

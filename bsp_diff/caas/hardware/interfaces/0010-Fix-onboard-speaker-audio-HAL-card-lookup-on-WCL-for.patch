@@ -1,0 +1,63 @@
+From ad0c64c66a1bd9a731ae731dc53cbf5244d5f970 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Thu, 12 Nov 2026 19:31:31 +0000
+Subject: [PATCH] Fix onboard speaker audio HAL card lookup on WCL for A17
+
+StreamPrimary::getCardAndDeviceId() hardcoded the ALSA card name
+lookup to "PCH" (legacy HDA naming on RPL-S/A16). On SoundWire-based
+platforms (e.g. WCL) the card registers as "sofsoundwire" instead,
+so the lookup failed and returned an invalid card id, causing every
+HAL write() to fail with ENOSYS and the AIDL stream to get stuck in
+ERROR state. App-level audio (e.g. media playback) was silent even
+though raw ALSA playback worked fine.
+
+Try "sofsoundwire" first, falling back to "PCH" so a single HAL
+binary works across both platform generations.
+
+Also fix PrimaryMixer::get_pcm_card()'s id_filepath buffer, which
+was only sized for the short "PCH" name (17 bytes) and silently
+truncated the longer "/proc/asound/sofsoundwire" path (26 bytes
+needed), causing readlink() to fail even with the correct name.
+
+Tracked-On:NIACP3-1695
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ audio/aidl/default/primary/PrimaryMixer.h    | 2 +-
+ audio/aidl/default/primary/StreamPrimary.cpp | 8 +++++++-
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/audio/aidl/default/primary/PrimaryMixer.h b/audio/aidl/default/primary/PrimaryMixer.h
+index 430fffb228..e810536a20 100644
+--- a/audio/aidl/default/primary/PrimaryMixer.h
++++ b/audio/aidl/default/primary/PrimaryMixer.h
+@@ -33,7 +33,7 @@ class PrimaryMixer {
+     static PrimaryMixer& getInstance();
+     static int get_pcm_card(const char* name)
+     {
+-        char id_filepath[20] = {0};
++        char id_filepath[64] = {0};
+         char number_filepath[20] = {0};
+         ssize_t written;
+ 
+diff --git a/audio/aidl/default/primary/StreamPrimary.cpp b/audio/aidl/default/primary/StreamPrimary.cpp
+index 2172979f63..34b7599511 100644
+--- a/audio/aidl/default/primary/StreamPrimary.cpp
++++ b/audio/aidl/default/primary/StreamPrimary.cpp
+@@ -187,7 +187,13 @@ StreamPrimary::AlsaDeviceId StreamPrimary::getCardAndDeviceId(
+     }
+     std::string deviceAddress = devices[0].address.get<AudioDeviceAddress::id>();
+     AlsaDeviceId cardAndDeviceId;
+-    cardAndDeviceId.first  = primary::PrimaryMixer::get_pcm_card("PCH");
++    // "sofsoundwire" is the card registered by SOF on SoundWire-based platforms (e.g. WCL);
++    // "PCH" is the legacy HDA card name used by older platforms (e.g. RPL-S). Try both so a
++    // single HAL binary works across platform generations.
++    cardAndDeviceId.first = primary::PrimaryMixer::get_pcm_card("sofsoundwire");
++    if (cardAndDeviceId.first == primary::PrimaryMixer::kInvalidAlsaCard) {
++        cardAndDeviceId.first = primary::PrimaryMixer::get_pcm_card("PCH");
++    }
+     cardAndDeviceId.second = primary::PrimaryMixer::get_pcm_device(cardAndDeviceId.first);
+     if (cardAndDeviceId.second == -1) {
+            cardAndDeviceId.second = 0;
+-- 
+2.34.1
+

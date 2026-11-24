@@ -1,0 +1,187 @@
+From eb20edda4a47925064651110a879559a94099b74 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 09:01:33 +0000
+Subject: [PATCH] libvpl: Revert va_drm.h include path to this fork's nested
+ libva layout
+
+A real flashfiles build failed with a fatal file-not-found error:
+hello-encode's util.hpp includes "va/va_drm.h", which the v2.16.0
+upgrade (59a14e7) changed from "va//drm/va_drm.h" -- assuming vanilla
+upstream libva's flat <includedir>/va/va_drm.h install layout.
+
+This fork's libva (hardware/intel/external/libva) keeps va_drm.h at
+its original source-tree path, va/drm/va_drm.h (confirmed unchanged by
+the earlier libva 2.23.0 overlay too, and already fixed the same way
+in vpl-gpu-rt's libmfxsw.cpp/libmfx_core_vaapi.cpp). No -I flag in any
+of these examples' builds resolves the "va/"-prefixed form.
+
+Reverted the identical include across all 11 affected example
+sources (legacy-decode/encode/vpp, hello-decode/decvpp/encode/
+encode-jpeg/transcode/vpp, hello-sharing-vaapi, vpl-infer) back to
+"va/drm/va_drm.h". hello-sharing-vaapi's device-vaapi.h also
+includes "va/va_drmcommon.h", which is unaffected -- that header is
+genuinely flat in this fork's libva layout (va/va_drmcommon.h) and
+needed no change.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ examples/api1x_core/legacy-decode/src/util.hpp            | 2 +-
+ examples/api1x_core/legacy-encode/src/util.hpp            | 2 +-
+ examples/api1x_core/legacy-vpp/src/util.hpp               | 2 +-
+ examples/api2x/hello-decode/src/util.hpp                  | 2 +-
+ examples/api2x/hello-decvpp/src/util.hpp                  | 2 +-
+ examples/api2x/hello-encode-jpeg/src/util.hpp             | 2 +-
+ examples/api2x/hello-encode/src/util.hpp                  | 2 +-
+ examples/api2x/hello-sharing-vaapi/include/device-vaapi.h | 2 +-
+ examples/api2x/hello-transcode/src/util.hpp               | 2 +-
+ examples/api2x/hello-vpp/src/util.hpp                     | 2 +-
+ examples/interop/vpl-infer/src/util.hpp                   | 2 +-
+ 11 files changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/examples/api1x_core/legacy-decode/src/util.hpp b/examples/api1x_core/legacy-decode/src/util.hpp
+index 9034103..7f0a4f6 100644
+--- a/examples/api1x_core/legacy-decode/src/util.hpp
++++ b/examples/api1x_core/legacy-decode/src/util.hpp
+@@ -38,7 +38,7 @@ enum {
+ 
+ #ifdef LIBVA_SUPPORT
+     #include "va/va.h"
+-    #include "va/va_drm.h"
++    #include "va/drm/va_drm.h"
+ #endif
+ 
+ #define WAIT_100_MILLISECONDS 100
+diff --git a/examples/api1x_core/legacy-encode/src/util.hpp b/examples/api1x_core/legacy-encode/src/util.hpp
+index 9034103..7f0a4f6 100644
+--- a/examples/api1x_core/legacy-encode/src/util.hpp
++++ b/examples/api1x_core/legacy-encode/src/util.hpp
+@@ -38,7 +38,7 @@ enum {
+ 
+ #ifdef LIBVA_SUPPORT
+     #include "va/va.h"
+-    #include "va/va_drm.h"
++    #include "va/drm/va_drm.h"
+ #endif
+ 
+ #define WAIT_100_MILLISECONDS 100
+diff --git a/examples/api1x_core/legacy-vpp/src/util.hpp b/examples/api1x_core/legacy-vpp/src/util.hpp
+index 9034103..7f0a4f6 100644
+--- a/examples/api1x_core/legacy-vpp/src/util.hpp
++++ b/examples/api1x_core/legacy-vpp/src/util.hpp
+@@ -38,7 +38,7 @@ enum {
+ 
+ #ifdef LIBVA_SUPPORT
+     #include "va/va.h"
+-    #include "va/va_drm.h"
++    #include "va/drm/va_drm.h"
+ #endif
+ 
+ #define WAIT_100_MILLISECONDS 100
+diff --git a/examples/api2x/hello-decode/src/util.hpp b/examples/api2x/hello-decode/src/util.hpp
+index 64bff96..84859db 100644
+--- a/examples/api2x/hello-decode/src/util.hpp
++++ b/examples/api2x/hello-decode/src/util.hpp
+@@ -38,7 +38,7 @@ enum {
+ 
+ #ifdef LIBVA_SUPPORT
+     #include "va/va.h"
+-    #include "va/va_drm.h"
++    #include "va/drm/va_drm.h"
+ #endif
+ 
+ #define WAIT_100_MILLISECONDS 100
+diff --git a/examples/api2x/hello-decvpp/src/util.hpp b/examples/api2x/hello-decvpp/src/util.hpp
+index 64bff96..84859db 100644
+--- a/examples/api2x/hello-decvpp/src/util.hpp
++++ b/examples/api2x/hello-decvpp/src/util.hpp
+@@ -38,7 +38,7 @@ enum {
+ 
+ #ifdef LIBVA_SUPPORT
+     #include "va/va.h"
+-    #include "va/va_drm.h"
++    #include "va/drm/va_drm.h"
+ #endif
+ 
+ #define WAIT_100_MILLISECONDS 100
+diff --git a/examples/api2x/hello-encode-jpeg/src/util.hpp b/examples/api2x/hello-encode-jpeg/src/util.hpp
+index 1c41883..9a954cc 100644
+--- a/examples/api2x/hello-encode-jpeg/src/util.hpp
++++ b/examples/api2x/hello-encode-jpeg/src/util.hpp
+@@ -38,7 +38,7 @@ enum {
+ 
+ #ifdef LIBVA_SUPPORT
+     #include "va/va.h"
+-    #include "va/va_drm.h"
++    #include "va/drm/va_drm.h"
+ #endif
+ 
+ #define WAIT_100_MILLISECONDS 100
+diff --git a/examples/api2x/hello-encode/src/util.hpp b/examples/api2x/hello-encode/src/util.hpp
+index 9034103..7f0a4f6 100644
+--- a/examples/api2x/hello-encode/src/util.hpp
++++ b/examples/api2x/hello-encode/src/util.hpp
+@@ -38,7 +38,7 @@ enum {
+ 
+ #ifdef LIBVA_SUPPORT
+     #include "va/va.h"
+-    #include "va/va_drm.h"
++    #include "va/drm/va_drm.h"
+ #endif
+ 
+ #define WAIT_100_MILLISECONDS 100
+diff --git a/examples/api2x/hello-sharing-vaapi/include/device-vaapi.h b/examples/api2x/hello-sharing-vaapi/include/device-vaapi.h
+index 37e6602..c0e2bf7 100644
+--- a/examples/api2x/hello-sharing-vaapi/include/device-vaapi.h
++++ b/examples/api2x/hello-sharing-vaapi/include/device-vaapi.h
+@@ -10,7 +10,7 @@
+     #include <fcntl.h>
+     #include <unistd.h>
+     #include "va/va.h"
+-    #include "va/va_drm.h"
++    #include "va/drm/va_drm.h"
+     #include "va/va_drmcommon.h"
+ 
+     #include "vpl/mfx.h"
+diff --git a/examples/api2x/hello-transcode/src/util.hpp b/examples/api2x/hello-transcode/src/util.hpp
+index 9034103..7f0a4f6 100644
+--- a/examples/api2x/hello-transcode/src/util.hpp
++++ b/examples/api2x/hello-transcode/src/util.hpp
+@@ -38,7 +38,7 @@ enum {
+ 
+ #ifdef LIBVA_SUPPORT
+     #include "va/va.h"
+-    #include "va/va_drm.h"
++    #include "va/drm/va_drm.h"
+ #endif
+ 
+ #define WAIT_100_MILLISECONDS 100
+diff --git a/examples/api2x/hello-vpp/src/util.hpp b/examples/api2x/hello-vpp/src/util.hpp
+index ffc8e65..6801a67 100644
+--- a/examples/api2x/hello-vpp/src/util.hpp
++++ b/examples/api2x/hello-vpp/src/util.hpp
+@@ -38,7 +38,7 @@ enum {
+ 
+ #ifdef LIBVA_SUPPORT
+     #include "va/va.h"
+-    #include "va/va_drm.h"
++    #include "va/drm/va_drm.h"
+ #endif
+ 
+ #define WAIT_100_MILLISECONDS 100
+diff --git a/examples/interop/vpl-infer/src/util.hpp b/examples/interop/vpl-infer/src/util.hpp
+index 0e5b9fb..900bbe0 100644
+--- a/examples/interop/vpl-infer/src/util.hpp
++++ b/examples/interop/vpl-infer/src/util.hpp
+@@ -42,7 +42,7 @@ enum {
+ 
+ #ifdef LIBVA_SUPPORT
+     #include "va/va.h"
+-    #include "va/va_drm.h"
++    #include "va/drm/va_drm.h"
+ #endif
+ 
+ #define WAIT_100_MILLISECONDS 100
+-- 
+2.34.1
+

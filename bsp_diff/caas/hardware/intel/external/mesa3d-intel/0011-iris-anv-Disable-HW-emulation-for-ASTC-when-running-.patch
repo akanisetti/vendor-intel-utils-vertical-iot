@@ -1,0 +1,82 @@
+From 716113e3b10828e3c9a0d82d4fddf247331d7cb9 Mon Sep 17 00:00:00 2001
+From: shenghualin <shenghua.lin@intel.com>
+Date: Wed, 29 May 2024 11:33:35 +0800
+Subject: [PATCH 11/19] iris/anv: Disable HW emulation for ASTC when running
+ CTS on MTL platform
+
+CTS astc tests failed on MTL platform if HW emulation for ASTC is enabled, so
+disable it and use CPU decompression.
+
+When current process name is "com.drawelements.deqp:testercore", disable dri option
+"vk_require_astc"(vulkan) or "transcode_astc"(iris).
+
+So if the dri option is false(CTS detected) and current platform is MTL, HW emulation is disabled.
+
+Adapted for Mesa 26.0.3 (A17 review): GL keeps upstream's gating on the
+transcode_astc option, so the CTS entry (and any explicit
+transcode_astc=false) disables the lossy ASTC to DXT transcoding on every
+platform and ASTC is decoded exactly on the CPU. Vulkan has no CPU
+fallback and Android requires ASTC LDR, so anv keeps the emulation on
+devices without native ASTC and honours vk_require_astc=false on MTL
+only; the reason is documented next to the check.
+
+Tracked-On: OAM-116833
+Signed-off-by: Lin, Shenghua <shenghua.lin@intel.com>
+(cherry picked from commit 5017abf149aeba7238424b0c9e991e4025de25f0)
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ src/intel/vulkan/anv_physical_device.c | 9 ++++++++-
+ src/util/00-mesa-defaults.conf         | 8 ++++++++
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/src/intel/vulkan/anv_physical_device.c b/src/intel/vulkan/anv_physical_device.c
+index f302954785dd..c44eac43a0a7 100644
+--- a/src/intel/vulkan/anv_physical_device.c
++++ b/src/intel/vulkan/anv_physical_device.c
+@@ -2731,8 +2731,15 @@ anv_physical_device_try_create(struct vk_instance *vk_instance,
+    device->has_astc_ldr =
+       isl_format_supports_sampling(&device->info,
+                                    ISL_FORMAT_ASTC_LDR_2D_4X4_FLT16);
++   /* Android requires ASTC LDR in Vulkan and anv has no CPU fallback, so
++    * devices without native ASTC keep the emulation. The Android CTS driconf
++    * entry (vk_require_astc=false) is only meant for MTL, where the emulation
++    * fails the dEQP ASTC tests; driconf is parsed per instance without a
++    * device name, so the platform check lives here.
++    */
+    if (!device->has_astc_ldr &&
+-       driQueryOptionb(&device->instance->dri_options, "vk_require_astc"))
++       (driQueryOptionb(&device->instance->dri_options, "vk_require_astc") ||
++       !intel_device_info_is_mtl(&devinfo)))
+       device->emu_astc_ldr = true;
+    if (devinfo.ver == 9 && !intel_device_info_is_9lp(&devinfo)) {
+       device->flush_astc_ldr_void_extent_denorms =
+diff --git a/src/util/00-mesa-defaults.conf b/src/util/00-mesa-defaults.conf
+index f659aa981f6c..78e674f47683 100644
+--- a/src/util/00-mesa-defaults.conf
++++ b/src/util/00-mesa-defaults.conf
+@@ -962,6 +962,10 @@ TODO: document the other workarounds.
+         <application name="Amnesia Bunker" executable="AmnesiaTheBunker_NoSteam.exe">
+             <option name="intel_disable_threaded_context" value="true" />
+         </application>
++        <application name="Android CTS" executable="com.drawelements.deqp:testercore">
++            <option name="transcode_astc" value="false" />
++        </application>
++
+         <application name="SPECviewperf13" executable="viewperf">
+             <!-- creo-03 needs this to compile shaders; we don't support some corner cases -->
+             <option name="mesa_extension_override" value="+GL_EXT_shader_image_load_store" />
+@@ -1168,6 +1172,10 @@ TODO: document the other workarounds.
+         <engine engine_name_match="mesa zink">
+             <option name="no_16bit" value="true" />
+         </engine>
++       <application name="Android CTS" executable="com.drawelements.deqp:testercore">
++            <option name="vk_require_astc" value="false" />
++        </application>
++
+         <!-- Disable FCV optimization for Unreal Engine 5.1 workloads. -->
+         <engine engine_name_match="UnrealEngine5.1">
+             <option name="anv_disable_fcv" value="true" />
+-- 
+2.34.1
+

@@ -1,0 +1,451 @@
+From 765e49efcbfd00a79889b20ef7944c2cbfee75b3 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 28 Oct 2026 08:24:49 +0000
+Subject: [PATCH] libva: Restore Android shim excluded/deleted from 2.23.0
+ overlay
+
+Upstream 2.23.0 deletes va/android/va_android.cpp, va/android/Makefile.am,
+and the vaGetDisplay() declaration in va/va_android.h ("Remove
+unnecessary Android code"), and ships a different Android.bp. Restores
+the fork-local Android shim as a deliberate addition: mediasdk_c2's
+mfx_dev_va.cpp and media-driver's cmrtlib both have real, load-bearing
+dependencies on vaGetDisplay()/libva-android. Migrating those two
+consumers to vaGetDisplayDRM() (upstream's intended replacement)
+remains a real follow-up task, not covered here.
+
+This commit exists so the manifest can pin this project directly to
+the real 2.23.0 tag (dbf83dc3b1ce6bad46e1628aaf2da5ef731157b8) instead
+of carrying the whole tag's tree as a single large patch -- only this
+Android-shim delta and the va_log* macro restoration layered on top of
+it need to live in utils_vertical now.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ Android.bp                |  64 +++++++---
+ va/android/Makefile.am    |  24 ++++
+ va/android/va_android.cpp | 238 ++++++++++++++++++++++++++++++++++++++
+ va/va_android.h           |  15 +++
+ 4 files changed, 322 insertions(+), 19 deletions(-)
+ create mode 100644 va/android/Makefile.am
+ create mode 100644 va/android/va_android.cpp
+
+diff --git a/Android.bp b/Android.bp
+index a6d9627..d7fd2fc 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -36,23 +36,18 @@ sh_binary_host {
+ }
+ 
+ genrule {
+-    name: "libva_gen_headers",
++    name: "libva_gen_version",
+     srcs: [
+         "configure.ac",
+         "va/va_version.h.in",
+-        "va/drm/va_drm.h",
+     ],
+     tools: [
+         "libva_gen_version_script",
+     ],
+-    out: [
+-        "va/va_version.h",
+-        "va/va_drm.h",
+-    ],
++    out: ["va/va_version.h"],
+     cmd: "$(location libva_gen_version_script) " +
+-        "$$(dirname $(location configure.ac)) " +
+-        "$(location va/va_version.h.in) > $(location va/va_version.h);" +
+-        "cp $(location va/drm/va_drm.h) $(location va/va_drm.h)",
++         "$$(dirname $(location configure.ac)) " +
++         "$(location va/va_version.h.in) > $(out)",
+ }
+ 
+ cc_library_headers {
+@@ -61,14 +56,14 @@ cc_library_headers {
+     export_include_dirs: [
+         ".",
+         "va",
+-        "va/drm",
++        "va/drm"
+     ],
+ 
+     generated_headers: [
+-        "libva_gen_headers",
++        "libva_gen_version",
+     ],
+     export_generated_headers: [
+-        "libva_gen_headers",
++        "libva_gen_version",
+     ],
+ 
+     vendor: true,
+@@ -91,17 +86,14 @@ cc_library_shared {
+     ],
+ 
+     local_include_dirs: [
+-        "va",
++        "va"
+     ],
+ 
+     generated_headers: [
+-        "libva_gen_headers",
++        "libva_gen_version",
+     ],
+     export_generated_headers: [
+-        "libva_gen_headers",
+-    ],
+-    export_include_dirs: [
+-        ".",
++        "libva_gen_version",
+     ],
+ 
+     header_libs: [
+@@ -120,7 +112,6 @@ cc_library_shared {
+     cflags: [
+         "-Werror",
+         "-Winvalid-pch",
+-        "-DANDROID",
+         "-DSYSCONFDIR=\"/vendor/etc\"",
+         "-DLOG_TAG=\"libva\"",
+     ],
+@@ -135,3 +126,38 @@ cc_library_shared {
+     vendor: true,
+     enabled: false,
+ }
++
++cc_library_shared {
++    name: "libva-android",
++
++    shared_libs: [
++        "libva",
++        "libdrm",
++        "liblog",
++        "libcutils",
++    ],
++
++    local_include_dirs: [
++        "va",
++        "va/drm",
++    ],
++
++    srcs: [
++        "va/android/va_android.cpp",
++        "va/drm/va_drm_utils.c",
++    ],
++
++    cflags: [
++        "-Werror",
++        "-Winvalid-pch",
++        "-DLOG_TAG=\"libva-android\"",
++    ],
++
++    vendor: true,
++    enabled: false,
++    arch: {
++        x86_64: {
++            enabled: true,
++        },
++    },
++}
+diff --git a/va/android/Makefile.am b/va/android/Makefile.am
+new file mode 100644
+index 0000000..26f63df
+--- /dev/null
++++ b/va/android/Makefile.am
+@@ -0,0 +1,24 @@
++# Copyright (c) 2007 Intel Corporation. All Rights Reserved.
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the
++# "Software"), to deal in the Software without restriction, including
++# without limitation the rights to use, copy, modify, merge, publish,
++# distribute, sub license, and/or sell copies of the Software, and to
++# permit persons to whom the Software is furnished to do so, subject to
++# the following conditions:
++# 
++# The above copyright notice and this permission notice (including the
++# next paragraph) shall be included in all copies or substantial portions
++# of the Software.
++# 
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
++# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
++# IN NO EVENT SHALL PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR
++# ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
++# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
++# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++
++# Extra clean files so that maintainer-clean removes *everything*
++MAINTAINERCLEANFILES = Makefile.in
+diff --git a/va/android/va_android.cpp b/va/android/va_android.cpp
+new file mode 100644
+index 0000000..3e3e8ac
+--- /dev/null
++++ b/va/android/va_android.cpp
+@@ -0,0 +1,238 @@
++/*
++ * Copyright (c) 2007 Intel Corporation. All Rights Reserved.
++ * Copyright (c) 2023 Emil Velikov
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sub license, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the
++ * next paragraph) shall be included in all copies or substantial portions
++ * of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
++ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
++ * IN NO EVENT SHALL PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR
++ * ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
++ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
++ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#define _GNU_SOURCE 1
++#include "sysdeps.h"
++#include "va.h"
++#include "va_backend.h"
++#include "va_internal.h"
++#include "va_trace.h"
++#include "va_android.h"
++#include "va_drmcommon.h"
++#include "va_drm_utils.h"
++#include <stdarg.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <dlfcn.h>
++#include <errno.h>
++#include <xf86drm.h>
++#include <i915_drm.h>
++
++#if defined(ANDROID)
++#include <cutils/properties.h>
++#endif
++
++
++#define CHECK_SYMBOL(func) { if (!func) printf("func %s not found\n", #func); return VA_STATUS_ERROR_UNKNOWN; }
++
++static void va_DisplayContextDestroy(
++    VADisplayContextP pDisplayContext
++)
++{
++    struct drm_state *drm_state;
++
++    if (pDisplayContext == NULL)
++        return;
++
++    /* close the open-ed DRM fd */
++    drm_state = (struct drm_state *)pDisplayContext->pDriverContext->drm_state;
++    close(drm_state->fd);
++
++    free(pDisplayContext->pDriverContext->drm_state);
++    free(pDisplayContext->pDriverContext);
++    free(pDisplayContext);
++}
++
++static int va_IsIntelDgpu(int fd)
++{
++    struct drm_i915_query_item item = {
++        .query_id = DRM_I915_QUERY_MEMORY_REGIONS,
++    };
++
++    struct drm_i915_query query = {
++        .num_items = 1, .items_ptr = (uintptr_t)&item,
++    };
++    if (drmIoctl(fd, DRM_IOCTL_I915_QUERY, &query)) {
++        va_loge("drv: Failed to DRM_IOCTL_I915_QUERY");
++        return 0;
++    }
++
++    struct drm_i915_query_memory_regions *meminfo = (struct drm_i915_query_memory_regions *)calloc(1, item.length);
++    if (!meminfo) {
++        va_loge("drv: %s Exit due to memory allocation failure", __func__);
++        return 0;
++    }
++
++    item.data_ptr = (uintptr_t)meminfo;
++    if (drmIoctl(fd, DRM_IOCTL_I915_QUERY, &query) || item.length <= 0) {
++        free(meminfo);
++        va_loge("%s:%d DRM_IOCTL_I915_QUERY error", __FUNCTION__, __LINE__);
++        return 0;
++    }
++
++    int has_sys = 0, has_local = 0;
++    for (uint32_t i = 0; i < meminfo->num_regions; i++) {
++        const struct drm_i915_memory_region_info *mem = &meminfo->regions[i];
++        switch (mem->region.memory_class) {
++        case I915_MEMORY_CLASS_SYSTEM:
++            has_sys = 1;
++            break;
++        case I915_MEMORY_CLASS_DEVICE:
++            has_local = 1;
++            break;
++        default:
++            break;
++        }
++    }
++
++    free(meminfo);
++    return has_local;
++}
++static int va_SelectIntelDevice()
++{
++    int use_dgpu = 1;
++#if defined(ANDROID)
++    char value[PROPERTY_VALUE_MAX] = {};
++
++    property_get("video.hw.dgpu", value, "1");
++    use_dgpu = atoi(value);
++#endif
++
++    int intel_gpu_index = -1;
++    for (int i = 0; i < 16; ++i) {
++        char device_path[64];
++        sprintf(device_path, "/dev/dri/renderD%d", 128 + i);
++        int temp = open(device_path, O_RDWR | O_CLOEXEC);
++        if (temp == -1) {
++            continue;
++        }
++        drmVersionPtr version = drmGetVersion(temp);
++        if (version == nullptr) {
++            close(temp);
++            continue;
++        }
++        if (strncmp(version->name, "i915", strlen("i915")) == 0) {
++            intel_gpu_index = i;
++            // If specify to use dgpu and found dgpu, return the first found dgpu,
++            // else if specify to use igpu and found igpu, return the first found igpu,
++            // otherwise use the last available intel node for codec
++            if (use_dgpu && va_IsIntelDgpu(temp)) {
++                drmFreeVersion(version);
++                close(temp);
++                va_logd("%s:%d find dgpu", __FUNCTION__, __LINE__);
++                break;
++            }
++            if (!use_dgpu && !va_IsIntelDgpu(temp)) {
++                va_logd("%s:%d find igpu", __FUNCTION__, __LINE__);
++                drmFreeVersion(version);
++                close(temp);
++                break;
++            }
++        }
++        drmFreeVersion(version);
++        close(temp);
++    }
++    return intel_gpu_index;
++}
++
++static VAStatus va_DisplayContextConnect(
++    VADisplayContextP pDisplayContext
++)
++{
++    VADriverContextP const ctx = pDisplayContext->pDriverContext;
++    struct drm_state * const drm_state = (struct drm_state *)ctx->drm_state;
++    int device_node_id = va_SelectIntelDevice();
++    if (device_node_id < 0) {
++        va_loge("Cannot find candidate DRM device\n");
++        return VA_STATUS_ERROR_UNKNOWN;
++    }
++
++    char device_name[64];
++    sprintf(device_name, "/dev/dri/renderD%d", 128 + device_node_id);
++    drm_state->fd = open(device_name, O_RDWR | O_CLOEXEC);
++    if (drm_state->fd < 0) {
++        va_loge("Cannot open DRM device '%s': %d, %s\n",
++                device_name, errno, strerror(errno));
++        return VA_STATUS_ERROR_UNKNOWN;
++    }
++    drm_state->auth_type = VA_DRM_AUTH_CUSTOM;
++    return VA_STATUS_SUCCESS;
++}
++
++static VAStatus
++va_DisplayContextGetDriverNames(
++    VADisplayContextP pDisplayContext,
++    char            **drivers,
++    unsigned         *num_drivers
++)
++{
++    VADriverContextP const ctx = pDisplayContext->pDriverContext;
++    VAStatus status = va_DisplayContextConnect(pDisplayContext);
++    if (status != VA_STATUS_SUCCESS)
++        return status;
++
++    return VA_DRM_GetDriverNames(ctx, drivers, num_drivers);
++}
++
++VADisplay vaGetDisplay(
++    void *native_dpy /* implementation specific */
++)
++{
++    VADisplayContextP pDisplayContext;
++    VADriverContextP  pDriverContext;
++    struct drm_state *drm_state;
++
++    if (!native_dpy)
++        return NULL;
++
++    pDisplayContext = va_newDisplayContext();
++    if (!pDisplayContext)
++        return NULL;
++
++    pDisplayContext->vaDestroy       = va_DisplayContextDestroy;
++    pDisplayContext->vaGetDriverNames = va_DisplayContextGetDriverNames;
++
++    pDriverContext = va_newDriverContext(pDisplayContext);
++    if (!pDriverContext) {
++        free(pDisplayContext);
++        return NULL;
++    }
++
++    pDriverContext->native_dpy   = (void *)native_dpy;
++    pDriverContext->display_type = VA_DISPLAY_ANDROID;
++
++    drm_state = (struct drm_state*)calloc(1, sizeof(*drm_state));
++    if (!drm_state) {
++        free(pDisplayContext);
++        free(pDriverContext);
++        return NULL;
++    }
++
++    pDriverContext->drm_state = drm_state;
++
++    return (VADisplay)pDisplayContext;
++}
+diff --git a/va/va_android.h b/va/va_android.h
+index 5df76aa..dfed8fd 100644
+--- a/va/va_android.h
++++ b/va/va_android.h
+@@ -31,4 +31,19 @@
+ /** \brief Android ION buffer memory type. */
+ #define VA_SURFACE_ATTRIB_MEM_TYPE_ANDROID_ION      0x00200000
+ 
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++ * Returns a suitable VADisplay for VA API
++ */
++VADisplay vaGetDisplay(
++    void *android_dpy
++);
++
++#ifdef __cplusplus
++}
++#endif
++
+ #endif /* _VA_ANDROID_H_ */
+-- 
+2.34.1
+

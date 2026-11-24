@@ -1,0 +1,184 @@
+From 74f6bd6d3413db6ac8bd5b3369c24f48bf3cccf2 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 05:34:14 +0000
+Subject: [PATCH] vpl-gpu-rt: Restore 4 fork-local correctness/CTS fixes
+ discarded by overlay
+
+All four predate this version bump and were silently dropped since
+they touch real source files, not build glue:
+
+1. mfx_h264_dec_decode.cpp (commit 27345311): return
+   MFX_WRN_VIDEO_PARAM_CHANGED when Color-Aspect/Bit-Depth change is
+   detected -- was being skipped.
+
+2. hevcehw_base_iddi_packer.h (commit 419d536f): enable PSliceSupport
+   for HEVC encode so GPB can be set off, fixing
+   android.videocodec.cts.VideoEncoderMaxBFrameTest#testMaxBFrameSupport
+   (GPB frames were being miscounted as B frames).
+
+3. umc_av1_dec_defs.h + umc_av1_bitstream.cpp (commit a4432599):
+   ignore reserved OBU units per AV1 spec section 6.2.2 instead of
+   throwing UMC_ERR_NOT_IMPLEMENTED, fixing
+   android.mediav2.cts.AdaptivePlaybackTest#testAdaptivePlayback.
+
+4. mfx_h264_enc_common_hw.cpp (commit f1ee87b3): don't downgrade
+   CodecLevel when currently at MFX_LEVEL_AVC_1b and the computed
+   minLevel is MFX_LEVEL_AVC_1 (1b has greater capability despite a
+   lower numeric level), fixing 3 CTS encoder profile/level tests.
+
+Two related fork-local commits were checked and intentionally
+skipped: b74956c2 ("Fix null pointer in GetCurrentSubsamples") is
+gated behind #ifdef ENABLE_WIDEVINE, which is never defined in this
+build (out of scope, confirmed dead code); 3dffe07f ("Support DG2 new
+device ID" 0x56AF in mfxstructures-int.h) is already present in the
+26.2.3 overlay, superseded by upstream.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ .../decode/h264/src/mfx_h264_dec_decode.cpp    |  1 +
+ .../h264/src/mfx_h264_enc_common_hw.cpp        | 18 +++++++++---------
+ .../agnostic/base/hevcehw_base_iddi_packer.h   |  2 +-
+ .../codec/av1_dec/include/umc_av1_dec_defs.h   |  1 +
+ .../codec/av1_dec/src/umc_av1_bitstream.cpp    |  3 ++-
+ 5 files changed, 14 insertions(+), 11 deletions(-)
+
+diff --git a/_studio/mfx_lib/decode/h264/src/mfx_h264_dec_decode.cpp b/_studio/mfx_lib/decode/h264/src/mfx_h264_dec_decode.cpp
+index c13f5784..9b1c3684 100644
+--- a/_studio/mfx_lib/decode/h264/src/mfx_h264_dec_decode.cpp
++++ b/_studio/mfx_lib/decode/h264/src/mfx_h264_dec_decode.cpp
+@@ -1277,6 +1277,7 @@ mfxStatus VideoDECODEH264::DecodeFrameCheck(mfxBitstream *bs, mfxFrameSurface1 *
+                 }
+ 
+                 MFX_CHECK(umcRes != UMC::UMC_NTF_NEW_RESOLUTION, MFX_ERR_INCOMPATIBLE_VIDEO_PARAM);
++                MFX_CHECK(sts != MFX_WRN_VIDEO_PARAM_CHANGED, MFX_WRN_VIDEO_PARAM_CHANGED);
+             }
+ 
+             if (umcRes == UMC::UMC_ERR_INVALID_STREAM)
+diff --git a/_studio/mfx_lib/encode_hw/h264/src/mfx_h264_enc_common_hw.cpp b/_studio/mfx_lib/encode_hw/h264/src/mfx_h264_enc_common_hw.cpp
+index 01d246c3..9ac61918 100644
+--- a/_studio/mfx_lib/encode_hw/h264/src/mfx_h264_enc_common_hw.cpp
++++ b/_studio/mfx_lib/encode_hw/h264/src/mfx_h264_enc_common_hw.cpp
+@@ -3067,7 +3067,7 @@ mfxStatus MfxHwH264Encode::CheckVideoParamQueryLike(
+                     par.mfx.CodecLevel = GetMaxSupportedLevel();
+             }
+         }
+-        else if (par.mfx.CodecLevel != 0 && par.mfx.CodecLevel < minLevel)
++        else if (par.mfx.CodecLevel != 0 && (par.mfx.CodecLevel != MFX_LEVEL_AVC_1b || minLevel != MFX_LEVEL_AVC_1) && par.mfx.CodecLevel < minLevel)
+         {
+             if (extBits->SPSBuffer)
+                 MFX_RETURN(Error(MFX_ERR_INCOMPATIBLE_VIDEO_PARAM));
+@@ -3097,7 +3097,7 @@ mfxStatus MfxHwH264Encode::CheckVideoParamQueryLike(
+                     par.mfx.CodecLevel = GetMaxSupportedLevel();
+             }
+         }
+-        else if (par.mfx.CodecLevel != 0 && par.mfx.CodecLevel < minLevel)
++        else if (par.mfx.CodecLevel != 0 && (par.mfx.CodecLevel != MFX_LEVEL_AVC_1b || minLevel != MFX_LEVEL_AVC_1) && par.mfx.CodecLevel < minLevel)
+         {
+             if (extBits->SPSBuffer)
+                 MFX_RETURN(Error(MFX_ERR_INCOMPATIBLE_VIDEO_PARAM));
+@@ -3121,7 +3121,7 @@ mfxStatus MfxHwH264Encode::CheckVideoParamQueryLike(
+             par.mfx.CodecLevel = MFX_LEVEL_AVC_52;
+             par.mfx.NumRefFrame = GetMaxNumRefFrame(par);
+         }
+-        else if (par.mfx.CodecLevel != 0 && par.mfx.CodecLevel < minLevel)
++        else if (par.mfx.CodecLevel != 0 && (par.mfx.CodecLevel != MFX_LEVEL_AVC_1b || minLevel != MFX_LEVEL_AVC_1) && par.mfx.CodecLevel < minLevel)
+         {
+             if (extBits->SPSBuffer)
+                 MFX_RETURN(Error(MFX_ERR_INCOMPATIBLE_VIDEO_PARAM));
+@@ -3495,7 +3495,7 @@ mfxStatus MfxHwH264Encode::CheckVideoParamQueryLike(
+                 {
+                     if (mfxU16 minLevel = GetLevelLimitByMaxBitrate(profile, par.calcParam.targetKbps))
+                     {
+-                        if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && par.mfx.CodecLevel < minLevel)
++                        if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && (par.mfx.CodecLevel != MFX_LEVEL_AVC_1b || minLevel != MFX_LEVEL_AVC_1) && par.mfx.CodecLevel < minLevel)
+                         {
+                             if (extBits->SPSBuffer)
+                                 MFX_RETURN(Error(MFX_ERR_INCOMPATIBLE_VIDEO_PARAM));
+@@ -3567,7 +3567,7 @@ mfxStatus MfxHwH264Encode::CheckVideoParamQueryLike(
+             {
+                 if (mfxU16 minLevel = GetLevelLimitByMaxBitrate(profile, par.calcParam.maxKbps))
+                 {
+-                    if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && par.mfx.CodecLevel < minLevel)
++                    if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && (par.mfx.CodecLevel != MFX_LEVEL_AVC_1b || minLevel != MFX_LEVEL_AVC_1) && par.mfx.CodecLevel < minLevel)
+                     {
+                         if (extBits->SPSBuffer)
+                             MFX_RETURN(Error(MFX_ERR_INCOMPATIBLE_VIDEO_PARAM));
+@@ -3657,7 +3657,7 @@ mfxStatus MfxHwH264Encode::CheckVideoParamQueryLike(
+                 {
+                     if (mfxU16 minLevel = GetLevelLimitByBufferSize(profile, par.calcParam.bufferSizeInKB))
+                     {
+-                        if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && par.mfx.CodecLevel < minLevel)
++                        if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && (par.mfx.CodecLevel != MFX_LEVEL_AVC_1b || minLevel != MFX_LEVEL_AVC_1) && par.mfx.CodecLevel < minLevel)
+                         {
+                             if (extBits->SPSBuffer)
+                                 MFX_RETURN(Error(MFX_ERR_INCOMPATIBLE_VIDEO_PARAM));
+@@ -3711,7 +3711,7 @@ mfxStatus MfxHwH264Encode::CheckVideoParamQueryLike(
+         {
+             if (mfxU16 minLevel = GetLevelLimitByMaxBitrate(profile, par.calcParam.decorativeHrdParam.targetKbps))
+             {
+-                if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && par.mfx.CodecLevel < minLevel)
++                if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && (par.mfx.CodecLevel != MFX_LEVEL_AVC_1b || minLevel != MFX_LEVEL_AVC_1) && par.mfx.CodecLevel < minLevel)
+                 {
+                     changed = true;
+                     par.mfx.CodecLevel   = minLevel;
+@@ -3741,7 +3741,7 @@ mfxStatus MfxHwH264Encode::CheckVideoParamQueryLike(
+         {
+             if (mfxU16 minLevel = GetLevelLimitByMaxBitrate(profile, par.calcParam.decorativeHrdParam.maxKbps))
+             {
+-                if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && par.mfx.CodecLevel < minLevel)
++                if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && (par.mfx.CodecLevel != MFX_LEVEL_AVC_1b || minLevel != MFX_LEVEL_AVC_1) && par.mfx.CodecLevel < minLevel)
+                 {
+                     changed = true;
+                     par.mfx.CodecLevel = minLevel;
+@@ -3765,7 +3765,7 @@ mfxStatus MfxHwH264Encode::CheckVideoParamQueryLike(
+         {
+             if (mfxU16 minLevel = GetLevelLimitByBufferSize(profile, par.calcParam.decorativeHrdParam.bufferSizeInKB))
+             {
+-                if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && par.mfx.CodecLevel < minLevel)
++                if (par.mfx.CodecLevel != 0 && par.mfx.CodecProfile != 0 && (par.mfx.CodecLevel != MFX_LEVEL_AVC_1b || minLevel != MFX_LEVEL_AVC_1) && par.mfx.CodecLevel < minLevel)
+                 {
+                     changed = true;
+                     par.mfx.CodecLevel = minLevel;
+diff --git a/_studio/mfx_lib/encode_hw/hevc/agnostic/base/hevcehw_base_iddi_packer.h b/_studio/mfx_lib/encode_hw/hevc/agnostic/base/hevcehw_base_iddi_packer.h
+index 32bd38cb..92f49d5c 100644
+--- a/_studio/mfx_lib/encode_hw/hevc/agnostic/base/hevcehw_base_iddi_packer.h
++++ b/_studio/mfx_lib/encode_hw/hevc/agnostic/base/hevcehw_base_iddi_packer.h
+@@ -61,7 +61,7 @@ protected:
+     void HardcodeCapsCommon(EncodeCapsHevc& caps, const mfxVideoParam& par)
+     {
+         caps.SliceIPOnly        = IsOn(par.mfx.LowPower);
+-        caps.msdk.PSliceSupport = false;
++        caps.msdk.PSliceSupport = true;
+     }
+ };
+ 
+diff --git a/_studio/shared/umc/codec/av1_dec/include/umc_av1_dec_defs.h b/_studio/shared/umc/codec/av1_dec/include/umc_av1_dec_defs.h
+index da1d1f0c..59d9aadb 100644
+--- a/_studio/shared/umc/codec/av1_dec/include/umc_av1_dec_defs.h
++++ b/_studio/shared/umc/codec/av1_dec/include/umc_av1_dec_defs.h
+@@ -104,6 +104,7 @@ namespace UMC_AV1_DECODER
+ 
+     enum AV1_OBU_TYPE
+     {
++        OBU_Reserved = 0,
+         OBU_SEQUENCE_HEADER = 1,
+         OBU_TEMPORAL_DELIMITER = 2,
+         OBU_FRAME_HEADER = 3,
+diff --git a/_studio/shared/umc/codec/av1_dec/src/umc_av1_bitstream.cpp b/_studio/shared/umc/codec/av1_dec/src/umc_av1_bitstream.cpp
+index c7babc93..99115a89 100644
+--- a/_studio/shared/umc/codec/av1_dec/src/umc_av1_bitstream.cpp
++++ b/_studio/shared/umc/codec/av1_dec/src/umc_av1_bitstream.cpp
+@@ -1211,7 +1211,8 @@ namespace UMC_AV1_DECODER
+ 
+         if (info.header.obu_has_size_field)
+             av1_read_obu_size(*this, obu_size, sizeFieldLength);
+-        else if (info.header.obu_type != OBU_TEMPORAL_DELIMITER)
++        // Av1-spec section 6.2.2: Reserved units are for future use and shall be ignored by AV1 decoder.
++        else if (info.header.obu_type != OBU_TEMPORAL_DELIMITER && info.header.obu_type != OBU_Reserved)
+             throw av1_exception(UMC::UMC_ERR_NOT_IMPLEMENTED); // no support for OBUs w/o size field so far
+ 
+         info.size = headerSize + sizeFieldLength + obu_size;
+-- 
+2.34.1
+

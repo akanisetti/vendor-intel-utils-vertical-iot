@@ -1,0 +1,52 @@
+From 5023ad9c601eb640fed445d77036534e85a13d89 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Sat, 17 Oct 2026 05:53:28 +0000
+Subject: [PATCH] vpl-gpu-rt: Wire in missing enctools include dir for
+ Android.mk build
+
+A real build (10m13s in, 5537/41711 targets) failed with a fatal
+"'mfxenctools-int.h' file not found" compiling mfx_utils_extbuf.h, via
+the include chain av1ehw_xe2_lin.cpp -> av1ehw_base_general.h ->
+av1ehw_base.h -> mfx_utils_extbuf.h.
+
+mfx_utils_extbuf.h and its #include "mfxenctools-int.h" both predate
+this version bump -- this file was simply never part of the compiled
+closure in the old Android.mk build. The intel-onevpl-26.2.3 AV1
+encoder refactor (agnostic/Xe2 -> agnostic/base, seen in prior commits
+in this series) now pulls it in via av1ehw_base_general.h for the
+first time. The real header lives at
+_studio/shared/enctools/include/mfxenctools-int.h, a directory never
+wired into MFX_LOCAL_INCLUDES_HW.
+
+Checked for a naming collision with the unrelated, incompatible
+_studio/enctools/include/mfx_ienctools.h (different API, a struct vs.
+class with a different method set) -- that directory is confirmed not
+wired into Android.mk, so no ambiguity is introduced.
+
+mfx_utils_extbuf.h's other includes (mfx_common.h, resolved since the
+compiler reached line 31 past it; mfxencodestats.h and the relative
+../mediasdk_structures/ts_ext_buffers_decl.h, both already covered by
+the libmfx_gen_headers header library's exported api/vpl and
+api/mediasdk_structures dirs) do not need any changes.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ _studio/mfx_lib/Android.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/_studio/mfx_lib/Android.mk b/_studio/mfx_lib/Android.mk
+index 9f2eaf5e..a71da6e7 100644
+--- a/_studio/mfx_lib/Android.mk
++++ b/_studio/mfx_lib/Android.mk
+@@ -179,6 +179,7 @@ MFX_LOCAL_INCLUDES_HW := \
+     $(MFX_HOME)/_studio/mfx_lib/encode_hw/shared \
+     $(MFX_HOME)/_studio/mfx_lib/shared/include \
+     $(MFX_HOME)/_studio/mfx_lib/shared/include/feature_blocks \
++    $(MFX_HOME)/_studio/shared/enctools/include \
+     $(MFX_HOME)/_studio/mfx_lib/scheduler/linux/include \
+     $(MFX_HOME)/_studio/mfx_lib/scheduler/agnostic/include \
+     $(MFX_HOME)/_studio/shared/asc/include
+-- 
+2.34.1
+

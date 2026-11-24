@@ -1,0 +1,47 @@
+From a47e0c1c765a9749197bc400d9e2675ec91f7b8c Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Fri, 13 Nov 2026 14:31:08 +0000
+Subject: [PATCH] vpl-gpu-rt: Wire in hevcehw_base_best_quality_ref.cpp, new in
+ 26.3.x
+
+Diffing the real intel-onevpl-26.2.3 and intel-onevpl-26.3.5 source
+trees (git diff --name-status) shows exactly 2 added files and 0
+deleted files relevant to the Android build:
+hevc/agnostic/base/hevcehw_base_best_quality_ref.{cpp,h}. The header's
+directory was already wired as an include dir (it's shared with all
+the other hevc/agnostic/base/*.cpp entries), but the .cpp was not
+in MFX_LOCAL_SRC_FILES_HW's explicit per-file list -- unlike most
+other mfx_lib source directories, encode_hw/hevc's sources are hand-
+enumerated here, not wildcard-globbed, so new upstream files are never
+picked up automatically (the same category of gap patch 0014 fixed for
+26.2.3).
+
+Confirmed this is live code, not dead/disabled: upstream's own
+encode_hw/CMakeLists.txt lists both files, and
+hevcehw_base_next_lin.cpp (already wired) instantiates the feature via
+`new BestQualityRef(FEATURE_BEST_QUALITY_REF)`. Left unwired, this
+would be an undefined symbol at link time, the same failure mode
+patch 0014 found via a real flashfiles build.
+
+Tracked-On: NIACP3-1705
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ _studio/mfx_lib/Android.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/_studio/mfx_lib/Android.mk b/_studio/mfx_lib/Android.mk
+index b8513553..9eee8cc2 100644
+--- a/_studio/mfx_lib/Android.mk
++++ b/_studio/mfx_lib/Android.mk
+@@ -125,6 +125,7 @@ MFX_LOCAL_SRC_FILES_HW += \
+     mfx_lib/encode_hw/hevc/linux/xe2/hevcehw_xe2_lin.cpp \
+     mfx_lib/encode_hw/hevc/agnostic/base/hevcehw_base_extddi.cpp \
+     mfx_lib/encode_hw/hevc/agnostic/base/hevcehw_base_caps.cpp \
++    mfx_lib/encode_hw/hevc/agnostic/base/hevcehw_base_best_quality_ref.cpp \
+     mfx_lib/encode_hw/shared/ehw_resources_pool.cpp \
+     mfx_lib/encode_hw/shared/ehw_task_manager.cpp \
+     mfx_lib/encode_hw/shared/ehw_device_vaapi.cpp \
+-- 
+2.34.1
+

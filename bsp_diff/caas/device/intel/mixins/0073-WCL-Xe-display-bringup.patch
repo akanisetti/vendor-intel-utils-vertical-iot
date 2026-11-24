@@ -1,0 +1,160 @@
+From eac9b7e98acfa3112bad5277d06d5c9b5f19595e Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Wed, 9 Sep 2026 03:57:48 +0000
+Subject: [PATCH] WCL Xe display bringup
+
+Changes:
+- added xe display firmware into build
+- added kernel command line for xe
+- switched i915 driver from in-built to modular build
+- updated kernel config to support i915 and xe modules
+- updated kernel config to enable fwdata
+- updated init.rc to load modules for i915 and xe accordingly
+- updated sysfs file permissions for xe
+- added mixins option to select i915 or xe
+- removed loading of vestigial i915_ag.ko module
+
+Tracked-On: NIACP3-1254
+Co-authored-by: Basil Chew <basil.chew@intel.com>
+Signed-off-by: Basil Chew <basil.chew@intel.com>
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ groups/graphics/auto/AndroidBoard.mk |  2 ++
+ groups/graphics/auto/BoardConfig.mk  |  9 +++++++--
+ groups/graphics/auto/init.rc         | 24 ++++++++++++++++++++----
+ groups/graphics/auto/init.rc.1       | 19 +++++++++++++++++++
+ groups/graphics/auto/option.spec     |  2 ++
+ groups/kernel/init.rc                |  1 -
+ 6 files changed, 50 insertions(+), 7 deletions(-)
+
+diff --git a/groups/graphics/auto/AndroidBoard.mk b/groups/graphics/auto/AndroidBoard.mk
+index a81de4c..8236a5f 100644
+--- a/groups/graphics/auto/AndroidBoard.mk
++++ b/groups/graphics/auto/AndroidBoard.mk
+@@ -16,6 +16,8 @@ $(foreach t, $(patsubst $(I915_FW_PATH)/%,%,$(wildcard $(I915_FW_PATH)/compat*))
+ $(foreach t, $(patsubst $(I915_FW_PATH)/%,%,$(wildcard $(I915_FW_PATH)/intel_vsec*)) ,$(eval I915_FW += i915/$(t)) $(eval $(LOCAL_KERNEL) : $(PRODUCT_OUT)/vendor/firmware/i915/$(t)))
+ $(foreach t, $(patsubst $(I915_FW_PATH)/%,%,$(wildcard $(I915_FW_PATH)/i915_ag*)) ,$(eval I915_FW += i915/$(t)) $(eval $(LOCAL_KERNEL) : $(PRODUCT_OUT)/vendor/firmware/i915/$(t)))
+ 
++$(foreach t, $(patsubst $(I915_FW_PATH)/%,%,$(wildcard $(I915_FW_PATH)/xe*)) ,$(eval I915_FW += i915/$(t)) $(eval $(LOCAL_KERNEL) : $(PRODUCT_OUT)/vendor/firmware/i915/$(t)))
++
+ _EXTRA_FW_ += $(I915_FW)
+ 
+ XE_FW_PATH := vendor/linux/firmware/xe
+diff --git a/groups/graphics/auto/BoardConfig.mk b/groups/graphics/auto/BoardConfig.mk
+index 2ed65c2..620df17 100755
+--- a/groups/graphics/auto/BoardConfig.mk
++++ b/groups/graphics/auto/BoardConfig.mk
+@@ -2,11 +2,16 @@
+ TARGET_USE_PRIVATE_LIBDRM := true
+ LIBDRM_VER ?= intel
+ 
++{{#graphics_i915}}
+ BOARD_KERNEL_CMDLINE += vga=current i915.modeset=1 drm.atomic=1 i915.nuclear_pageflip=1 drm.vblankoffdelay=1 i915.fastboot=1
++{{/graphics_i915}}
++{{#graphics_xe}}
++BOARD_KERNEL_CMDLINE += drm.atomic=1 xe.force_probe=* video=efifb:off
++{{/graphics_xe}}
+ 
+ USE_OPENGL_RENDERER := true
+ USE_INTEL_UFO_DRIVER := false
+-BOARD_GPU_DRIVERS := i965 swrast virgl iris
++BOARD_GPU_DRIVERS := i965 swrast virgl iris xe
+ BOARD_USE_CUSTOMIZED_MESA := true
+ 
+ ifneq ($(USE_PREBUILT_MESA), true)
+@@ -20,7 +25,7 @@ ifeq ($(USE_PREBUILT_MESA), true)
+ BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true
+ endif
+ 
+-BOARD_GPU_DRIVERS ?= i965 swrast virgl iris
++BOARD_GPU_DRIVERS ?= i965 swrast virgl iris xe
+ ifneq ($(strip $(BOARD_GPU_DRIVERS)),)
+ TARGET_HARDWARE_3D := true
+ TARGET_USES_HWC2 := true
+diff --git a/groups/graphics/auto/init.rc b/groups/graphics/auto/init.rc
+index bd69cb6..2cd754b 100755
+--- a/groups/graphics/auto/init.rc
++++ b/groups/graphics/auto/init.rc
+@@ -1,3 +1,23 @@
++on early-init
++    insmod /vendor/lib/modules/drm_ttm.ko
++    insmod /vendor/lib/modules/drm_buddy.ko
++    insmod /vendor/lib/modules/drm_display_helper.ko
++    insmod /vendor/lib/modules/mei.ko
++    insmod /vendor/lib/modules/mei-me.ko
++    insmod /vendor/lib/modules/mei-gsc.ko
++    insmod /vendor/lib/modules/mei_pxp.ko
++{{#graphics_xe}}
++    insmod /vendor/lib/modules/mei_gsc_proxy.ko
++    insmod /vendor/lib/modules/gpu-sched.ko
++    insmod /vendor/lib/modules/drm_gpuvm.ko
++    insmod /vendor/lib/modules/drm_suballoc_helper.ko
++    insmod /vendor/lib/modules/drm_gpusvm_helper.ko
++    insmod /vendor/lib/modules/xe.ko
++{{/graphics_xe}}
++{{#graphics_i915}}
++    insmod /vendor/lib/modules/i915.ko
++{{/graphics_i915}}
++
+ on init
+     chown system system /sys/class/backlight/intel_backlight/brightness
+     chown system system /sys/class/backlight/acpi_video0/brightness
+@@ -15,9 +35,5 @@ on post-fs-data
+ on boot
+    chown system graphics /sys/kernel/debug/sync/sw_sync
+    symlink /sys/kernel/debug/sync/sw_sync /dev/sw_sync
+-   insmod /vendor/lib/modules/mei.ko
+-   insmod /vendor/lib/modules/mei-me.ko
+    insmod /vendor/lib/modules/mei-txe.ko
+-   insmod /vendor/lib/modules/mei-gsc.ko
+-   insmod /vendor/lib/modules/mei_pxp.ko
+    insmod /vendor/lib/modules/mei_hdcp.ko
+diff --git a/groups/graphics/auto/init.rc.1 b/groups/graphics/auto/init.rc.1
+index e1c7478..3636200 100644
+--- a/groups/graphics/auto/init.rc.1
++++ b/groups/graphics/auto/init.rc.1
+@@ -38,3 +38,22 @@ on boot
+     chown media media /sys/kernel/debug/tracing/events/i915/i915_ring_wait_end/enable
+     chown media media /sys/devices/pci0000:00/0000:00:02.0/drm/card0/gt_max_freq_mhz
+     chown media media /sys/devices/pci0000:00/0000:00:02.0/drm/card0/gt_min_freq_mhz
++
++{{#graphics_xe}}
++    # Xe driver sysfs (tile0/gt0/freq0)
++    chown system system /sys/class/drm/card0/device/tile0/gt0/freq0/max_freq
++    chown system system /sys/class/drm/card0/device/tile0/gt0/freq0/min_freq
++    chown system system /sys/class/drm/card0/device/tile0/gt0/freq0/cur_freq
++    chown media media /sys/class/drm/card0/device/tile0/gt0/freq0/rp0_freq
++    chown media media /sys/class/drm/card0/device/tile0/gt0/freq0/rp1_freq
++    chown media media /sys/class/drm/card0/device/tile0/gt0/freq0/rpn_freq
++    chown media media /sys/class/drm/card0/device/tile0/gt0/freq0/act_freq
++    chown media media /sys/class/drm/card0/device/tile0/gt0/freq0/throttle/status
++    chown media media /sys/class/drm/card0/device/tile0/gt0/freq0/throttle/reason_pl1
++    chown media media /sys/class/drm/card0/device/tile0/gt0/freq0/throttle/reason_pl2
++    chown media media /sys/class/drm/card0/device/tile0/gt0/freq0/throttle/reason_pl4
++    chown media media /sys/class/drm/card0/device/tile0/gt0/freq0/throttle/reason_thermal
++    chmod 0664 /sys/class/drm/card0/device/tile0/gt0/freq0/max_freq
++    chmod 0664 /sys/class/drm/card0/device/tile0/gt0/freq0/min_freq
++    chmod 0444 /sys/class/drm/card0/device/tile0/gt0/freq0/act_freq
++{{/graphics_xe}}
+diff --git a/groups/graphics/auto/option.spec b/groups/graphics/auto/option.spec
+index 459f823..6208f14 100644
+--- a/groups/graphics/auto/option.spec
++++ b/groups/graphics/auto/option.spec
+@@ -6,3 +6,5 @@ enable_guc = true
+ acrn-guest = false
+ opencl_sepolicy = true
+ use_vulkan = true
++graphics_xe = true
++graphics_i915 = false
+diff --git a/groups/kernel/init.rc b/groups/kernel/init.rc
+index 4413d65..8e22fdb 100644
+--- a/groups/kernel/init.rc
++++ b/groups/kernel/init.rc
+@@ -88,4 +88,3 @@ on early-init
+ on fs
+ 	insmod /vendor/lib/modules/compat.ko
+ 	insmod /vendor/lib/modules/intel_vsec.ko
+-	insmod /vendor/lib/modules/i915_ag.ko
+-- 
+2.34.1
+

@@ -1,0 +1,23 @@
+From cdb2853ba8713c98c704b947c356e40c50cc42d1 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Thu, 12 Nov 2026 10:15:07 +0000
+Subject: [PATCH] Migration to MEMFD due to kernel update to 6.18.38
+
+Tracked-On: NIACP3-1704
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ groups/device-specific/caas/system.prop | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/groups/device-specific/caas/system.prop b/groups/device-specific/caas/system.prop
+index 89f2ad20..9486de16 100644
+--- a/groups/device-specific/caas/system.prop
++++ b/groups/device-specific/caas/system.prop
+@@ -45,3 +45,4 @@ bluetooth.profile.pan.panu.enabled=true
+ bluetooth.profile.pbap.server.enabled=true
+ bluetooth.profile.ccp.server.enabled=true
+ bluetooth.profile.vcp.controller.enabled=true
++sys.use_memfd=true
+-- 
+2.34.1
+

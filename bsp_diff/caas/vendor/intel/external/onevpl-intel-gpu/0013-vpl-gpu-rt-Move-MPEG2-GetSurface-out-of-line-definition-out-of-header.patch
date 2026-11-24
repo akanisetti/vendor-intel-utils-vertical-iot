@@ -1,0 +1,71 @@
+From be529d82e8ae750a1ecc668a6562683b6b67f264 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 10:32:12 +0000
+Subject: [PATCH] vpl-gpu-rt: Move MPEG2 GetSurface() out-of-line definition
+ out of the header
+
+A real flashfiles build failed at link time with 4 duplicate-symbol
+errors for MFXVideoENCODEMPEG2_HW (GetSurface() plus its vtable/
+typeinfo), coming from the same source location,
+mfx_mpeg2_encode_hw.h:190, in two different object files:
+libmfxsw_encode.o and mfx_mpeg2_encode_debug_hw.o (via
+libmfx_core_hw.a). Both link into the same libmfx-gen.so.
+
+The 0002 upgrade commit (1669afcc) added
+'MFX_PROPAGATE_GetSurface_VideoENCODE_Impl(MFXVideoENCODEMPEG2_HW);'
+directly in the header -- this macro expands to a non-inline,
+out-of-class member function definition, meant to be emitted into
+exactly one translation unit. Every other codec (av1, h264, hevc,
+mjpeg, vp9) invokes this same macro from its own single .cpp file, not
+from a header that can be included by more than one .cpp (an ODR
+violation once that happens, caught here because mfx_mpeg2_encode_hw.h
+is included by both libmfxsw_encode.cpp and
+mfx_mpeg2_encode_debug_hw.cpp).
+
+Moved the macro invocation to mfx_mpeg2_encode_hw.cpp (the header's
+natural single-TU counterpart, matching every other codec's existing
+convention), adding the one missing #include needed to see the class
+definition there.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ _studio/mfx_lib/ext/mpeg2/include/mfx_mpeg2_encode_hw.h | 2 --
+ _studio/mfx_lib/ext/mpeg2/src/mfx_mpeg2_encode_hw.cpp   | 9 ++-------
+ 2 files changed, 2 insertions(+), 9 deletions(-)
+
+diff --git a/_studio/mfx_lib/ext/mpeg2/include/mfx_mpeg2_encode_hw.h b/_studio/mfx_lib/ext/mpeg2/include/mfx_mpeg2_encode_hw.h
+index faa60ea9..ab8be751 100644
+--- a/_studio/mfx_lib/ext/mpeg2/include/mfx_mpeg2_encode_hw.h
++++ b/_studio/mfx_lib/ext/mpeg2/include/mfx_mpeg2_encode_hw.h
+@@ -187,7 +187,5 @@ private:
+ 
+ };
+ 
+-MFX_PROPAGATE_GetSurface_VideoENCODE_Impl(MFXVideoENCODEMPEG2_HW);
+-
+ #endif // MFX_ENABLE_MPEG2_VIDEO_ENCODE
+ #endif
+diff --git a/_studio/mfx_lib/ext/mpeg2/src/mfx_mpeg2_encode_hw.cpp b/_studio/mfx_lib/ext/mpeg2/src/mfx_mpeg2_encode_hw.cpp
+index 23d53b40..6c440ef4 100644
+--- a/_studio/mfx_lib/ext/mpeg2/src/mfx_mpeg2_encode_hw.cpp
++++ b/_studio/mfx_lib/ext/mpeg2/src/mfx_mpeg2_encode_hw.cpp
+@@ -24,13 +24,8 @@
+ 
+ #if defined (MFX_ENABLE_MPEG2_VIDEO_ENCODE)
+ #include "mfx_mpeg2_encode_utils_hw.h"
++#include "mfx_mpeg2_encode_hw.h"
+ 
+-
+-
+-
+-
+-
+-
+-
++MFX_PROPAGATE_GetSurface_VideoENCODE_Impl(MFXVideoENCODEMPEG2_HW);
+ 
+ #endif // MFX_ENABLE_MPEG2_VIDEO_ENCODE
+-- 
+2.34.1
+

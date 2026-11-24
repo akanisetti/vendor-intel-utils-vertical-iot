@@ -1,0 +1,75 @@
+From fa2f087eb0bbff91a0083ed87eaeb47320155fc2 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Sat, 17 Oct 2026 09:44:28 +0000
+Subject: [PATCH] vpl-gpu-rt: Wire in new UMC vvc_dec codec directory
+
+A real build failed with a fatal "'umc_vvc_mfx_utils.h' file not
+found" compiling mfx_vvc_dec_decode.cpp.
+
+VVC/H.266 is a genuinely new codec in this release (unlike the
+AV1/HEVC issues earlier in this series, which were renames/refactors
+of already-partially-wired code). A prior commit in this series wired
+vvc into MFX_LOCAL_DECODERS for _studio/mfx_lib/decode/vvc/ (a simple,
+flat src/include layout that needed no further change), but missed
+that VVC decode also depends on a parallel, separate UMC-side codec
+directory, _studio/shared/umc/codec/vvc_dec/, which neither
+UMC_DIRS_IMPL (_studio/mfx_lib/Android.mk, for the include path) nor
+MFX_CODEC_LOCAL_DIRS (_studio/shared/umc/codec/Android.mk, for both
+the include path and the actual libumc_codecs_hw source compilation)
+had ever listed, since this directory didn't exist before this
+version.
+
+Confirmed vvc_dec has the same simple include/+src/ layout as the
+other UMC decoders already in both lists, so the existing mechanisms
+apply directly. Checked every #include across vvc_dec's 9 .cpp/11 .h
+files: all resolve via already-wired generic UMC/MFX headers except
+mfx_pxp_vvc_nal_spl.h, which is correctly gated behind
+"#if defined(MFX_ENABLE_PXP)" -- a flag this series' mfx_features.h
+deliberately leaves undefined, matching BuildOptions.cmake's default
+(protected-content support is off), so no action needed there.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ _studio/mfx_lib/Android.mk          | 2 +-
+ _studio/shared/umc/codec/Android.mk | 4 +++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/_studio/mfx_lib/Android.mk b/_studio/mfx_lib/Android.mk
+index 655e123b..5313508e 100644
+--- a/_studio/mfx_lib/Android.mk
++++ b/_studio/mfx_lib/Android.mk
+@@ -212,7 +212,7 @@ UMC_DIRS := \
+     brc
+ 
+ UMC_DIRS_IMPL := \
+-    h265_dec h264_dec mpeg2_dec vc1_dec jpeg_dec vp9_dec av1_dec \
++    h265_dec h264_dec mpeg2_dec vc1_dec jpeg_dec vp9_dec av1_dec vvc_dec \
+     vc1_common jpeg_common color_space_converter
+ 
+ UMC_LOCAL_INCLUDES := \
+diff --git a/_studio/shared/umc/codec/Android.mk b/_studio/shared/umc/codec/Android.mk
+index fdf12dff..3474af5e 100644
+--- a/_studio/shared/umc/codec/Android.mk
++++ b/_studio/shared/umc/codec/Android.mk
+@@ -11,7 +11,8 @@ MFX_CODEC_LOCAL_DIRS := \
+     vc1_dec \
+     jpeg_dec \
+     vp9_dec \
+-    av1_dec
++    av1_dec \
++    vvc_dec
+ 
+ MFX_CODEC_LOCAL_SRC_FILES := \
+   $(patsubst $(LOCAL_PATH)/%, %, $(foreach dir, $(MFX_CODEC_LOCAL_DIRS), $(wildcard $(LOCAL_PATH)/$(dir)/src/*.cpp)))
+@@ -67,6 +68,7 @@ LOCAL_C_INCLUDES := \
+     $(LOCAL_PATH)/vc1_common/include \
+     $(LOCAL_PATH)/vc1_dec/include \
+     $(LOCAL_PATH)/vp9_dec/include \
++    $(LOCAL_PATH)/vvc_dec/include \
+     $(MFX_INCLUDES_INTERNAL_HW)
+ 
+ LOCAL_CFLAGS := \
+-- 
+2.34.1
+

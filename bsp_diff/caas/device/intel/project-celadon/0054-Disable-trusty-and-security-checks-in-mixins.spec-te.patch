@@ -1,0 +1,46 @@
+From ac6ba1477fc6a69ae566d8d176ebc81d592c778f Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Mon, 7 Sep 2026 11:27:08 +0000
+Subject: [PATCH 2/2] Disable trusty and security checks in mixins.spec
+ temporarily
+
+Tracked-On: NIACP3-1310
+Signed-off-by: Basil Chew <basil.chew@intel.com>
+---
+ caas/mixins.spec | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/caas/mixins.spec b/caas/mixins.spec
+index 4e8a3047..46a4370a 100755
+--- a/caas/mixins.spec
++++ b/caas/mixins.spec
+@@ -9,7 +9,7 @@ product.mk: device.mk
+ [groups]
+ kernel: gmin64(useprebuilt=false, loglevel=7, interactive_governor=false, relative_sleepstates=false, modules_in_bootimg=false, external_modules=,debug_modules=, use_bcmdhd=false, use_iwlwifi=false, extmod_platform=bxt, iwl_defconfig=, more_modules=true, linux_intel_lts2025_src_path=kernel/linux-intel-lts2025, linux_intel_lts2025_cfg_path=config-lts/linux-intel-lts2025)
+ disk-bus: auto
+-boot-arch: project-celadon(uefi_arch=x86_64,fastboot=efi,ignore_rsci=true,disable_watchdog=true,watchdog_parameters=10 30,verity_warning=false,txe_bind_root_of_trust=false,bootloader_block_size=4096,verity_mode=false,disk_encryption=false,file_encryption=true,metadata_encryption=true,fsverity=true,target=caas,ignore_not_applicable_reset=true,self_usb_device_mode_protocol=true,usb_storage=true,live_boot=true,userdata_checkpoint=true,data_use_f2fs=true,trusty=true)
++boot-arch: project-celadon(uefi_arch=x86_64,fastboot=efi,ignore_rsci=true,disable_watchdog=true,watchdog_parameters=10 30,verity_warning=false,txe_bind_root_of_trust=false,bootloader_block_size=4096,verity_mode=false,disk_encryption=false,file_encryption=true,metadata_encryption=true,fsverity=true,target=caas,ignore_not_applicable_reset=true,self_usb_device_mode_protocol=true,usb_storage=true,live_boot=true,userdata_checkpoint=true,data_use_f2fs=true,trusty=false)
+ staticlocation: true
+ sepolicy: enforcing
+ bluetooth: btusb(ivi=false)
+@@ -54,14 +54,14 @@ lights: true
+ power: true(power_throttle=true)
+ debug-usb-config: true(source_dev=dvcith-0-msc0)
+ intel_prop: true
+-tee: trusty(ref_target=celadon_64)
++tee: false
+ memtrack: true
+-tpm: true
++tpm: false
+ avx: auto
+ health: hal(ivi=false)
+ slot-ab: true
+ abota-fw: true
+-firststage-mount: true(trusty=true)
++firststage-mount: true(trusty=false)
+ cpuset: autocores
+ usb-init: true
+ usb-audio-init: false
+-- 
+2.34.1
+

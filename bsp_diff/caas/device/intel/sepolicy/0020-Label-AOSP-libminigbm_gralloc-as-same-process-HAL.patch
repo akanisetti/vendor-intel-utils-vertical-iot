@@ -1,0 +1,29 @@
+From 2703eacfc9a25b7cb88c0943ad020efad4712481 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 13 Oct 2026 02:27:23 +0000
+Subject: [PATCH] Label AOSP libminigbm_gralloc as same-process HAL
+
+AOSP external/minigbm builds mapper.minigbm against
+libminigbm_gralloc.so. mapper.minigbm is loaded into app processes,
+so its dependency must be labeled same_process_hal_file like the
+existing minigbm-intel libraries.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ vendor/file_contexts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/vendor/file_contexts b/vendor/file_contexts
+index 6737e9f..66899ce 100644
+--- a/vendor/file_contexts
++++ b/vendor/file_contexts
+@@ -3,4 +3,5 @@
+ /vendor/lib(64)?/hw/android\.hardware\.graphics\.mapper@4\.0-impl\.minigbm_intel\.so u:object_r:same_process_hal_file:s0
+ /vendor/lib(64)?/hw/mapper\.minigbm\.so u:object_r:same_process_hal_file:s0
+ /vendor/lib(64)?/libminigbm_gralloc_intel.so u:object_r:same_process_hal_file:s0
++/vendor/lib(64)?/libminigbm_gralloc\.so u:object_r:same_process_hal_file:s0
+ /vendor/lib(64)?/libminigbm_gralloc4_utils.so  u:object_r:same_process_hal_file:s0
+-- 
+2.34.1
+

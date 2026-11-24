@@ -1,0 +1,1688 @@
+From 5f2e5a8a9d8ebce71a5cffed5d01f5b5a662383b Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 3 Nov 2026 11:43:54 +0000
+Subject: [PATCH] graphic: Add hwc.info service (libhwcservice) for HDCP
+
+Intel hwc.info vndbinder service used by Intel HDCP clients, moved
+here from the drm_hwcomposer adaptation patch: it is hand-written
+binder code (hwc.IService, hwc.IControls, hwc.IDiagnostic), which
+Soong allows only under vendor/ and hardware/. Module names and
+install paths are unchanged:
+
+ - graphic/hwcservice/libhwcservice: client/server interface library
+   (from the Intel drm-hwcomposer fork, commits 56c1a5b, 5167ccd).
+ - graphic/hwcservice/libhwcservice/test: hwcservice_test.
+ - graphic/hwcservice/service: libhwcservicelib, dlopen()ed by
+   android.hardware.composer.hwc3-service.drm. It talks to the HWC
+   through the C ops table in hwcservice_ops.h
+   (libhwcservice_ops_headers, from the external/drm_hwcomposer Intel
+   patch "Add hwc.info service (libhwcservice) for HDCP").
+
+Changes compared with the fork:
+ - The requested HDCP content type is passed to the HWC.
+   HWCS_CP_CONTENT_TYPE1 (HDCP 2.2 or newer) no longer falls back to
+   HDCP 1.4; unknown content types are rejected with BAD_VALUE.
+ - Client proxies return the binder transaction error instead of
+   reading the empty reply (which reported failed disable and SRM
+   calls as success), and DumpOptions() writes the interface token the
+   service checks.
+ - SetHDCPSRM*() return INVALID_OPERATION: SRM programming is not
+   implemented, and the fork reported the discarded revocation list as
+   applied (OK).
+ - hwcservice_test: one action per run with explicit operands
+   (-h <connector> <type>, -i <connector>, -j <type>, -k), validated
+   before connecting; the fork read argv[0] without checking it and
+   derived the content type from the display number. Unused locals
+   from the fork's removed mode/color options are gone.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ graphic/hwcservice/libhwcservice/Android.bp   |  46 ++++
+ .../libhwcservice/hwcserviceapi.cpp           | 146 +++++++++++++
+ .../hwcservice/libhwcservice/hwcserviceapi.h  |  94 +++++++++
+ .../libhwcservice/hwcservicehelper.h          |  52 +++++
+ .../hwcservice/libhwcservice/icontrols.cpp    | 196 ++++++++++++++++++
+ graphic/hwcservice/libhwcservice/icontrols.h  |  55 +++++
+ .../hwcservice/libhwcservice/idiagnostic.cpp  | 157 ++++++++++++++
+ .../hwcservice/libhwcservice/idiagnostic.h    |  61 ++++++
+ graphic/hwcservice/libhwcservice/iservice.cpp | 185 +++++++++++++++++
+ graphic/hwcservice/libhwcservice/iservice.h   |  56 +++++
+ .../hwcservice/libhwcservice/test/Android.bp  |  36 ++++
+ .../libhwcservice/test/hwcservice_test.cpp    | 151 ++++++++++++++
+ graphic/hwcservice/service/Android.bp         |  41 ++++
+ graphic/hwcservice/service/hwcservice.cpp     | 162 +++++++++++++++
+ graphic/hwcservice/service/hwcservice.h       |  85 ++++++++
+ 15 files changed, 1523 insertions(+)
+ create mode 100644 graphic/hwcservice/libhwcservice/Android.bp
+ create mode 100644 graphic/hwcservice/libhwcservice/hwcserviceapi.cpp
+ create mode 100644 graphic/hwcservice/libhwcservice/hwcserviceapi.h
+ create mode 100644 graphic/hwcservice/libhwcservice/hwcservicehelper.h
+ create mode 100644 graphic/hwcservice/libhwcservice/icontrols.cpp
+ create mode 100644 graphic/hwcservice/libhwcservice/icontrols.h
+ create mode 100644 graphic/hwcservice/libhwcservice/idiagnostic.cpp
+ create mode 100644 graphic/hwcservice/libhwcservice/idiagnostic.h
+ create mode 100644 graphic/hwcservice/libhwcservice/iservice.cpp
+ create mode 100644 graphic/hwcservice/libhwcservice/iservice.h
+ create mode 100644 graphic/hwcservice/libhwcservice/test/Android.bp
+ create mode 100644 graphic/hwcservice/libhwcservice/test/hwcservice_test.cpp
+ create mode 100644 graphic/hwcservice/service/Android.bp
+ create mode 100644 graphic/hwcservice/service/hwcservice.cpp
+ create mode 100644 graphic/hwcservice/service/hwcservice.h
+
+diff --git a/graphic/hwcservice/libhwcservice/Android.bp b/graphic/hwcservice/libhwcservice/Android.bp
+new file mode 100644
+index 0000000..e98cd16
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/Android.bp
+@@ -0,0 +1,46 @@
++//
++// Copyright (C) 2026 Intel Corporation
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package {
++    default_applicable_licenses: ["Android-Apache-2.0"],
++}
++
++// Client/server interface of the Intel hwc.info vndbinder service
++// (HDCP control), ported from the Intel drm-hwcomposer fork. The interfaces
++// are hand-written binder code, which Soong allows under vendor/ only.
++cc_library_shared {
++    name: "libhwcservice",
++    srcs: [
++        "icontrols.cpp",
++        "idiagnostic.cpp",
++        "iservice.cpp",
++        "hwcserviceapi.cpp",
++    ],
++    cflags: [
++        "-fvisibility=default",
++        "-Wall",
++        "-Werror",
++        "-Wno-unused-parameter",
++    ],
++    shared_libs: [
++        "libbinder",
++        "liblog",
++        "libutils",
++    ],
++    header_libs: ["libcutils_headers"],
++    export_include_dirs: ["."],
++    vendor: true,
++    relative_install_path: "hw",
++}
+diff --git a/graphic/hwcservice/libhwcservice/hwcserviceapi.cpp b/graphic/hwcservice/libhwcservice/hwcserviceapi.cpp
+new file mode 100644
+index 0000000..79882f9
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/hwcserviceapi.cpp
+@@ -0,0 +1,146 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "hwcserviceapi.h"
++
++#include "icontrols.h"
++#include "iservice.h"
++
++#include <binder/IServiceManager.h>
++#include <binder/ProcessState.h>
++
++#include <utils/RefBase.h>
++#include <utils/String8.h>
++
++using namespace std;
++using namespace android;
++
++using namespace hwcomposer;
++
++extern "C" {
++struct HwcsContext {
++  sp<IService> mHwcService;
++  sp<IControls> mControls;
++};
++
++HWCSHANDLE HwcService_Connect() {
++  ProcessState::self()
++      ->startThreadPool();  // Required for starting binder threads
++  ALOGD("%s start",__FUNCTION__);
++  HwcsContext context;
++  context.mHwcService = interface_cast<IService>(
++      defaultServiceManager()->waitForService(String16(HWC_SERVICE_NAME)));
++  if (context.mHwcService == NULL) {
++    printf("%d\n", __LINE__);
++    ALOGE("%s context.mHwcService == NULL",__FUNCTION__);
++    return NULL;
++  }
++
++  ALOGD("%s IService ok",__FUNCTION__);
++  context.mControls = context.mHwcService->GetControls();
++  ALOGD("%s context.mControls",__FUNCTION__);
++  if (context.mControls == NULL) {
++    printf("%d\n", __LINE__);
++    ALOGE("%s context.mControls == NULL",__FUNCTION__);
++    return NULL;
++  }
++  printf("%d\n", __LINE__);
++  ALOGD("HDcPD_ %s ok",__FUNCTION__);
++  return new HwcsContext(context);
++}
++
++void HwcService_Disconnect(HWCSHANDLE hwcs) {
++  if (hwcs != NULL) {
++    delete static_cast<HwcsContext*>(hwcs);
++  }
++}
++
++const char* HwcService_GetHwcVersion(HWCSHANDLE hwcs) {
++  HwcsContext* pContext = static_cast<HwcsContext*>(hwcs);
++  if (!pContext) {
++    return NULL;
++  }
++
++  static String8 version = pContext->mHwcService->GetHwcVersion();
++  if (version.length() == 0) {
++    return NULL;
++  }
++  return version;
++}
++
++status_t HwcService_Video_EnableHDCPSession_ForDisplay(
++    HWCSHANDLE hwcs, uint32_t connector, EHwcsContentType content_type) {
++  HwcsContext* pContext = static_cast<HwcsContext*>(hwcs);
++  if (!pContext) {
++    return android::BAD_VALUE;
++  }
++
++  return pContext->mControls->EnableHDCPSessionForDisplay(connector,
++                                                          content_type);
++}
++
++status_t HwcService_Video_EnableHDCPSession_AllDisplays(
++    HWCSHANDLE hwcs, EHwcsContentType content_type) {
++  HwcsContext* pContext = static_cast<HwcsContext*>(hwcs);
++  if (!pContext) {
++    return android::BAD_VALUE;
++  }
++
++  return pContext->mControls->EnableHDCPSessionForAllDisplays(content_type);
++}
++
++status_t HwcService_Video_SetHDCPSRM_AllDisplays(HWCSHANDLE hwcs,
++                                                 const int8_t* SRM,
++                                                 uint32_t SRMLength) {
++  HwcsContext* pContext = static_cast<HwcsContext*>(hwcs);
++  if (!pContext) {
++    return android::BAD_VALUE;
++  }
++
++  return pContext->mControls->SetHDCPSRMForAllDisplays(SRM, SRMLength);
++}
++
++status_t HwcService_Video_SetHDCPSRM_ForDisplay(HWCSHANDLE hwcs,
++                                                uint32_t connector,
++                                                const int8_t* SRM,
++                                                uint32_t SRMLength) {
++  HwcsContext* pContext = static_cast<HwcsContext*>(hwcs);
++
++  if (!pContext) {
++    return android::BAD_VALUE;
++  }
++  return pContext->mControls->SetHDCPSRMForDisplay(connector, SRM, SRMLength);
++}
++
++status_t HwcService_Video_DisableHDCPSession_ForDisplay(HWCSHANDLE hwcs,
++                                                        uint32_t connector) {
++  HwcsContext* pContext = static_cast<HwcsContext*>(hwcs);
++  if (!pContext) {
++    return android::BAD_VALUE;
++  }
++
++  return pContext->mControls->DisableHDCPSessionForDisplay(connector);
++}
++
++status_t HwcService_Video_DisableHDCPSession_AllDisplays(HWCSHANDLE hwcs) {
++  HwcsContext* pContext = static_cast<HwcsContext*>(hwcs);
++  if (!pContext) {
++    return android::BAD_VALUE;
++  }
++
++  return pContext->mControls->DisableHDCPSessionForAllDisplays();
++}
++}
+diff --git a/graphic/hwcservice/libhwcservice/hwcserviceapi.h b/graphic/hwcservice/libhwcservice/hwcserviceapi.h
+new file mode 100644
+index 0000000..8a32ce4
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/hwcserviceapi.h
+@@ -0,0 +1,94 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef OS_ANDROID_HWC_HWCSERVICEAPI_H_
++#define OS_ANDROID_HWC_HWCSERVICEAPI_H_
++
++#include <stdint.h>
++
++#ifdef __cplusplus
++#include <vector>
++extern "C" {
++#endif
++
++// Header file version.  Please increment on any API additions.
++// NOTE: Additions ONLY! No API modifications allowed (to maintain
++// compatability).
++#define HWCS_VERSION 1
++
++typedef void *HWCSHANDLE;
++
++typedef enum _EHwcsBool {
++  HWCS_FALSE = 0,
++  HWCS_TRUE = 1,
++} EHwcsBool;
++
++typedef int status_t;
++
++HWCSHANDLE HwcService_Connect();
++void HwcService_Disconnect(HWCSHANDLE hwcs);
++
++const char *HwcService_GetHwcVersion(HWCSHANDLE hwcs);
++
++// DisplayControl
++// Enumerations for content type.
++typedef enum _EHwcsContentType {
++  HWCS_CP_CONTENT_TYPE0,  // Can support any HDCP specifiction.
++  HWCS_CP_CONTENT_TYPE1,  // Can support only HDCP 2.2 and higher specification.
++} EHwcsContentType;
++
++// VideoControl
++
++// The control enables the usage of HDCP for all planes supporting this feature
++// on display. Some displays can support latest HDCP specification and also
++// have ability to fallback to older specifications i.e. HDCP 2.2 and 1.4
++// in case latest specification cannot be supported for some reason. Type
++// of content can be set by content_type.
++status_t HwcService_Video_EnableHDCPSession_ForDisplay(
++    HWCSHANDLE hwcs, uint32_t connector, EHwcsContentType content_type);
++
++// The control enables the usage of HDCP for all planes supporting this
++// feature on all connected displays. Some displays can support latest HDCP
++// specification and also have ability to fallback to older specifications
++// i.e. HDCP 2.2 and 1.4 in case latest specification cannot be supported
++// for some reason. Type of content can be set by content_type.
++status_t HwcService_Video_EnableHDCPSession_AllDisplays(
++    HWCSHANDLE hwcs, EHwcsContentType content_type);
++
++// The control disables the usage of HDCP for all planes supporting this feature
++// on display.
++status_t HwcService_Video_DisableHDCPSession_ForDisplay(HWCSHANDLE hwcs,
++                                                        uint32_t connector);
++
++// The control disables the usage of HDCP for all planes supporting this feature
++// on all connected displays.
++status_t HwcService_Video_DisableHDCPSession_AllDisplays(HWCSHANDLE hwcs);
++
++// SRM (revocation list) updates are not supported yet: both calls return
++// INVALID_OPERATION and the SRM is not applied.
++status_t HwcService_Video_SetHDCPSRM_ForDisplay(HWCSHANDLE hwcs,
++                                                uint32_t connector,
++                                                const int8_t *SRM,
++                                                uint32_t SRMLengh);
++
++status_t HwcService_Video_SetHDCPSRM_AllDisplays(HWCSHANDLE hwcs,
++                                                 const int8_t *SRM,
++                                                 uint32_t SRMLengh);
++#ifdef __cplusplus
++}
++#endif
++
++#endif  // OS_ANDROID_HWC_HWCSERVICEAPI_H_
+diff --git a/graphic/hwcservice/libhwcservice/hwcservicehelper.h b/graphic/hwcservice/libhwcservice/hwcservicehelper.h
+new file mode 100644
+index 0000000..c1a0518
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/hwcservicehelper.h
+@@ -0,0 +1,52 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef OS_ANDROID_HWC_HWCSERVICEHELPER_H_
++#define OS_ANDROID_HWC_HWCSERVICEHELPER_H_
++
++// Inline c++ helpers to augment HwcServiceApi.h
++
++#include <hwcserviceapi.h>
++
++#if __ANDROID__
++#include <utils/RefBase.h>
++
++class HwcServiceConnection : public android::RefBase {
++ public:
++  HwcServiceConnection() {
++    mHwcs = HwcService_Connect();
++  }
++  ~HwcServiceConnection() {
++    HwcService_Disconnect(mHwcs);
++  }
++  operator HWCSHANDLE() {
++    return mHwcs;
++  }
++  HWCSHANDLE handle() {
++    return mHwcs;
++  }
++
++ private:
++  // Non-copyable.
++  HwcServiceConnection(HwcServiceConnection const &);
++  void operator=(HwcServiceConnection const &);
++
++  HWCSHANDLE mHwcs;
++};
++
++#endif  // __ANDROID__
++
++#endif  // OS_ANDROID_HWC_HWCSERVICEHELPER_H_
+diff --git a/graphic/hwcservice/libhwcservice/icontrols.cpp b/graphic/hwcservice/libhwcservice/icontrols.cpp
+new file mode 100644
+index 0000000..98293dc
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/icontrols.cpp
+@@ -0,0 +1,196 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "icontrols.h"
++#include <binder/IPCThreadState.h>
++#include <utils/String8.h>
++
++// For AID_ROOT & AID_MEDIA - various vendor code and utils include this despite
++// the path.
++#include <cutils/android_filesystem_config.h>
++
++namespace hwcomposer {
++
++using namespace android;
++
++/**
++ */
++class BpControls : public BpInterface<IControls> {
++ public:
++  BpControls(const sp<IBinder> &impl) : BpInterface<IControls>(impl) {
++  }
++
++  enum {
++    // ==============================================
++    // Public APIs - try not to reorder these
++
++    TRANSACT_VIDEO_ENABLE_HDCP_SESSION_FOR_DISPLAY = IBinder::FIRST_CALL_TRANSACTION,
++    TRANSACT_VIDEO_ENABLE_HDCP_SESSION_FOR_ALL_DISPLAYS,
++    TRANSACT_VIDEO_DISABLE_HDCP_SESSION_FOR_DISPLAY,
++    TRANSACT_VIDEO_DISABLE_HDCP_SESSION_FOR_ALL_DISPLAYS,
++    TRANSACT_VIDEO_SET_HDCP_SRM_FOR_ALL_DISPLAYS,
++    TRANSACT_VIDEO_SET_HDCP_SRM_FOR_DISPLAY,
++  };
++
++  status_t EnableHDCPSessionForDisplay(uint32_t connector,
++                                       EHwcsContentType content_type) override {
++    Parcel data;
++    Parcel reply;
++    data.writeInterfaceToken(IControls::getInterfaceDescriptor());
++    data.writeInt32(connector);
++    data.writeInt32(content_type);
++    status_t ret = remote()->transact(
++        TRANSACT_VIDEO_ENABLE_HDCP_SESSION_FOR_DISPLAY, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return ret;
++    }
++    return reply.readInt32();
++  }
++
++  status_t EnableHDCPSessionForAllDisplays(
++      EHwcsContentType content_type) override {
++    Parcel data;
++    Parcel reply;
++    data.writeInterfaceToken(IControls::getInterfaceDescriptor());
++    data.writeInt32(content_type);
++    status_t ret = remote()->transact(
++        TRANSACT_VIDEO_ENABLE_HDCP_SESSION_FOR_ALL_DISPLAYS, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return ret;
++    }
++    return reply.readInt32();
++  }
++
++  status_t DisableHDCPSessionForDisplay(uint32_t connector) override {
++    Parcel data;
++    Parcel reply;
++    data.writeInterfaceToken(IControls::getInterfaceDescriptor());
++    data.writeInt32(connector);
++    status_t ret = remote()->transact(
++        TRANSACT_VIDEO_DISABLE_HDCP_SESSION_FOR_DISPLAY, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return ret;
++    }
++    return reply.readInt32();
++  }
++
++  status_t DisableHDCPSessionForAllDisplays() override {
++    Parcel data;
++    Parcel reply;
++    data.writeInterfaceToken(IControls::getInterfaceDescriptor());
++    status_t ret = remote()->transact(
++        TRANSACT_VIDEO_DISABLE_HDCP_SESSION_FOR_ALL_DISPLAYS, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return ret;
++    }
++    return reply.readInt32();
++  }
++
++  status_t SetHDCPSRMForAllDisplays(const int8_t *SRM,
++                                    uint32_t SRMLength) override {
++    Parcel data;
++    Parcel reply;
++    data.writeInterfaceToken(IControls::getInterfaceDescriptor());
++    data.writeByteArray(SRMLength, (const uint8_t *)SRM);
++    status_t ret = remote()->transact(
++        TRANSACT_VIDEO_SET_HDCP_SRM_FOR_ALL_DISPLAYS, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return ret;
++    }
++    return reply.readInt32();
++  }
++
++  status_t SetHDCPSRMForDisplay(uint32_t connector, const int8_t *SRM,
++                                uint32_t SRMLength) override {
++    Parcel data;
++    Parcel reply;
++    data.writeInterfaceToken(IControls::getInterfaceDescriptor());
++    data.writeInt32(connector);
++    data.writeByteArray(SRMLength, (const uint8_t *)SRM);
++    status_t ret = remote()->transact(TRANSACT_VIDEO_SET_HDCP_SRM_FOR_DISPLAY,
++                                      data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return ret;
++    }
++    return reply.readInt32();
++  }
++};
++
++IMPLEMENT_META_INTERFACE(Controls, "hwc.controls");
++
++status_t BnControls::onTransact(uint32_t code, const Parcel &data,
++                                Parcel *reply, uint32_t flags) {
++  switch (code) {
++    case BpControls::TRANSACT_VIDEO_ENABLE_HDCP_SESSION_FOR_DISPLAY: {
++      CHECK_INTERFACE(IControls, data, reply);
++      uint32_t connector = data.readInt32();
++      EHwcsContentType content_type = (EHwcsContentType)data.readInt32();
++      status_t ret = this->EnableHDCPSessionForDisplay(connector, content_type);
++      reply->writeInt32(ret);
++      return NO_ERROR;
++    }
++    case BpControls::TRANSACT_VIDEO_ENABLE_HDCP_SESSION_FOR_ALL_DISPLAYS: {
++      CHECK_INTERFACE(IControls, data, reply);
++      EHwcsContentType content_type = (EHwcsContentType)data.readInt32();
++      status_t ret = this->EnableHDCPSessionForAllDisplays(content_type);
++      reply->writeInt32(ret);
++      return NO_ERROR;
++    }
++    case BpControls::TRANSACT_VIDEO_DISABLE_HDCP_SESSION_FOR_DISPLAY: {
++      CHECK_INTERFACE(IControls, data, reply);
++      uint32_t connector = data.readInt32();
++      status_t ret = this->DisableHDCPSessionForDisplay(connector);
++      reply->writeInt32(ret);
++      return NO_ERROR;
++    }
++    case BpControls::TRANSACT_VIDEO_DISABLE_HDCP_SESSION_FOR_ALL_DISPLAYS: {
++      CHECK_INTERFACE(IControls, data, reply);
++      status_t ret = this->DisableHDCPSessionForAllDisplays();
++      reply->writeInt32(ret);
++      return NO_ERROR;
++    }
++    case BpControls::TRANSACT_VIDEO_SET_HDCP_SRM_FOR_ALL_DISPLAYS: {
++      CHECK_INTERFACE(IControls, data, reply);
++      std::vector<int8_t> srmvec;
++      data.readByteVector(&srmvec);
++      status_t ret = this->SetHDCPSRMForAllDisplays(
++          (const int8_t *)(srmvec.data()), srmvec.size());
++      reply->writeInt32(ret);
++      return NO_ERROR;
++    }
++    case BpControls::TRANSACT_VIDEO_SET_HDCP_SRM_FOR_DISPLAY: {
++      CHECK_INTERFACE(IControls, data, reply);
++      std::vector<int8_t> srmvec;
++      uint32_t connector = data.readInt32();
++      data.readByteVector(&srmvec);
++      status_t ret = this->SetHDCPSRMForDisplay(
++          connector, (const int8_t *)(srmvec.data()), srmvec.size());
++      reply->writeInt32(ret);
++      return NO_ERROR;
++    }
++
++    default:
++      return BBinder::onTransact(code, data, reply, flags);
++  }
++}
++
++}  // namespace hwcomposer
+diff --git a/graphic/hwcservice/libhwcservice/icontrols.h b/graphic/hwcservice/libhwcservice/icontrols.h
+new file mode 100644
+index 0000000..df32f85
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/icontrols.h
+@@ -0,0 +1,55 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef OS_ANDROID_HWC_ICONTROLS_H_
++#define OS_ANDROID_HWC_ICONTROLS_H_
++
++#include <binder/IInterface.h>
++#include <binder/Parcel.h>
++#include "hwcserviceapi.h"
++
++namespace hwcomposer {
++
++class IControls : public android::IInterface {
++ public:
++  DECLARE_META_INTERFACE(Controls);
++
++  virtual status_t EnableHDCPSessionForDisplay(
++      uint32_t connector, EHwcsContentType content_type) = 0;
++
++  virtual status_t EnableHDCPSessionForAllDisplays(
++      EHwcsContentType content_type) = 0;
++
++  virtual status_t DisableHDCPSessionForDisplay(uint32_t connector) = 0;
++
++  virtual status_t DisableHDCPSessionForAllDisplays() = 0;
++
++  virtual status_t SetHDCPSRMForAllDisplays(const int8_t *SRM,
++                                            uint32_t SRMLength) = 0;
++
++  virtual status_t SetHDCPSRMForDisplay(uint32_t connector, const int8_t *SRM,
++                                        uint32_t SRMLength) = 0;
++};
++
++class BnControls : public android::BnInterface<IControls> {
++ public:
++  status_t onTransact(uint32_t, const android::Parcel &, android::Parcel *,
++                      uint32_t) override;
++};
++
++}  // namespace hwcomposer
++
++#endif  // OS_ANDROID_HWC_ICONTROLS_H_
+diff --git a/graphic/hwcservice/libhwcservice/idiagnostic.cpp b/graphic/hwcservice/libhwcservice/idiagnostic.cpp
+new file mode 100644
+index 0000000..3942542
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/idiagnostic.cpp
+@@ -0,0 +1,157 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "idiagnostic.h"
++#include <binder/IInterface.h>
++#include <binder/Parcel.h>
++#include <utils/String8.h>
++
++namespace hwcomposer {
++
++using namespace android;
++
++class BpDiagnostic : public BpInterface<IDiagnostic> {
++ public:
++  BpDiagnostic(const sp<IBinder>& impl)
++      : BpInterface<IDiagnostic>(impl), mReply(0) {
++  }
++
++  enum {
++    TRANSACT_READ_LOG_PARCEL = IBinder::FIRST_CALL_TRANSACTION,
++    TRANSACT_ENABLE_DISPLAY,
++    TRANSACT_DISABLE_DISPLAY,
++    TRANSACT_MASK_LAYER,
++    TRANSACT_DUMP_FRAMES
++  };
++
++  virtual ~BpDiagnostic() {
++    if (mReply)
++      delete mReply;
++  }
++
++  status_t ReadLogParcel(Parcel* reply) {
++    Parcel data;
++    data.writeInterfaceToken(IDiagnostic::getInterfaceDescriptor());
++    status_t ret = remote()->transact(TRANSACT_READ_LOG_PARCEL, data, reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++    }
++    return ret;
++  }
++
++  void EnableDisplay(uint32_t d) {
++    Parcel data, reply;
++    data.writeInterfaceToken(IDiagnostic::getInterfaceDescriptor());
++    data.writeInt32(d);
++    status_t ret = remote()->transact(TRANSACT_ENABLE_DISPLAY, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return;
++    }
++  }
++
++  void DisableDisplay(uint32_t d, bool bBlank) {
++    Parcel data, reply;
++    data.writeInterfaceToken(IDiagnostic::getInterfaceDescriptor());
++    data.writeInt32(d);
++    data.writeInt32(bBlank);
++    status_t ret = remote()->transact(TRANSACT_DISABLE_DISPLAY, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return;
++    }
++  }
++
++  void MaskLayer(uint32_t d, uint32_t layer, bool bHide) {
++    Parcel data, reply;
++    data.writeInterfaceToken(IDiagnostic::getInterfaceDescriptor());
++    data.writeInt32(d);
++    data.writeInt32(layer);
++    data.writeInt32(bHide);
++    status_t ret = remote()->transact(TRANSACT_MASK_LAYER, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return;
++    }
++  }
++
++  void DumpFrames(uint32_t d, int32_t frames, bool bSync) {
++    Parcel data, reply;
++    data.writeInterfaceToken(IDiagnostic::getInterfaceDescriptor());
++    data.writeInt32(d);
++    data.writeInt32(frames);
++    data.writeInt32(bSync);
++    status_t ret = remote()->transact(TRANSACT_DUMP_FRAMES, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return;
++    }
++  }
++
++ private:
++  Parcel* mReply;
++};
++
++IMPLEMENT_META_INTERFACE(Diagnostic, "hwc.diagnostic");
++
++status_t BnDiagnostic::onTransact(uint32_t code, const Parcel& data,
++                                  Parcel* reply, uint32_t flags) {
++  switch (code) {
++    case BpDiagnostic::TRANSACT_READ_LOG_PARCEL: {
++      CHECK_INTERFACE(IDiagnostic, data, reply);
++      status_t err = ReadLogParcel(reply);
++      return err;
++    }
++
++    case BpDiagnostic::TRANSACT_ENABLE_DISPLAY: {
++      CHECK_INTERFACE(IDiagnostic, data, reply);
++      uint32_t d = data.readInt32();
++      EnableDisplay(d);
++      return NO_ERROR;
++    }
++
++    case BpDiagnostic::TRANSACT_DISABLE_DISPLAY: {
++      CHECK_INTERFACE(IDiagnostic, data, reply);
++      uint32_t d = data.readInt32();
++      bool bBlank = data.readInt32();
++      DisableDisplay(d, bBlank);
++      return NO_ERROR;
++    }
++
++    case BpDiagnostic::TRANSACT_MASK_LAYER: {
++      CHECK_INTERFACE(IDiagnostic, data, reply);
++      uint32_t d = data.readInt32();
++      uint32_t layer = data.readInt32();
++      bool bHide = data.readInt32();
++      MaskLayer(d, layer, bHide);
++      return NO_ERROR;
++    }
++
++    case BpDiagnostic::TRANSACT_DUMP_FRAMES: {
++      CHECK_INTERFACE(IDiagnostic, data, reply);
++      uint32_t d = data.readInt32();
++      int32_t frames = data.readInt32();
++      bool bSync = data.readInt32();
++      DumpFrames(d, frames, bSync);
++      return NO_ERROR;
++    }
++
++    default:
++      return BBinder::onTransact(code, data, reply, flags);
++  }
++}
++
++}  // namespace hwcomposer
+diff --git a/graphic/hwcservice/libhwcservice/idiagnostic.h b/graphic/hwcservice/libhwcservice/idiagnostic.h
+new file mode 100644
+index 0000000..5bd8aa2
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/idiagnostic.h
+@@ -0,0 +1,61 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef OS_ANDROID_HWC_IDIAGNOSTIC_H
++#define OS_ANDROID_HWC_IDIAGNOSTIC_H
++
++#include <binder/IInterface.h>
++#include <binder/Parcel.h>
++
++namespace hwcomposer {
++
++using namespace android;
++
++class IDiagnostic : public IInterface {
++ public:
++  DECLARE_META_INTERFACE(Diagnostic);
++
++  // This class is shared with the validation team. Take care when changing it
++  // that
++  // the validation tests understand how we have changed this.
++  enum {
++    eLogTruncated =
++        101,  // Status to indicate log entries have been overwritten
++  };
++
++  virtual status_t ReadLogParcel(android::Parcel* reply) = 0;
++
++  // Debug API
++  virtual void EnableDisplay(uint32_t d) = 0;
++  virtual void DisableDisplay(uint32_t d, bool bBlank) = 0;
++  virtual void MaskLayer(uint32_t d, uint32_t layer, bool bHide) = 0;
++  virtual void DumpFrames(uint32_t d, int32_t frames, bool bSync) = 0;
++};
++
++class BnDiagnostic : public android::BnInterface<IDiagnostic> {
++ public:
++  BnDiagnostic() {
++  }
++
++  virtual ~BnDiagnostic() {
++  }
++
++  status_t onTransact(uint32_t, const Parcel&, Parcel*, uint32_t) override;
++};
++
++}  // namespace hwcomposer
++
++#endif  // OS_ANDROID_HWC_IDIAGNOSTIC_H
+diff --git a/graphic/hwcservice/libhwcservice/iservice.cpp b/graphic/hwcservice/libhwcservice/iservice.cpp
+new file mode 100644
+index 0000000..633ec54
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/iservice.cpp
+@@ -0,0 +1,185 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "iservice.h"
++#include "icontrols.h"
++#include "idiagnostic.h"
++
++#include <utils/String8.h>
++
++namespace hwcomposer {
++
++using namespace android;
++
++/**
++ */
++class BpService : public BpInterface<IService> {
++ public:
++  BpService(const sp<IBinder>& impl) : BpInterface<IService>(impl) {
++  }
++
++  enum {
++    // ==============================================
++    // Public APIs - try not to reorder these
++
++    GET_HWC_VERSION = IBinder::FIRST_CALL_TRANSACTION,
++
++    // Dump options and current settings to logcat.
++    DUMP_OPTIONS,
++
++    // Override an option.
++    SET_OPTION,
++
++    // Disable hwc logviewer output to logcat
++    DISABLE_LOG_TO_LOGCAT = 98,
++    // Enable hwclogviewer output to logcat
++    ENABLE_LOG_TO_LOGCAT = 99,
++
++    // accessor for IBinder interface functions
++    TRANSACT_GET_DIAGNOSTIC = 100,
++    TRANSACT_GET_CONTROLS,
++  };
++
++  String8 GetHwcVersion() override {
++    Parcel data, reply;
++    data.writeInterfaceToken(IService::getInterfaceDescriptor());
++    status_t ret = remote()->transact(GET_HWC_VERSION, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return String8();
++    }
++    return reply.readString8();
++  }
++
++  void DumpOptions(void) override {
++    Parcel data, reply;
++    data.writeInterfaceToken(IService::getInterfaceDescriptor());
++    status_t ret = remote()->transact(DUMP_OPTIONS, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++    }
++  }
++
++  status_t SetOption(String8 option, String8 optionValue) override {
++    Parcel data, reply;
++    data.writeInterfaceToken(IService::getInterfaceDescriptor());
++    data.writeString16(String16(option));
++    data.writeString16(String16(optionValue));
++    status_t ret = remote()->transact(SET_OPTION, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return ret;
++    }
++    return reply.readInt32();
++  }
++
++  status_t EnableLogviewToLogcat(bool enable = true) override {
++    Parcel data, reply;
++    data.writeInterfaceToken(IService::getInterfaceDescriptor());
++    status_t ret = remote()->transact(
++        enable ? ENABLE_LOG_TO_LOGCAT : DISABLE_LOG_TO_LOGCAT, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return ret;
++    }
++    return reply.readInt32();
++  }
++
++  sp<IDiagnostic> GetDiagnostic() override {
++    Parcel data;
++    Parcel reply;
++    data.writeInterfaceToken(getInterfaceDescriptor());
++    status_t ret = remote()->transact(TRANSACT_GET_DIAGNOSTIC, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return nullptr;
++    }
++    return interface_cast<IDiagnostic>(reply.readStrongBinder());
++  }
++
++  sp<IControls> GetControls() override {
++    Parcel data;
++    Parcel reply;
++    data.writeInterfaceToken(getInterfaceDescriptor());
++    status_t ret = remote()->transact(TRANSACT_GET_CONTROLS, data, &reply);
++    if (ret != NO_ERROR) {
++      ALOGW("%s() transact failed: %d", __FUNCTION__, ret);
++      return nullptr;
++    }
++    return interface_cast<IControls>(reply.readStrongBinder());
++  }
++};
++
++IMPLEMENT_META_INTERFACE(Service, "hwc.IService");
++
++status_t BnService::onTransact(uint32_t code, const Parcel& data, Parcel* reply,
++                               uint32_t flags) {
++  switch (code) {
++    case BpService::GET_HWC_VERSION: {
++      CHECK_INTERFACE(IService, data, reply);
++      reply->writeString8(GetHwcVersion());
++      return NO_ERROR;
++    }
++
++    case BpService::SET_OPTION: {
++      CHECK_INTERFACE(IService, data, reply);
++      String16 option = data.readString16();
++      String16 optionValue = data.readString16();
++      status_t ret = SetOption(String8(option), String8(optionValue));
++      reply->writeInt32(ret);
++      return NO_ERROR;
++    }
++
++    case BpService::DUMP_OPTIONS: {
++      CHECK_INTERFACE(IService, data, reply);
++      DumpOptions();
++      return NO_ERROR;
++    }
++
++    case BpService::DISABLE_LOG_TO_LOGCAT: {
++      CHECK_INTERFACE(IService, data, reply);
++      status_t ret = EnableLogviewToLogcat(false);
++      reply->writeInt32(ret);
++      return NO_ERROR;
++    }
++
++    case BpService::ENABLE_LOG_TO_LOGCAT: {
++      CHECK_INTERFACE(IService, data, reply);
++      status_t ret = EnableLogviewToLogcat();
++      reply->writeInt32(ret);
++      return NO_ERROR;
++    }
++
++    case BpService::TRANSACT_GET_DIAGNOSTIC: {
++      CHECK_INTERFACE(IService, data, reply);
++      sp<IBinder> b = IInterface::asBinder(this->GetDiagnostic());
++      reply->writeStrongBinder(b);
++      return NO_ERROR;
++    }
++
++    case BpService::TRANSACT_GET_CONTROLS: {
++      CHECK_INTERFACE(IService, data, reply);
++      sp<IBinder> b = IInterface::asBinder(this->GetControls());
++      reply->writeStrongBinder(b);
++      return NO_ERROR;
++    }
++
++    default:
++      return BBinder::onTransact(code, data, reply, flags);
++  }
++}
++
++}  // namespace hwcomposer
+diff --git a/graphic/hwcservice/libhwcservice/iservice.h b/graphic/hwcservice/libhwcservice/iservice.h
+new file mode 100644
+index 0000000..608f8d6
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/iservice.h
+@@ -0,0 +1,56 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef OS_ANDROID_ISERVICE_H_
++#define OS_ANDROID_ISERVICE_H_
++
++#include <binder/IInterface.h>
++#include <binder/Parcel.h>
++
++#define HWC_SERVICE_NAME "hwc.info"
++
++namespace hwcomposer {
++
++class IControls;
++class IDiagnostic;
++
++using namespace android;
++
++/** Maintenance interface to control HWC activity.
++ */
++class IService : public IInterface {
++ public:
++  DECLARE_META_INTERFACE(Service);
++
++  virtual sp<IDiagnostic> GetDiagnostic() = 0;
++  virtual sp<IControls> GetControls() = 0;
++
++  virtual String8 GetHwcVersion() = 0;
++  virtual void DumpOptions(void) = 0;
++  virtual status_t SetOption(String8 option, String8 optionValue) = 0;
++  virtual status_t EnableLogviewToLogcat(bool enable = true) = 0;
++};
++
++/**
++ */
++class BnService : public BnInterface<IService> {
++ public:
++  status_t onTransact(uint32_t, const Parcel&, Parcel*, uint32_t) override;
++};
++
++}  // namespace hwcomposer
++
++#endif  // OS_ANDROID_ISERVICE_H_
+diff --git a/graphic/hwcservice/libhwcservice/test/Android.bp b/graphic/hwcservice/libhwcservice/test/Android.bp
+new file mode 100644
+index 0000000..fa5c9d0
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/test/Android.bp
+@@ -0,0 +1,36 @@
++//
++// Copyright (C) 2026 Intel Corporation
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package {
++    default_applicable_licenses: ["Android-Apache-2.0"],
++}
++
++cc_binary {
++    name: "hwcservice_test",
++    srcs: ["hwcservice_test.cpp"],
++    cflags: [
++        "-DUSE_PROCESS_STATE",
++        "-Wall",
++        "-Werror",
++        "-Wno-unused-parameter",
++    ],
++    shared_libs: [
++        "libbinder",
++        "libhwcservice",
++        "liblog",
++        "libutils",
++    ],
++    vendor: true,
++}
+diff --git a/graphic/hwcservice/libhwcservice/test/hwcservice_test.cpp b/graphic/hwcservice/libhwcservice/test/hwcservice_test.cpp
+new file mode 100644
+index 0000000..8b40cd9
+--- /dev/null
++++ b/graphic/hwcservice/libhwcservice/test/hwcservice_test.cpp
+@@ -0,0 +1,151 @@
++/*
++ * Copyright (C) 2015 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <binder/IServiceManager.h>
++#include <binder/ProcessState.h>
++#include <binder/TextOutput.h>
++#include <utils/String8.h>
++#include <cerrno>
++#include <cinttypes>
++#include <climits>
++#include <cstdlib>
++#include "hwcserviceapi.h"
++#include "iservice.h"
++
++using namespace android;
++using namespace hwcomposer;
++
++static void usage() {
++  aout << "Usage: hwcservice_test <option>\n"
++          "\t-h <connector> <type>: Enable HDCP on the display driven by DRM\n"
++          "\t                       connector <connector>.\n"
++          "\t-i <connector>:        Disable HDCP on that display.\n"
++          "\t-j <type>:             Enable HDCP on all displays.\n"
++          "\t-k:                    Disable HDCP on all displays.\n"
++          "\t<type>: 0 = Content Type 0 (any HDCP version, HDCP 1.4 fallback),\n"
++          "\t        1 = Content Type 1 (HDCP 2.2 or newer only).\n";
++  exit(-1);
++}
++
++static bool parse_uint(const char *arg, uint32_t *out) {
++  if (arg == nullptr || *arg == '\0')
++    return false;
++  char *end = nullptr;
++  errno = 0;
++  const unsigned long value = strtoul(arg, &end, 0);
++  if (errno != 0 || *end != '\0' || value > UINT32_MAX)
++    return false;
++  *out = static_cast<uint32_t>(value);
++  return true;
++}
++
++static bool parse_content_type(const char *arg, EHwcsContentType *out) {
++  uint32_t value = 0;
++  if (!parse_uint(arg, &value) || value > 1)
++    return false;
++  *out = value == 0 ? HWCS_CP_CONTENT_TYPE0 : HWCS_CP_CONTENT_TYPE1;
++  return true;
++}
++
++int main(int argc, char** argv) {
++  int action = 0;
++  int ch;
++
++  while ((ch = getopt(argc, argv, "hijk")) != -1) {
++    switch (ch) {
++      case 'h':
++      case 'i':
++      case 'j':
++      case 'k':
++        if (action != 0)
++          usage();  // one action per invocation
++        action = ch;
++        break;
++      default:
++        usage();
++    }
++  }
++  argc -= optind;
++  argv += optind;
++
++  // Validate the operands before connecting to the service.
++  uint32_t connector = 0;
++  EHwcsContentType content_type = HWCS_CP_CONTENT_TYPE0;
++  switch (action) {
++    case 'h':
++      if (argc != 2 || !parse_uint(argv[0], &connector) ||
++          !parse_content_type(argv[1], &content_type))
++        usage();
++      break;
++    case 'i':
++      if (argc != 1 || !parse_uint(argv[0], &connector))
++        usage();
++      break;
++    case 'j':
++      if (argc != 1 || !parse_content_type(argv[0], &content_type))
++        usage();
++      break;
++    case 'k':
++      if (argc != 0)
++        usage();
++      break;
++    default:
++      usage();
++  }
++
++#ifdef USE_PROCESS_STATE
++  // Initialize ProcessState with /dev/vndbinder as HwcService is
++  // in the vndbinder context
++  android::ProcessState::initWithDriver("/dev/vndbinder");
++#endif
++
++  // Connect to HWC service
++  HWCSHANDLE hwcs = HwcService_Connect();
++  if (hwcs == NULL) {
++    aout << "Could not connect to service\n";
++    return -1;
++  }
++
++  status_t ret = OK;
++  switch (action) {
++    case 'h':
++      aout << "Enabling HDCP (content type " << content_type
++           << ") for connector " << connector << endl;
++      ret = HwcService_Video_EnableHDCPSession_ForDisplay(hwcs, connector,
++                                                          content_type);
++      break;
++    case 'i':
++      aout << "Disabling HDCP for connector " << connector << endl;
++      ret = HwcService_Video_DisableHDCPSession_ForDisplay(hwcs, connector);
++      break;
++    case 'j':
++      aout << "Enabling HDCP (content type " << content_type
++           << ") for all displays" << endl;
++      ret = HwcService_Video_EnableHDCPSession_AllDisplays(hwcs, content_type);
++      break;
++    case 'k':
++      aout << "Disabling HDCP for all displays" << endl;
++      ret = HwcService_Video_DisableHDCPSession_AllDisplays(hwcs);
++      break;
++  }
++
++  HwcService_Disconnect(hwcs);
++  if (ret != OK) {
++    aout << "Request failed: " << ret << endl;
++    return -1;
++  }
++  return 0;
++}
+diff --git a/graphic/hwcservice/service/Android.bp b/graphic/hwcservice/service/Android.bp
+new file mode 100644
+index 0000000..fbe8e4b
+--- /dev/null
++++ b/graphic/hwcservice/service/Android.bp
+@@ -0,0 +1,41 @@
++//
++// Copyright (C) 2026 Intel Corporation
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package {
++    default_applicable_licenses: ["Android-Apache-2.0"],
++}
++
++// Intel hwc.info vndbinder service, dlopen()ed by
++// android.hardware.composer.hwc3-service.drm. The HWC side and the
++// hwcservice_ops.h interface are in external/drm_hwcomposer (Intel patch
++// "Add hwc.info service (libhwcservice) for HDCP").
++cc_library_shared {
++    name: "libhwcservicelib",
++    srcs: ["hwcservice.cpp"],
++    cflags: [
++        "-Wall",
++        "-Werror",
++    ],
++    shared_libs: [
++        "libbinder",
++        "libhwcservice",
++        "liblog",
++        "libutils",
++    ],
++    header_libs: ["libhwcservice_ops_headers"],
++    export_include_dirs: ["."],
++    vendor: true,
++    relative_install_path: "hw",
++}
+diff --git a/graphic/hwcservice/service/hwcservice.cpp b/graphic/hwcservice/service/hwcservice.cpp
+new file mode 100644
+index 0000000..d7fb1a6
+--- /dev/null
++++ b/graphic/hwcservice/service/hwcservice.cpp
+@@ -0,0 +1,162 @@
++/*
++ * Copyright (C) 2026 Intel Corporation
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#define LOG_TAG "hwc-info-service"
++
++#include "hwcservice.h"
++
++#include <binder/IPCThreadState.h>
++#include <binder/IServiceManager.h>
++#include <binder/ProcessState.h>
++#include <log/log.h>
++
++namespace android {
++
++bool HwcService::Start() {
++  const sp<IServiceManager> sm(defaultServiceManager());
++  if (sm == nullptr ||
++      sm->addService(String16(HWC_SERVICE_NAME), this, false) != OK) {
++    ALOGE("Failed to start %s service", HWC_SERVICE_NAME);
++    return false;
++  }
++  ALOGI("Started %s service", HWC_SERVICE_NAME);
++  return true;
++}
++
++String8 HwcService::GetHwcVersion() {
++  return String8("");
++}
++
++status_t HwcService::SetOption(String8 /*option*/, String8 /*optionValue*/) {
++  return OK;
++}
++
++void HwcService::DumpOptions() {
++}
++
++status_t HwcService::EnableLogviewToLogcat(bool /*enable*/) {
++  return OK;
++}
++
++sp<IDiagnostic> HwcService::GetDiagnostic() {
++  const std::lock_guard lock(lock_);
++  if (diagnostic_ == nullptr)
++    diagnostic_ = new Diagnostic();
++  return diagnostic_;
++}
++
++sp<IControls> HwcService::GetControls() {
++  return new Controls(ops_);
++}
++
++status_t HwcService::Diagnostic::ReadLogParcel(Parcel * /*parcel*/) {
++  return OK;
++}
++
++void HwcService::Diagnostic::EnableDisplay(uint32_t /*d*/) {
++}
++
++void HwcService::Diagnostic::DisableDisplay(uint32_t /*d*/, bool /*bBlank*/) {
++}
++
++void HwcService::Diagnostic::MaskLayer(uint32_t /*d*/, uint32_t /*layer*/,
++                                       bool /*bHide*/) {
++}
++
++void HwcService::Diagnostic::DumpFrames(uint32_t /*d*/, int32_t /*frames*/,
++                                        bool /*bSync*/) {
++}
++
++status_t HwcService::Controls::SetHdcp(uint32_t connector, bool all_displays,
++                                       bool enable,
++                                       EHwcsContentType content_type) {
++  if (ops_.set_hdcp == nullptr)
++    return INVALID_OPERATION;
++
++  HwcServiceHdcpContentType type;
++  switch (content_type) {
++    case HWCS_CP_CONTENT_TYPE0:
++      type = HWC_SERVICE_HDCP_CONTENT_TYPE0;
++      break;
++    case HWCS_CP_CONTENT_TYPE1:
++      type = HWC_SERVICE_HDCP_CONTENT_TYPE1;
++      break;
++    default:
++      ALOGE("Unknown HDCP content type %d", content_type);
++      return BAD_VALUE;
++  }
++
++  return ops_.set_hdcp(ops_.ctx, connector, all_displays, enable, type)
++             ? OK
++             : BAD_VALUE;
++}
++
++/*
++ * Type 0: the HWC tries HDCP 2.2+ first and falls back to HDCP 1.4.
++ * Type 1: HDCP 2.2+ only; the session fails instead of falling back.
++ */
++status_t HwcService::Controls::EnableHDCPSessionForDisplay(
++    uint32_t connector, EHwcsContentType content_type) {
++  return SetHdcp(connector, false, true, content_type);
++}
++
++status_t HwcService::Controls::EnableHDCPSessionForAllDisplays(
++    EHwcsContentType content_type) {
++  return SetHdcp(0, true, true, content_type);
++}
++
++status_t HwcService::Controls::DisableHDCPSessionForDisplay(
++    uint32_t connector) {
++  return SetHdcp(connector, false, false, HWCS_CP_CONTENT_TYPE0);
++}
++
++status_t HwcService::Controls::DisableHDCPSessionForAllDisplays() {
++  return SetHdcp(0, true, false, HWCS_CP_CONTENT_TYPE0);
++}
++
++/*
++ * SRM (System Renewability Message) programming is not implemented: the
++ * revocation list cannot be handed to the kernel, so report the request as
++ * unsupported instead of claiming success.
++ */
++status_t HwcService::Controls::SetHDCPSRMForAllDisplays(
++    const int8_t * /*SRM*/, uint32_t /*SRMLength*/) {
++  ALOGW("HDCP SRM update is not supported");
++  return INVALID_OPERATION;
++}
++
++status_t HwcService::Controls::SetHDCPSRMForDisplay(uint32_t /*connector*/,
++                                                    const int8_t * /*SRM*/,
++                                                    uint32_t /*SRMLength*/) {
++  ALOGW("HDCP SRM update is not supported");
++  return INVALID_OPERATION;
++}
++
++}  // namespace android
++
++void StartHwcInfoService(const struct HwcServiceOps *ops) {
++  if (ops == nullptr)
++    return;
++
++  const android::sp<android::HwcService> service = new android::HwcService(
++      *ops);
++  if (!service->Start())
++    return;
++
++  /* vendor libbinder: /dev/vndbinder */
++  android::ProcessState::self()->startThreadPool();
++  android::IPCThreadState::self()->joinThreadPool();
++}
+diff --git a/graphic/hwcservice/service/hwcservice.h b/graphic/hwcservice/service/hwcservice.h
+new file mode 100644
+index 0000000..3d73692
+--- /dev/null
++++ b/graphic/hwcservice/service/hwcservice.h
+@@ -0,0 +1,85 @@
++/*
++ * Copyright (C) 2026 Intel Corporation
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <binder/IInterface.h>
++#include <utils/String8.h>
++
++#include <mutex>
++
++#include "hwcservice_ops.h"
++#include "icontrols.h"
++#include "idiagnostic.h"
++#include "iservice.h"
++
++namespace android {
++
++using namespace hwcomposer;
++
++class HwcService : public BnService {
++ public:
++  class Diagnostic : public BnDiagnostic {
++   public:
++    status_t ReadLogParcel(Parcel *parcel) override;
++    void EnableDisplay(uint32_t d) override;
++    void DisableDisplay(uint32_t d, bool bBlank) override;
++    void MaskLayer(uint32_t d, uint32_t layer, bool bHide) override;
++    void DumpFrames(uint32_t d, int32_t frames, bool bSync) override;
++  };
++
++  class Controls : public BnControls {
++   public:
++    explicit Controls(const HwcServiceOps &ops) : ops_(ops) {
++    }
++
++    status_t EnableHDCPSessionForDisplay(
++        uint32_t connector, EHwcsContentType content_type) override;
++    status_t EnableHDCPSessionForAllDisplays(
++        EHwcsContentType content_type) override;
++    status_t DisableHDCPSessionForDisplay(uint32_t connector) override;
++    status_t DisableHDCPSessionForAllDisplays() override;
++    status_t SetHDCPSRMForAllDisplays(const int8_t *SRM,
++                                      uint32_t SRMLength) override;
++    status_t SetHDCPSRMForDisplay(uint32_t connector, const int8_t *SRM,
++                                  uint32_t SRMLength) override;
++
++   private:
++    status_t SetHdcp(uint32_t connector, bool all_displays, bool enable,
++                     EHwcsContentType content_type);
++
++    const HwcServiceOps ops_;
++  };
++
++  explicit HwcService(const HwcServiceOps &ops) : ops_(ops) {
++  }
++
++  bool Start();
++
++  sp<IDiagnostic> GetDiagnostic() override;
++  sp<IControls> GetControls() override;
++  String8 GetHwcVersion() override;
++  void DumpOptions() override;
++  status_t SetOption(String8 option, String8 optionValue) override;
++  status_t EnableLogviewToLogcat(bool enable) override;
++
++ private:
++  const HwcServiceOps ops_;
++  std::mutex lock_;
++  sp<IDiagnostic> diagnostic_;
++};
++
++}  // namespace android
+-- 
+2.34.1
+

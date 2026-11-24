@@ -1,0 +1,59 @@
+From 9f3fe4a8ea1ad726d7c14b41f7edf21958d25321 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 07:59:12 +0000
+Subject: [PATCH] vpl-gpu-rt: Revert va_drm.h include path to this fork's
+ nested libva layout
+
+A real flashfiles build failed with a fatal file-not-found error:
+libmfxsw.cpp includes "va/va_drm.h", which upstream intel-onevpl-26.2.3
+changed from "va/drm/va_drm.h" (commit 1669afcc, enabling the upstream
+release tag) -- assuming vanilla upstream libva's flat
+<includedir>/va/va_drm.h install layout.
+
+This fork's libva (hardware/intel/external/libva) keeps va_drm.h at its
+original source-tree path, va/drm/va_drm.h, and exports it to
+consumers via that exact include dir (Android.bp's libva_headers
+export_include_dirs + this module's own -I flags). No -I flag in this
+module's build resolves the "va/" prefix form against that layout.
+
+Reverted both affected includes (libmfxsw.cpp,
+libmfx_core_vaapi.cpp) back to "va/drm/va_drm.h" to match the actual
+on-disk layout; this is the only form that resolves against existing
+-I flags.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ _studio/mfx_lib/shared/src/libmfxsw.cpp  | 2 +-
+ _studio/shared/src/libmfx_core_vaapi.cpp | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/_studio/mfx_lib/shared/src/libmfxsw.cpp b/_studio/mfx_lib/shared/src/libmfxsw.cpp
+index eb2ea154..f410cf98 100644
+--- a/_studio/mfx_lib/shared/src/libmfxsw.cpp
++++ b/_studio/mfx_lib/shared/src/libmfxsw.cpp
+@@ -31,7 +31,7 @@
+ #include <unistd.h>
+ #include <fcntl.h>
+ #include <xf86drm.h>
+-#include "va/va_drm.h"
++#include "va/drm/va_drm.h"
+ #include <i915_drm.h>
+ 
+ #include "mediasdk_version.h"
+diff --git a/_studio/shared/src/libmfx_core_vaapi.cpp b/_studio/shared/src/libmfx_core_vaapi.cpp
+index 6c3dadc8..5fc62c99 100644
+--- a/_studio/shared/src/libmfx_core_vaapi.cpp
++++ b/_studio/shared/src/libmfx_core_vaapi.cpp
+@@ -44,7 +44,7 @@
+ 
+ #include "va/va.h"
+ #include <va/va_backend.h>
+-#include "va/va_drm.h"
++#include "va/drm/va_drm.h"
+ #include <unistd.h>
+ #include <fcntl.h>
+ 
+-- 
+2.34.1
+

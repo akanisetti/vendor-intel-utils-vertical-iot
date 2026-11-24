@@ -1,0 +1,99 @@
+From 33238d078797225d63cf39ed89c2bcec3347d5da Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Mon, 12 Oct 2026 12:34:14 +0000
+Subject: [PATCH 18/19] pps: add Android data source names to sample configs
+
+From Intel A17 25.0.1 a8b717c0991 ("Perfetto: Fix
+CtsGpuProfilingDataTest fail"). Only the sample tracing configs are
+carried: the rest of that change (Android "gpu.counters" /
+"gpu.renderstages" data source names, skipping failing drivers,
+libgpudataproducer start() entry point) is upstream in Mesa 26.0.3.
+
+The Intel metric set property persist.vendor.intel.perfetto.metric_set
+is replaced by upstream's os_get_option() lookup of
+INTEL_PERFETTO_METRIC_SET, i.e. vendor.mesa.intel.perfetto.metric.set
+on Android.
+
+Tracked-On: OAM-128278
+(cherry picked from commit a8b717c0991981ea783d95ac0127c4dbc36c62f9)
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ src/tool/pps/cfg/gpu.cfg    |  9 +++++++++
+ src/tool/pps/cfg/intel.cfg  | 15 +++++++++++++++
+ src/tool/pps/cfg/system.cfg | 15 +++++++++++++++
+ 3 files changed, 39 insertions(+)
+
+diff --git a/src/tool/pps/cfg/gpu.cfg b/src/tool/pps/cfg/gpu.cfg
+index 2a6578375d82..3e85c3e0e188 100644
+--- a/src/tool/pps/cfg/gpu.cfg
++++ b/src/tool/pps/cfg/gpu.cfg
+@@ -30,4 +30,13 @@ data_sources {
+   }
+ }
+ 
++data_sources {
++  config {
++    name: "gpu.counters"
++    gpu_counter_config {
++      counter_period_ns: 1000000000
++    }
++  }
++}
++
+ duration_ms: 16000
+diff --git a/src/tool/pps/cfg/intel.cfg b/src/tool/pps/cfg/intel.cfg
+index bb9e2d22dbce..4b9ce40099a2 100644
+--- a/src/tool/pps/cfg/intel.cfg
++++ b/src/tool/pps/cfg/intel.cfg
+@@ -58,6 +58,21 @@ data_sources {
+   }
+ }
+ 
++data_sources {
++  config {
++    name: "gpu.counters"
++    gpu_counter_config {
++      counter_period_ns: 100000
++    }
++  }
++}
++
++data_sources {
++  config {
++    name: "gpu.renderstages"
++  }
++}
++
+ data_sources {
+   config {
+     name: "track_event"
+diff --git a/src/tool/pps/cfg/system.cfg b/src/tool/pps/cfg/system.cfg
+index 2e6ce480bb27..493415e5f24d 100644
+--- a/src/tool/pps/cfg/system.cfg
++++ b/src/tool/pps/cfg/system.cfg
+@@ -82,6 +82,21 @@ data_sources {
+   }
+ }
+ 
++data_sources {
++  config {
++    name: "gpu.counters"
++    gpu_counter_config {
++      counter_period_ns: 100000
++    }
++  }
++}
++
++data_sources {
++  config {
++    name: "gpu.renderstages"
++  }
++}
++
+ data_sources {
+   config {
+     name: "track_event"
+-- 
+2.34.1
+

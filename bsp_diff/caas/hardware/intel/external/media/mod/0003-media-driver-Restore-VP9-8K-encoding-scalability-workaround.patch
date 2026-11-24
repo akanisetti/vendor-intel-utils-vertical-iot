@@ -1,0 +1,35 @@
+From 7bd0a753e5f5bf344b26417bce8fd6aac7f4e046 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 05:29:59 +0000
+Subject: [PATCH] media-driver: Restore VP9 8K encoding scalability workaround
+
+Confirmed codechal_vdenc_vp9_g12.cpp is actually compiled into this
+product's build (present in the regenerated Android.bp), so this
+upstream-reported bug workaround (commit d4129e148,
+https://github.com/intel/media-driver/issues/1847: VP9 8K encoding
+with scalability enabled produces incorrect output) applies here and
+was silently discarded by the overlay like the other fixes in this
+series.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ .../agnostic/gen12/codec/hal/codechal_vdenc_vp9_g12.cpp         | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media_driver/agnostic/gen12/codec/hal/codechal_vdenc_vp9_g12.cpp b/media_driver/agnostic/gen12/codec/hal/codechal_vdenc_vp9_g12.cpp
+index 428454062..4174ef06d 100644
+--- a/media_driver/agnostic/gen12/codec/hal/codechal_vdenc_vp9_g12.cpp
++++ b/media_driver/agnostic/gen12/codec/hal/codechal_vdenc_vp9_g12.cpp
+@@ -963,7 +963,7 @@ MOS_STATUS CodechalVdencVp9StateG12::GetSystemPipeNumberCommon()
+         &userFeatureData,
+         m_osInterface->pOsContext);
+ 
+-    bool disableScalability = m_hwInterface->IsDisableScalability();
++    bool disableScalability = true; // m_hwInterface->IsDisableScalability();
+     if (statusKey == MOS_STATUS_SUCCESS)
+     {
+         disableScalability = userFeatureData.i32Data ? true : false;
+-- 
+2.34.1
+

@@ -1,0 +1,127 @@
+From 2e20cc927bcd403fd89b79e4720629b8ef229e0a Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 05:36:57 +0000
+Subject: [PATCH] vpl-gpu-rt: Restore dGPU/iGPU device-selection logic in
+ libmfxsw.cpp
+
+Third instance of the same device-selection fix family already
+restored in libva's va_android.cpp and media-driver's media_libva.cpp
+(commit d090464f, "Use dgpu for codec when dual gpu case") -- silently
+discarded by the overlay since it touches a real source file, not
+build glue.
+
+Checked two related commits and confirmed they're a net no-op:
+f37c5bc2 ("Fixed an issue where opening renderD129 will cause a
+crash") temporarily restructured this same function to only open
+renderD128, and was fully reverted by 87eb9d8f two days later --
+verified the pre-upgrade HEAD's libmfxsw.cpp and Android.mk are
+byte-identical to d090464f's state, so only d090464f's changes needed
+restoring here.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ _studio/mfx_lib/shared/src/libmfxsw.cpp | 64 +++++++++++++++++++++++++
+ 1 file changed, 64 insertions(+)
+
+diff --git a/_studio/mfx_lib/shared/src/libmfxsw.cpp b/_studio/mfx_lib/shared/src/libmfxsw.cpp
+index 0b3b2d08..eb2ea154 100644
+--- a/_studio/mfx_lib/shared/src/libmfxsw.cpp
++++ b/_studio/mfx_lib/shared/src/libmfxsw.cpp
+@@ -32,6 +32,7 @@
+ #include <fcntl.h>
+ #include <xf86drm.h>
+ #include "va/va_drm.h"
++#include <i915_drm.h>
+ 
+ #include "mediasdk_version.h"
+ #include "libmfx_core_factory.h"
+@@ -41,6 +42,10 @@
+ 
+ #include "mfx_unified_decode_logging.h"
+ 
++#if defined(ANDROID)
++#include <cutils/properties.h>
++#endif
++
+ mfxStatus MFXInit(mfxIMPL implParam, mfxVersion *ver, mfxSession *session)
+ {
+     MFX_AUTO_LTRACE(MFX_TRACE_LEVEL_API, __FUNCTION__);
+@@ -629,8 +634,62 @@ GetAdapterInfo(mfxU64 adapterId)
+     return result;
+ }
+ 
++static int IsIntelDgpu(int fd)
++{
++    struct drm_i915_query_item item = {
++        .query_id = DRM_I915_QUERY_MEMORY_REGIONS,
++    };
++
++    struct drm_i915_query query = {
++        .num_items = 1, .items_ptr = (uintptr_t)&item,
++    };
++    if (drmIoctl(fd, DRM_IOCTL_I915_QUERY, &query)) {
++        fprintf(stderr, "drv: Failed to DRM_IOCTL_I915_QUERY");
++        return 0;
++    }
++
++    struct drm_i915_query_memory_regions *meminfo = (struct drm_i915_query_memory_regions *)calloc(1, item.length);
++    if (!meminfo) {
++        fprintf(stderr, "drv: %s Exit due to memory allocation failure", __func__);
++        return 0;
++    }
++
++    item.data_ptr = (uintptr_t)meminfo;
++    if (drmIoctl(fd, DRM_IOCTL_I915_QUERY, &query) || item.length <= 0) {
++        free(meminfo);
++        fprintf(stderr, "%s:%d DRM_IOCTL_I915_QUERY error", __FUNCTION__, __LINE__);
++        return 0;
++    }
++
++    int has_sys = 0, has_local = 0;
++    for (uint32_t i = 0; i < meminfo->num_regions; i++) {
++        const struct drm_i915_memory_region_info *mem = &meminfo->regions[i];
++        switch (mem->region.memory_class) {
++        case I915_MEMORY_CLASS_SYSTEM:
++            has_sys = 1;
++            break;
++        case I915_MEMORY_CLASS_DEVICE:
++            has_local = 1;
++            break;
++        default:
++            break;
++        }
++    }
++
++    free(meminfo);
++    return has_local;
++}
++
+ static bool QueryImplCaps(std::function < bool (VideoCORE&, mfxU32, mfxU32 , mfxU64, const std::vector<bool>& ) > QueryImpls)
+ {
++    int use_dgpu = 1;
++#if defined(ANDROID)
++    char value[PROPERTY_VALUE_MAX] = {};
++
++    property_get("video.hw.dgpu", value, "1");
++    use_dgpu = atoi(value);
++#endif
++
+     for (int i = 0; i < 64; ++i)
+     {
+         std::string path;
+@@ -704,6 +763,11 @@ static bool QueryImplCaps(std::function < bool (VideoCORE&, mfxU32, mfxU32 , mfx
+ 
+                 if (!QueryImpls(*pCore, deviceId, i, fd, subDevMask))
+                     return false;
++
++                // If specify to use dgpu and found dgpu, return the first found dgpu,
++                // otherwise use the last available intel node for codec
++                if (use_dgpu && IsIntelDgpu(fd))
++                    return true;
+             }
+         }
+     }
+-- 
+2.34.1
+

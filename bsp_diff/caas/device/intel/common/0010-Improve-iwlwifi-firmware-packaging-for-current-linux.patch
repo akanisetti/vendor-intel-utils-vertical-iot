@@ -1,0 +1,49 @@
+From b509f4a7d252588dd1e9b0c8be29047e11a8e2dd Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Mon, 5 Oct 2026 08:43:35 +0000
+Subject: [PATCH] Improve iwlwifi firmware packaging for current linux-firmware
+ layout
+
+- Updated LOCAL_FIRMWARE_PATTERN (iwlwifi) matching to search
+  recursively under FIRMWARES_DIR, accommodating the current
+  linux-firmware directory layout where iwlwifi blobs are organized
+  under intel/iwlwifi/
+- Matched files are installed flat (basename only) via
+  $(notdir $(f)), matching iwlwifi's request_firmware() calls which
+  use no subdirectory prefix
+- Ensures iwlwifi-ty-a0-gf-a0-89.ucode (Intel Wi-Fi 6E AX210) and
+  related firmware blobs are packaged into /vendor/firmware/
+
+Tracked-On: NIACP3-1661
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ firmware.mk | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/firmware.mk b/firmware.mk
+index eaceadb..8df2431 100644
+--- a/firmware.mk
++++ b/firmware.mk
+@@ -52,11 +52,17 @@ LOCAL_FIRMWARE_PATTERN_IN_DIR := \
+     xe/bmg \
+     xe/ptl
+ 
+-LOCAL_FIRMWARE_SRC += $(foreach f,$(LOCAL_FIRMWARE_PATTERN),$(shell cd $(FIRMWARES_DIR) && find *$(f)* -type f,l ))
+ LOCAL_FIRMWARE_SRC += $(foreach f,$(LOCAL_FIRMWARE_DIR),$(shell cd $(FIRMWARES_DIR) && find $(f) -type f,l) )
+ LOCAL_FIRMWARE_SRC += $(foreach f,$(LOCAL_FIRMWARE_PATTERN_IN_DIR),$(shell cd $(FIRMWARES_DIR) && find $(shell dirname $(f)) -iname "$(shell basename $(f))*" -type f,l))
+ 
++# LOCAL_FIRMWARE_PATTERN entries must be searched recursively (upstream
++# linux-firmware now nests them, e.g. intel/iwlwifi/*.ucode) and installed
++# flat (basename only), since request_firmware() callers like iwlwifi ask
++# for these files with no subdirectory prefix.
++LOCAL_FIRMWARE_PATTERN_FLAT_SRC += $(foreach f,$(LOCAL_FIRMWARE_PATTERN),$(shell cd $(FIRMWARES_DIR) && find . -iname "*$(f)*" -type f,l))
++
+ PRODUCT_COPY_FILES := \
+-    $(foreach f,$(LOCAL_FIRMWARE_SRC),$(FIRMWARES_DIR)/$(f):$(TARGET_COPY_OUT_VENDOR)/firmware/$(f))
++    $(foreach f,$(LOCAL_FIRMWARE_SRC),$(FIRMWARES_DIR)/$(f):$(TARGET_COPY_OUT_VENDOR)/firmware/$(f)) \
++    $(foreach f,$(LOCAL_FIRMWARE_PATTERN_FLAT_SRC),$(FIRMWARES_DIR)/$(f):$(TARGET_COPY_OUT_VENDOR)/firmware/$(notdir $(f)))
+ 
+ endif
+-- 
+2.34.1
+

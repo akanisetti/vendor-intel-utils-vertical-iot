@@ -1,0 +1,80 @@
+From eb91233ef29f5ebf7205771ef778717bcbdcdd26 Mon Sep 17 00:00:00 2001
+From: Basil Chew <basil.chew@intel.com>
+Date: Tue, 28 Apr 2026 11:46:51 +0800
+Subject: [PATCH] Add XE firmware and increase boot partition
+
+Tracked-On: NIACP3-1312
+Signed-off-by: Basil Chew <basil.chew@intel.com>
+---
+ groups/boot-arch/project-celadon/BoardConfig.mk | 2 +-
+ groups/boot-arch/project-celadon/gpt.ini        | 2 +-
+ groups/graphics/auto/AndroidBoard.mk            | 8 ++++++++
+ groups/graphics/mesa/AndroidBoard.mk            | 8 ++++++++
+ 4 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/groups/boot-arch/project-celadon/BoardConfig.mk b/groups/boot-arch/project-celadon/BoardConfig.mk
+index cea4d41d..86d565ee 100644
+--- a/groups/boot-arch/project-celadon/BoardConfig.mk
++++ b/groups/boot-arch/project-celadon/BoardConfig.mk
+@@ -26,7 +26,7 @@ TARGET_RECOVERY_PIXEL_FORMAT := BGRA_8888
+ #
+ 
+ # NOTE: These values must be kept in sync with BOARD_GPT_INI
+-BOARD_BOOTIMAGE_PARTITION_SIZE ?= 47185920
++BOARD_BOOTIMAGE_PARTITION_SIZE ?= 50331648
+ SYSTEM_PARTITION_SIZE = $(shell echo {{system_partition_size}}*1024*1024 | bc)
+ {{^dynamic-partitions}}
+ BOARD_SYSTEMIMAGE_PARTITION_SIZE ?= $(SYSTEM_PARTITION_SIZE)
+diff --git a/groups/boot-arch/project-celadon/gpt.ini b/groups/boot-arch/project-celadon/gpt.ini
+index 5eac05f0..41b655b1 100644
+--- a/groups/boot-arch/project-celadon/gpt.ini
++++ b/groups/boot-arch/project-celadon/gpt.ini
+@@ -54,7 +54,7 @@ type = fat
+ 
+ [partition.boot]
+ label = boot
+-len = 45
++len = 48
+ type = boot
+ {{#slot-ab}}
+ has_slot = true
+diff --git a/groups/graphics/auto/AndroidBoard.mk b/groups/graphics/auto/AndroidBoard.mk
+index ccedadd1..a81de4c4 100644
+--- a/groups/graphics/auto/AndroidBoard.mk
++++ b/groups/graphics/auto/AndroidBoard.mk
+@@ -18,6 +18,14 @@ $(foreach t, $(patsubst $(I915_FW_PATH)/%,%,$(wildcard $(I915_FW_PATH)/i915_ag*)
+ 
+ _EXTRA_FW_ += $(I915_FW)
+ 
++XE_FW_PATH := vendor/linux/firmware/xe
++
++$(foreach t, $(patsubst $(XE_FW_PATH)/%,%,$(wildcard $(XE_FW_PATH)/lnl*)) ,$(eval XE_FW += xe/$(t)) $(eval $(LOCAL_KERNEL) : $(PRODUCT_OUT)/vendor/firmware/xe/$(t)))
++$(foreach t, $(patsubst $(XE_FW_PATH)/%,%,$(wildcard $(XE_FW_PATH)/bmg*)) ,$(eval XE_FW += xe/$(t)) $(eval $(LOCAL_KERNEL) : $(PRODUCT_OUT)/vendor/firmware/xe/$(t)))
++$(foreach t, $(patsubst $(XE_FW_PATH)/%,%,$(wildcard $(XE_FW_PATH)/ptl*)) ,$(eval XE_FW += xe/$(t)) $(eval $(LOCAL_KERNEL) : $(PRODUCT_OUT)/vendor/firmware/xe/$(t)))
++
++_EXTRA_FW_ += $(XE_FW)
++
+ AUTO_IN += $(TARGET_DEVICE_DIR)/{{_extra_dir}}/auto_hal.in
+ 
+ {{/gen9+}}
+diff --git a/groups/graphics/mesa/AndroidBoard.mk b/groups/graphics/mesa/AndroidBoard.mk
+index 359a3b5b..126ac68f 100644
+--- a/groups/graphics/mesa/AndroidBoard.mk
++++ b/groups/graphics/mesa/AndroidBoard.mk
+@@ -7,5 +7,13 @@ $(foreach t, $(patsubst $(I915_FW_PATH)/%,%,$(wildcard $(I915_FW_PATH)/*)) ,$(ev
+ 
+ _EXTRA_FW_ += $(I915_FW)
+ 
++XE_FW_PATH := vendor/linux/firmware/xe
++
++$(foreach t, $(patsubst $(XE_FW_PATH)/%,%,$(wildcard $(XE_FW_PATH)/lnl*)) ,$(eval XE_FW += xe/$(t)) $(eval $(LOCAL_KERNEL) : $(PRODUCT_OUT)/vendor/firmware/xe/$(t)))
++$(foreach t, $(patsubst $(XE_FW_PATH)/%,%,$(wildcard $(XE_FW_PATH)/bmg*)) ,$(eval XE_FW += xe/$(t)) $(eval $(LOCAL_KERNEL) : $(PRODUCT_OUT)/vendor/firmware/xe/$(t)))
++$(foreach t, $(patsubst $(XE_FW_PATH)/%,%,$(wildcard $(XE_FW_PATH)/ptl*)) ,$(eval XE_FW += xe/$(t)) $(eval $(LOCAL_KERNEL) : $(PRODUCT_OUT)/vendor/firmware/xe/$(t)))
++
++_EXTRA_FW_ += $(XE_FW)
++
+ {{/gen9+}}
+ 
+-- 
+2.35.3
+

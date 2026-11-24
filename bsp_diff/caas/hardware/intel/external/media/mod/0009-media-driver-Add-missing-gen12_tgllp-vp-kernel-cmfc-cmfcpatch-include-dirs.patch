@@ -1,0 +1,44 @@
+From f074d2b10a252e71c737e4425537837afa60640d Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 08:16:20 +0000
+Subject: [PATCH] media-driver: Add missing
+ gen12_tgllp/vp/kernel/{cmfc,cmfcpatch} include dirs
+
+A real flashfiles build failed with a fatal file-not-found error:
+vphal_renderer_g12_tgllp.cpp includes "igvpkrn_g12_tgllp_cmfc.h", whose
+containing directory, gen12_tgllp/vp/kernel/cmfc, was excluded from
+the earlier comprehensive include-dirs sweep alongside its
+kernel/cmfcpatch sibling and both kernel_free equivalents as 'legacy
+generation-specific kernel source duplicates'.
+
+That exclusion was too broad: kernel/cmfc's and kernel/cmfcpatch's .c
+sources (igvpkrn_g12_tgllp_cmfc.c, igvpkrn_g12_tgllp_cmfcpatch.c) are
+actually compiled per Android.bp's srcs list, so their headers are
+load-bearing. kernel_free/cmfc is a genuine, differently-contentted
+duplicate (confirmed via diff) but is never referenced by any srcs
+entry, so it remains correctly excluded -- no ambiguity results from
+adding only the kernel/ variants.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ Android.bp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/Android.bp b/Android.bp
+index 2c8f867b9..db500ea0a 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -2461,7 +2461,9 @@ cc_library_shared {
+         "media_driver/agnostic/gen12_tgllp",
+         "media_driver/agnostic/gen12_tgllp/vp/hal",
+         "media_driver/agnostic/gen12_tgllp/vp/kernel",
++        "media_driver/agnostic/gen12_tgllp/vp/kernel/cmfc",
+         "media_driver/agnostic/gen12_tgllp/vp/kernel/cmfccmlpch",
++        "media_driver/agnostic/gen12_tgllp/vp/kernel/cmfcpatch",
+         "media_driver/agnostic/gen12_tgllp/vp/kernel/swsb",
+         "media_driver/agnostic/gen8/cm",
+         "media_driver/agnostic/gen8/hw",
+-- 
+2.34.1
+

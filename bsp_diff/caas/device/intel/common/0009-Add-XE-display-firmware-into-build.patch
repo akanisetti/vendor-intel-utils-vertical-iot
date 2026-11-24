@@ -1,0 +1,26 @@
+From ff4cf310a7b3339234b2ccab670f7f91f27c0370 Mon Sep 17 00:00:00 2001
+From: Basil Chew <basil.chew@intel.com>
+Date: Mon, 11 May 2026 15:12:19 +0800
+Subject: [PATCH] Add XE display firmware into build
+
+Tracked-On: NIACP3-1254
+Signed-off-by: Basil Chew <basil.chew@intel.com>
+---
+ firmware.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/firmware.mk b/firmware.mk
+index 04a2fc3..eaceadb 100644
+--- a/firmware.mk
++++ b/firmware.mk
+@@ -47,6 +47,7 @@ LOCAL_FIRMWARE_PATTERN_IN_DIR := \
+     i915/intel_vsec \
+     i915/compat \
+     i915/i915_ag \
++    i915/xe \
+     xe/lnl \
+     xe/bmg \
+     xe/ptl
+-- 
+2.35.3
+

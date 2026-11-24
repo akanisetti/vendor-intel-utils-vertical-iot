@@ -1,0 +1,117 @@
+From 24793899c1615b6617d9be6b1dbe475402abe422 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Thu, 12 Nov 2026 19:48:49 +0000
+Subject: [PATCH 1/2] [AUDIO] Initialize onboard microphone mixer controls
+
+Initialize the capture switch and gain when the primary ALSA mixer
+connects.
+Cache mic mute and gain across mixer reconnections, and forward
+framework
+mute changes to the mixer while preserving existing speaker routing.
+
+Tracked-On: NIACP3-1695
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ audio/aidl/default/ModulePrimary.cpp          |  8 ++++++
+ .../default/include/core-impl/ModulePrimary.h |  1 +
+ audio/aidl/default/primary/PrimaryMixer.cpp   | 28 +++++++++++++++++--
+ audio/aidl/default/primary/PrimaryMixer.h     |  2 ++
+ 4 files changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/audio/aidl/default/ModulePrimary.cpp b/audio/aidl/default/ModulePrimary.cpp
+index b3ad3cbe2a..e26df58547 100644
+--- a/audio/aidl/default/ModulePrimary.cpp
++++ b/audio/aidl/default/ModulePrimary.cpp
+@@ -47,6 +47,14 @@ using aidl::android::media::audio::common::MicrophoneInfo;
+ 
+ namespace aidl::android::hardware::audio::core {
+ 
++ndk::ScopedAStatus ModulePrimary::setMicMute(bool in_mute) {
++    if (auto status = primary::PrimaryMixer::getInstance().setMicMute(in_mute);
++        !status.isOk()) {
++        return status;
++    }
++    return Module::setMicMute(in_mute);
++}
++
+ ndk::ScopedAStatus ModulePrimary::getTelephony(std::shared_ptr<ITelephony>* _aidl_return) {
+     if (!mTelephony) {
+         mTelephony = ndk::SharedRefBase::make<Telephony>();
+diff --git a/audio/aidl/default/include/core-impl/ModulePrimary.h b/audio/aidl/default/include/core-impl/ModulePrimary.h
+index 374ba03e20..f71093b806 100644
+--- a/audio/aidl/default/include/core-impl/ModulePrimary.h
++++ b/audio/aidl/default/include/core-impl/ModulePrimary.h
+@@ -31,6 +31,7 @@ class ModulePrimary final : public Module {
+ 
+   protected:
+     ndk::ScopedAStatus getTelephony(std::shared_ptr<ITelephony>* _aidl_return) override;
++                ndk::ScopedAStatus setMicMute(bool in_mute) override;
+ 
+     ndk::ScopedAStatus calculateBufferSizeFrames(
+             const ::aidl::android::media::audio::common::AudioFormatDescription& format,
+diff --git a/audio/aidl/default/primary/PrimaryMixer.cpp b/audio/aidl/default/primary/PrimaryMixer.cpp
+index 2176bb7b70..36d51d5709 100644
+--- a/audio/aidl/default/primary/PrimaryMixer.cpp
++++ b/audio/aidl/default/primary/PrimaryMixer.cpp
+@@ -39,6 +39,14 @@ void PrimaryMixer::setDeviceConnectionState(int card, bool masterMuted, float ma
+         }
+         alsaMixer->setMasterMute(masterMuted);
+         alsaMixer->setMasterVolume(masterVolume);
++        if (auto status = alsaMixer->setMicMute(mMicMuted); !status.isOk()) {
++            LOG(ERROR) << __func__ << ": failed to apply mic mute state: "
++                       << status.getDescription();
++        }
++        if (auto status = alsaMixer->setMicGain(mMicGain); !status.isOk()) {
++            LOG(ERROR) << __func__ << ": failed to apply mic gain: "
++                       << status.getDescription();
++        }
+         mMixer = alsaMixer;
+     } else {
+         mMixer.reset();
+@@ -82,12 +90,28 @@ ndk::ScopedAStatus PrimaryMixer::setMasterVolume(float volume) {
+ 
+ ndk::ScopedAStatus PrimaryMixer::setMicGain(float gain) {
+     std::lock_guard guard(mLock);
+-    return mMixer ? mMixer->setMicGain(gain) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++    if (!mMixer) {
++        mMicGain = gain;
++        return ndk::ScopedAStatus::ok();
++    }
++    auto status = mMixer->setMicGain(gain);
++    if (status.isOk()) {
++        mMicGain = gain;
++    }
++    return status;
+ }
+ 
+ ndk::ScopedAStatus PrimaryMixer::setMicMute(bool muted) {
+     std::lock_guard guard(mLock);
+-    return mMixer ? mMixer->setMicMute(muted) : ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++    if (!mMixer) {
++        mMicMuted = muted;
++        return ndk::ScopedAStatus::ok();
++    }
++    auto status = mMixer->setMicMute(muted);
++    if (status.isOk()) {
++        mMicMuted = muted;
++    }
++    return status;
+ }
+ 
+ ndk::ScopedAStatus PrimaryMixer::setVolumes(const std::vector<float>& volumes) {
+diff --git a/audio/aidl/default/primary/PrimaryMixer.h b/audio/aidl/default/primary/PrimaryMixer.h
+index e810536a20..e4877d77af 100644
+--- a/audio/aidl/default/primary/PrimaryMixer.h
++++ b/audio/aidl/default/primary/PrimaryMixer.h
+@@ -91,6 +91,8 @@ class PrimaryMixer {
+ 
+     std::mutex mLock;
+     std::shared_ptr<alsa::Mixer> mMixer GUARDED_BY(mLock);
++    bool mMicMuted GUARDED_BY(mLock) = false;
++    float mMicGain GUARDED_BY(mLock) = 1.0f;
+ };
+ 
+ 
+-- 
+2.34.1
+

@@ -1,0 +1,77 @@
+From fc8a27a06b6824d8d7e98d22b724bee294343cf0 Mon Sep 17 00:00:00 2001
+From: Basil Chew <basil.chew@intel.com>
+Date: Tue, 19 May 2026 18:52:26 +0800
+Subject: [PATCH] Add rules for XE graphics
+
+Tracked-On: NIACP3-1254
+Signed-off-by: Basil Chew <basil.chew@intel.com>
+---
+ app_render_setting_property/bootanim.te | 1 +
+ graphics/mesa/bootanim.te               | 1 +
+ graphics/mesa/file.te                   | 4 ++++
+ graphics/mesa/genfs_contexts            | 1 +
+ graphics/mesa/xe_proc_access.te         | 6 ++++++
+ 5 files changed, 13 insertions(+)
+ create mode 100644 app_render_setting_property/bootanim.te
+ create mode 100644 graphics/mesa/xe_proc_access.te
+
+diff --git a/app_render_setting_property/bootanim.te b/app_render_setting_property/bootanim.te
+new file mode 100644
+index 0000000..b9d11ac
+--- /dev/null
++++ b/app_render_setting_property/bootanim.te
+@@ -0,0 +1 @@
++get_prop(bootanim, vendor_intel_render_selection_prop)
+diff --git a/graphics/mesa/bootanim.te b/graphics/mesa/bootanim.te
+index 3da7ca9..359c612 100644
+--- a/graphics/mesa/bootanim.te
++++ b/graphics/mesa/bootanim.te
+@@ -7,6 +7,7 @@ allow bootanim graphics_device:chr_file { ioctl open read };
+ allow bootanim graphics_device:dir search;
+ allow bootanim self:process execmem;
+ allow bootanim proc_graphics:file r_file_perms;
++allow bootanim proc_sys_dev_xe:file r_file_perms;
+ allow bootanim hal_graphics_allocator_default_tmpfs:file { map read write };
+ 
+ # Allow writing performance tracing data into the perfetto traced daemon.
+diff --git a/graphics/mesa/file.te b/graphics/mesa/file.te
+index c139ac8..724250c 100644
+--- a/graphics/mesa/file.te
++++ b/graphics/mesa/file.te
+@@ -13,6 +13,10 @@ type sysfs_videostatus, fs_type, sysfs_type;
+ # i915 related /proc/driver entry.
+ type proc_graphics, fs_type, proc_type;
+ 
++# Define file type for xe proc sys entries
++# proc types must include the proc_type attribute
++type proc_sys_dev_xe, fs_type, proc_type;
++
+ type sysfs_app_readable, fs_type, sysfs_type;
+ 
+ typeattribute hal_graphics_allocator_default_tmpfs mlstrustedobject;
+diff --git a/graphics/mesa/genfs_contexts b/graphics/mesa/genfs_contexts
+index 5e2b266..864493c 100644
+--- a/graphics/mesa/genfs_contexts
++++ b/graphics/mesa/genfs_contexts
+@@ -1,5 +1,6 @@
+ genfscon proc /driver/i915rpm/i915_rpm_op u:object_r:proc_graphics:s0
+ genfscon proc /sys/dev/i915/ u:object_r:proc_graphics:s0
++genfscon proc /sys/dev/xe/   u:object_r:proc_sys_dev_xe:s0
+ genfscon sysfs /devices/pci0000:00/0000:00:02.0/ u:object_r:sysfs_app_readable:s0
+ genfscon sysfs /devices/pci0000:00/0000:00:01.0/ u:object_r:sysfs_app_readable:s0
+ genfscon sysfs /devices/pci0000:00/0000:00:03.0/ u:object_r:sysfs_app_readable:s0
+diff --git a/graphics/mesa/xe_proc_access.te b/graphics/mesa/xe_proc_access.te
+new file mode 100644
+index 0000000..df7305c
+--- /dev/null
++++ b/graphics/mesa/xe_proc_access.te
+@@ -0,0 +1,6 @@
++# Allow minimal read/open/getattr access to /proc/sys/dev/xe for graphics userspace
++allow system_server proc_sys_dev_xe:file { read open getattr };
++allow system_app proc_sys_dev_xe:file { read open getattr };
++allow platform_app proc_sys_dev_xe:file { read open getattr };
++allow priv_app proc_sys_dev_xe:file { read open getattr };
++allow surfaceflinger proc_sys_dev_xe:file { read open getattr };
+-- 
+2.35.3
+

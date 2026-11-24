@@ -1,0 +1,77 @@
+From b2fb677d1d3a375af7aa56f045cfeaac86201cf0 Mon Sep 17 00:00:00 2001
+From: Kyle Hsiao <kylehsiao@google.com>
+Date: Mon, 6 Jul 2026 20:32:10 -0700
+Subject: [PATCH] Fix Secure NFC init after DE migration
+
+Ensure the migrated Secure NFC preference is saved to the user-specific
+key during DE migration. Also, trigger a routing table update if the
+Secure NFC state changes to ensure the hardware is in the correct state.
+
+Bug: 528209861
+Bug: 368376056
+Test: Build
+Flag: EXEMPT BUGFIX
+
+TAG=agy
+CONV=02e55829-e6d2-4667-b978-818da2a70111
+
+Change-Id: I941fc5d15e05c4b17d4162b17e2bccb3ef33fd90
+Merged-In: I941fc5d15e05c4b17d4162b17e2bccb3ef33fd90
+(cherry picked from commit 3d4f50ef8c81cbffec6b26fc036d22a44d51f6a2)
+---
+ NfcNci/src/com/android/nfc/NfcService.java | 32 ++++++++++++++++++----
+ 1 file changed, 27 insertions(+), 5 deletions(-)
+
+diff --git a/NfcNci/src/com/android/nfc/NfcService.java b/NfcNci/src/com/android/nfc/NfcService.java
+index 53f5184c9..ecf554f3a 100644
+--- a/NfcNci/src/com/android/nfc/NfcService.java
++++ b/NfcNci/src/com/android/nfc/NfcService.java
+@@ -6775,7 +6775,6 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback
+                     mPrefs = mContext.getSharedPreferences(PREF, Context.MODE_PRIVATE);
+                     mPrefsEditor = mPrefs.edit();
+                     mPrefsEditor.putBoolean(PREF_MIGRATE_TO_DE_COMPLETE, true);
+-                    mPrefsEditor.apply();
+                     // Read the shared prefs again to determine if NFC should
+                     // be enabled or disabled.
+                     reinitializeAfterDeMigration();
+@@ -6790,10 +6789,33 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback
+                 new EnableDisableTask().execute(TASK_DISABLE);
+             }
+             String secureNfcPreferenceKey = getSecureNfcPreferenceKeyForUser(mUserId);
+-            mIsSecureNfcEnabled = mPrefs.getBoolean(secureNfcPreferenceKey,
+-                    mDeviceConfigFacade.getDefaultSecureNfcState())
+-                    && mIsSecureNfcCapable;
+-            mDeviceHost.setNfcSecure(mIsSecureNfcEnabled);
++            synchronized (NfcService.this) {
++                if (mUserId == UserHandle.SYSTEM.getIdentifier()
++                        && !mPrefs.contains(PREF_SECURE_NFC_ON + "_"
++                                + UserHandle.SYSTEM.getIdentifier())) {
++                    mIsSecureNfcEnabled = mPrefs.getBoolean(PREF_SECURE_NFC_ON,
++                            mDeviceConfigFacade.getDefaultSecureNfcState())
++                            && mIsSecureNfcCapable;
++                } else {
++                    mIsSecureNfcEnabled = mPrefs.getBoolean(secureNfcPreferenceKey,
++                            mDeviceConfigFacade.getDefaultSecureNfcState())
++                            && mIsSecureNfcCapable;
++                }
++
++                mPrefsEditor.putBoolean(secureNfcPreferenceKey, mIsSecureNfcEnabled);
++                mPrefsEditor.apply();
++                mBackupManager.dataChanged();
++
++                mDeviceHost.setNfcSecure(mIsSecureNfcEnabled);
++
++                if (mIsHceCapable) {
++                    // update HCE/HCEF routing and commitRouting if Nfc is enabled
++                    mCardEmulationManager.onTriggerRoutingTableUpdate();
++                } else if (isNfcEnabled()) {
++                    // commit only tech/protocol route without HCE support
++                    mDeviceHost.commitRouting();
++                }
++            }
+         }
+     };
+ 
+-- 
+2.56.0.385.gac671c819a-goog
+

@@ -1,0 +1,37 @@
+From 872700d92285f82ed66ac26cb97624b61390a35b Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Mon, 5 Oct 2026 16:26:36 +0000
+Subject: [PATCH] Enable CONFIG_BLK_DEV_UBLK for linux-intel-lts2025 kernel
+
+- update_engine's libsnapshot uses the ublk-backed dm-user path for
+  Virtual A/B Compression (VABC) snapshot merging on kernels that
+  support io_uring, complementing the dm-user-only merge path used
+  on older AOSP branches (e.g. A16).
+- Enables OTA updates to complete snapshot merge successfully.
+- Also enable CONFIG_BLKDEV_UBLK_LEGACY_OPCODES, the dependent
+  symbol required by CONFIG_BLK_DEV_UBLK, to keep the defconfig
+  clean under olddefconfig/diffconfig.
+
+Tracked-On: NIACP3-1660
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ .../gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig     | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig b/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig
+index 21eff3c8..7419e292 100644
+--- a/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig
++++ b/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig
+@@ -2075,7 +2075,8 @@ CONFIG_BLK_DEV_RAM_SIZE=8192
+ # CONFIG_ATA_OVER_ETH is not set
+ CONFIG_VIRTIO_BLK=y
+ # CONFIG_BLK_DEV_RBD is not set
+-# CONFIG_BLK_DEV_UBLK is not set
++CONFIG_BLK_DEV_UBLK=y
++CONFIG_BLKDEV_UBLK_LEGACY_OPCODES=y
+ 
+ #
+ # NVME Support
+-- 
+2.34.1
+

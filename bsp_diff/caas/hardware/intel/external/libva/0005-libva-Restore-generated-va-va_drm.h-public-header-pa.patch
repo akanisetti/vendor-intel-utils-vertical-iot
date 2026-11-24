@@ -1,0 +1,52 @@
+From 84ad8765cf78c1247a3fc32c3761faea4446ef27 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 4 Nov 2026 04:40:18 +0000
+Subject: [PATCH] libva: Restore generated va/va_drm.h public header path
+
+The 2.23.0 overlay restoration (libva: Restore Android shim
+excluded/deleted from 2.23.0 overlay) renamed libva_gen_headers to
+libva_gen_version and dropped its second output, which used to copy
+va/drm/va_drm.h to the generated va/va_drm.h path. Exporting va/drm
+as an include directory only resolves <va_drm.h>, not <va/va_drm.h>,
+so real consumers that include the nested path directly -- e.g.
+external/libva-utils's va_display_drm.c, test_va_api_fixture.cpp,
+VDecAccelVA.cpp, and external/rust/cros-libva's libva-wrapper.h --
+fail to find the header even though they depend on libva_headers.
+
+Restore the generated copy/output alongside va/va_version.h.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ Android.bp | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/Android.bp b/Android.bp
+index d7fd2fc..debff8d 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -40,14 +40,19 @@ genrule {
+     srcs: [
+         "configure.ac",
+         "va/va_version.h.in",
++        "va/drm/va_drm.h",
+     ],
+     tools: [
+         "libva_gen_version_script",
+     ],
+-    out: ["va/va_version.h"],
++    out: [
++        "va/va_version.h",
++        "va/va_drm.h",
++    ],
+     cmd: "$(location libva_gen_version_script) " +
+          "$$(dirname $(location configure.ac)) " +
+-         "$(location va/va_version.h.in) > $(out)",
++         "$(location va/va_version.h.in) > $(location va/va_version.h);" +
++         "cp $(location va/drm/va_drm.h) $(location va/va_drm.h)",
+ }
+ 
+ cc_library_headers {
+-- 
+2.34.1
+

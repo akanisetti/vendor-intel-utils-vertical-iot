@@ -1,0 +1,62 @@
+From 5ed8dbdc2bc0202f7992064d26b83533fc100644 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Mon, 16 Nov 2026 08:45:24 +0000
+Subject: [PATCH] Add memfd policies in BSP
+
+Apps running MediaCodec in-process send the Intel HW codec memfd-backed
+buffer queues. AOSP only granted this to the software codec process.
+
+For encrypted playback, the app creates the decrypt memory and the DRM
+HAL maps it.
+
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+
+diff --git a/camera-ext/ext-camera-only/cameraserver.te b/camera-ext/ext-camera-only/cameraserver.te
+index a24f9bb..3950d90 100644
+--- a/camera-ext/ext-camera-only/cameraserver.te
++++ b/camera-ext/ext-camera-only/cameraserver.te
+@@ -2,3 +2,5 @@
+ allow cameraserver gpu_device:dir search;
+ allow cameraserver gpu_device:chr_file rw_file_perms;
+ allow cameraserver hal_graphics_allocator_default_tmpfs:file { read write map};
++# Parcel blobs > 16KB (e.g. CameraMetadata) from apps are memfds with sys.use_memfd=true
++allow cameraserver { appdomain -isolated_app_all }:memfd_file { getattr map read write };
+diff --git a/codec2/msdk-codec2/codec2_hal_default.te b/codec2/msdk-codec2/codec2_hal_default.te
+index 17ab97d..b2451ab 100644
+--- a/codec2/msdk-codec2/codec2_hal_default.te
++++ b/codec2/msdk-codec2/codec2_hal_default.te
+@@ -34,6 +34,8 @@ allow codec2_hal_default hal_graphics_composer_default:fd use;
+ allow codec2_hal_default hal_camera:fd use;
+ allow codec2_hal_default bufferhubd:fd use;
+ allow codec2_hal_default { appdomain -isolated_app_all }:fd use;
++# memfds (libcutils, sys.use_memfd=true) from in-app MediaCodec, e.g. bufferpool FMQs
++allow codec2_hal_default { appdomain -isolated_app_all }:memfd_file { getattr map read write };
+ 
+ allow codec2_hal_default gpu_device:dir r_dir_perms;
+ allow codec2_hal_default gpu_device:chr_file rw_file_perms;
+diff --git a/drm-default/hal_drm_clearkey.te b/drm-default/hal_drm_clearkey.te
+index 5ac8950..8bfeeef 100644
+--- a/drm-default/hal_drm_clearkey.te
++++ b/drm-default/hal_drm_clearkey.te
+@@ -11,3 +11,5 @@ vndbinder_use(hal_drm_clearkey)
+ allow hal_drm_clearkey servicemanager:binder { call transfer };
+ allow hal_drm_clearkey hal_drm_service:service_manager add;
+ allow hal_drm_clearkey { appdomain -isolated_app_all }:fd use;
++# Decrypt heaps (MemoryHeapBase memfds) set by in-app MediaCodec/MediaCrypto
++allow hal_drm_clearkey { appdomain -isolated_app_all }:memfd_file { getattr map read write };
+diff --git a/widevine/gen/gen_common/hal_drm_widevine.te b/widevine/gen/gen_common/hal_drm_widevine.te
+index 406a480..e2de0d9 100644
+--- a/widevine/gen/gen_common/hal_drm_widevine.te
++++ b/widevine/gen/gen_common/hal_drm_widevine.te
+@@ -13,6 +13,8 @@ hal_client_domain(hal_drm_widevine, hal_graphics_composer);
+ allow hal_drm_widevine servicemanager:binder { call transfer };
+ allow hal_drm_widevine hal_drm_service:service_manager add;
+ allow hal_drm_widevine { appdomain -isolated_app_all }:fd use;
++# Decrypt heaps (MemoryHeapBase memfds) set by in-app MediaCodec/MediaCrypto
++allow hal_drm_widevine { appdomain -isolated_app_all }:memfd_file { getattr map read write };
+ allow hal_drm_widevine hal_allocator_server:fd use;
+ allow hal_drm_widevine gpu_device:dir { read search };
+ allow hal_drm_widevine gpu_device:chr_file rw_file_perms;
+-- 
+2.34.1
+

@@ -1,0 +1,43 @@
+From 222d130e9381f916ad48759cff67877e35898f0a Mon Sep 17 00:00:00 2001
+From: "Li,Gaoshun" <gaoshun.li@intel.com>
+Date: Fri, 29 Dec 2023 14:03:40 +0800
+Subject: [PATCH 09/19] iris: Fix a rendering corruption for CCS format texture
+
+This is a workaround solution to fix rendering corruption
+for CCS format texture when copying the compressed data.
+
+TODO: Improve this solution
+when identifying the true root cause of this issue.
+
+Tracked-On: OAM-113382
+Signed-off-by: Li,Gaoshun <gaoshun.li@intel.com>
+(cherry picked from commit 1073420ea40338167ce8003819beb9a90374f66d)
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ src/gallium/drivers/iris/iris_resource.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/gallium/drivers/iris/iris_resource.c b/src/gallium/drivers/iris/iris_resource.c
+index dc06a439b7ff..29b18a4be8ff 100644
+--- a/src/gallium/drivers/iris/iris_resource.c
++++ b/src/gallium/drivers/iris/iris_resource.c
+@@ -2637,6 +2637,15 @@ iris_texture_subdata(struct pipe_context *ctx,
+        isl_aux_usage_has_compression(res->aux.usage) ||
+        resource_is_busy(ice, res) ||
+        iris_bo_mmap_mode(res->bo) == IRIS_MMAP_NONE) {
++       /* This is a workaround solution to fix rendering corruption
++        * for CCS format texture when copying the compressed data.
++        *
++        * TODO: Improve this solution when identifying the true root cause of this issue.
++        */
++       iris_foreach_batch(ice, batch) {
++          if (iris_batch_references(batch, res->bo))
++             iris_batch_flush(batch);
++       }
+       return u_default_texture_subdata(ctx, resource, level, usage, box,
+                                        data, stride, layer_stride);
+    }
+-- 
+2.34.1
+

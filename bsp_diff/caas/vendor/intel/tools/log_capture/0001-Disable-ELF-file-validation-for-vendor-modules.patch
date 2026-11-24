@@ -1,0 +1,61 @@
+From 40e027438acc48c3bff5f9e1ce4a850b798d5337 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 7 Aug 2026 09:37:57 +0000
+Subject: [PATCH] Disable ELF file validation for vendor modules
+
+changes:
+- crashlog/Android.mk: add LOCAL_CHECK_ELF_FILES := false to three build
+  targets (BUILD_EXECUTABLE, BUILD_PREBUILT for crashlog, ingredients)
+  to skip ELF validation for vendor proprietary binaries
+- log_service/Android.mk: add LOCAL_CHECK_ELF_FILES := false to
+  BUILD_PREBUILT target for vendor prebuilt executable
+
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ crashlog/Android.mk    | 3 +++
+ log_service/Android.mk | 1 +
+ 2 files changed, 4 insertions(+)
+
+diff --git a/crashlog/Android.mk b/crashlog/Android.mk
+index 4e90d43..ff7ba9c 100755
+--- a/crashlog/Android.mk
++++ b/crashlog/Android.mk
+@@ -85,6 +85,7 @@ LOCAL_CFLAGS += -DCONFIG_EARLY_LOGS
+ endif
+ 
+ LOCAL_PROPRIETARY_MODULE := true
++LOCAL_CHECK_ELF_FILES := false
+ include $(BUILD_EXECUTABLE)
+ 
+ include $(CLEAR_VARS)
+@@ -101,6 +102,7 @@ LOCAL_MODULE_OWNER := intel
+ LOCAL_SRC_FILES := $(1)
+ LOCAL_MODULE_CLASS := EXECUTABLES
+ LOCAL_PROPRIETARY_MODULE := true
++LOCAL_CHECK_ELF_FILES := false
+ include $(BUILD_PREBUILT)
+ 
+ endef
+@@ -115,6 +117,7 @@ LOCAL_MODULE_OWNER := intel
+ LOCAL_MODULE_TAGS := optional
+ LOCAL_MODULE_CLASS := ETC
+ LOCAL_PROPRIETARY_MODULE := true
++LOCAL_CHECK_ELF_FILES := false
+ include $(BUILD_SYSTEM)/base_rules.mk
+ INGREDIENTS_FILES ?=
+ INGREDIENTS_FILES := $(LOCAL_PATH)/ingredients.conf $(INGREDIENTS_FILES)
+diff --git a/log_service/Android.mk b/log_service/Android.mk
+index f315b0d..33970fd 100644
+--- a/log_service/Android.mk
++++ b/log_service/Android.mk
+@@ -28,6 +28,7 @@ LOCAL_MODULE_OWNER := intel
+ LOCAL_SRC_FILES := $(1)
+ LOCAL_MODULE_CLASS := EXECUTABLES
+ LOCAL_PROPRIETARY_MODULE := true
++LOCAL_CHECK_ELF_FILES := false
+ include $(BUILD_PREBUILT)
+ 
+ endef
+-- 
+2.34.1
+

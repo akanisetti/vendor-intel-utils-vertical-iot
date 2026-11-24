@@ -1,0 +1,42 @@
+From f19e703c5d2dc14cbc151ddbbbfb8ba411f36192 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 07:43:40 +0000
+Subject: [PATCH] media-driver: Add missing gen11_icllp/vp/kernel include dir
+
+A real flashfiles build failed with a fatal file-not-found error:
+vphal_renderer_g11_icllp.cpp includes "igvpkrn_g11_icllp.h", whose
+containing directory, media_driver/agnostic/gen11_icllp/vp/kernel, was
+excluded from the earlier comprehensive include-dirs sweep alongside
+its kernel_free sibling as a 'legacy generation-specific kernel source
+duplicate'.
+
+That exclusion was too broad: the kernel/ (not kernel_free/) copy is
+the one whose .c sources (igvpkrn_g11_icllp.c,
+igvpkrn_isa_g11_icllp.c) are actually compiled per Android.bp's srcs
+list, so its headers are load-bearing, not dead legacy code. Added
+only media_driver/agnostic/gen11_icllp/vp/kernel (not kernel_free,
+which remains genuinely unused and excluded) -- avoids the
+Source/Source duplicate filename ambiguity entirely by picking the
+directory that matches the compiled sources.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Android.bp b/Android.bp
+index 1f1037954..2c8f867b9 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -2450,6 +2450,7 @@ cc_library_shared {
+         "media_driver/agnostic/gen11/renderhal",
+         "media_driver/agnostic/gen11/vp/hal",
+         "media_driver/agnostic/gen11_icllp/vp/hal",
++        "media_driver/agnostic/gen11_icllp/vp/kernel",
+         "media_driver/agnostic/gen11_jsl_ehl/renderhal",
+         "media_driver/agnostic/gen11_jsl_ehl/vp/hal",
+         "media_driver/agnostic/gen12",
+-- 
+2.34.1
+

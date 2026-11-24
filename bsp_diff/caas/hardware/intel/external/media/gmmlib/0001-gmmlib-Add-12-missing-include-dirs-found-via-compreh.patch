@@ -1,0 +1,48 @@
+From cd35fa4a654f35442fe3c2a92fee611e48c97059 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 06:50:30 +0000
+Subject: [PATCH] gmmlib: Add 12 missing include dirs found via comprehensive
+ sweep
+
+While auditing media-driver's Android.bp for the same generator gap,
+checked gmmlib's Android.bp (also produced by GenerateAndroidBp.py)
+and found the same class of issue on a smaller scale: 18 header
+directories missing from local_include_dirs. Checked for filename
+collisions; 4 are genuine (spdlog/details, spdlog/fmt/bundled,
+inc/Internal/Common, inc/Internal/Common/Texture overlapping
+already-included dirs) and excluded, along with 2 test-only
+ULT/googletest directories not part of the real library. Added the
+remaining 12.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ Android.bp | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/Android.bp b/Android.bp
+index 6755d92..0386b88 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -133,6 +133,18 @@ cc_library_shared {
+         "Source/inc",
+         "Source/inc/common",
+         "Source/inc/umKmInc",
++        "Source/Common/AssertTracer",
++        "Source/GmmLib/CachePolicy",
++        "Source/GmmLib/TranslationTable",
++        "Source/GmmLib/Utility/CpuSwizzleBlt",
++        "Source/GmmLib/Utility/GmmLog/spdlog",
++        "Source/GmmLib/Utility/GmmLog/spdlog/fmt",
++        "Source/GmmLib/Utility/GmmLog/spdlog/sinks",
++        "Source/GmmLib/inc/External/Common",
++        "Source/GmmLib/inc/External/Common/CachePolicy",
++        "Source/GmmLib/inc/External/Linux",
++        "Source/GmmLib/inc/Internal/Common/Platform",
++        "Source/GmmLib/inc/Internal/Linux",
+     ],
+ 
+     enabled: false,
+-- 
+2.34.1
+

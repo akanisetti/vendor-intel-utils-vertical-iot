@@ -1,0 +1,27 @@
+From 16dda4325b4678bfd33bd60569131d811867dd47 Mon Sep 17 00:00:00 2001
+From: Basil Chew <basil.chew@intel.com>
+Date: Thu, 23 Apr 2026 16:36:03 +0800
+Subject: [PATCH] Omit kernel tools testing folder from build
+
+Tracked-On: NIACP3-1310
+Signed-off-by: Basil Chew <basil.chew@intel.com>
+---
+ groups/kernel/AndroidBoard.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/groups/kernel/AndroidBoard.mk b/groups/kernel/AndroidBoard.mk
+index 6db6209e..6bf2b8a3 100644
+--- a/groups/kernel/AndroidBoard.mk
++++ b/groups/kernel/AndroidBoard.mk
+@@ -128,7 +128,7 @@ KERNEL_CONFIG_DEPS = $(strip $(KERNEL_DEFCONFIG) $(KERNEL_DIFFCONFIG))
+ CHECK_CONFIG_SCRIPT := $(LOCAL_KERNEL_SRC)/scripts/diffconfig
+ CHECK_CONFIG_LOG :=  $(LOCAL_KERNEL_PATH)/.config.check
+ 
+-KERNEL_DEPS := $(shell find $(LOCAL_KERNEL_SRC) \( -name *.git -prune \) -o -print )
++KERNEL_DEPS := $(shell find $(LOCAL_KERNEL_SRC) \( -name *.git -prune \) -o \( -path "$(LOCAL_KERNEL_SRC)/tools/testing" -prune \) -o -print )
+ 
+ KERNEL_MAKE_CMD:= \
+       PATH="$(PWD)/prebuilts/build-tools/linux-x86/bin:$(TARGET_KERNEL_CLANG_PATH):$(PWD)/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8/x86_64-linux/bin:$$PATH" \
+-- 
+2.35.3
+

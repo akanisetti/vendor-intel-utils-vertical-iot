@@ -1,0 +1,43 @@
+From 1ab4cad1c9ad9ac5d875803bc8645335683182a9 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 11 Nov 2026 16:55:07 +0000
+Subject: [PATCH] libva: Restore export_include_dirs on the libva shared
+ library
+
+Removing export_include_dirs: ["."] dropped the source-tree include
+root that consumers linking against libva used to get for free via
+<va/va.h> and other public headers. Exporting generated_headers does
+not substitute for that root, and a dependency on libva_headers only
+propagates its headers to a consumer if that consumer explicitly
+re-exports or separately depends on it.
+
+Every current consumer in this tree (media-driver, cmrtlib, the
+onevpl examples, mediasdk_c2's c2_components) already depends on
+libva_headers directly, so none of them broke -- but restore the
+self-export anyway so libva keeps working for any future consumer
+that depends on it the way it used to.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ Android.bp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Android.bp b/Android.bp
+index debff8d..eac99ac 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -94,6 +94,10 @@ cc_library_shared {
+         "va"
+     ],
+ 
++    export_include_dirs: [
++        ".",
++    ],
++
+     generated_headers: [
+         "libva_gen_version",
+     ],
+-- 
+2.34.1
+

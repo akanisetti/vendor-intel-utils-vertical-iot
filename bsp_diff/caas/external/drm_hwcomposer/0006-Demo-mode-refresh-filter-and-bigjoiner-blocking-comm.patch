@@ -1,0 +1,121 @@
+From 4b3c59dd6cf89fbc63d9cd8c78d27ca1e2dff314 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 13 Oct 2026 02:47:50 +0000
+Subject: [PATCH 6/6] Demo mode refresh filter and bigjoiner blocking commit
+
+Celadon demo systems (androidboot.demo=1):
+ - Disable display modes below 59 Hz (58.8 Hz threshold), unless no mode
+   reaches it.
+ - Use blocking commits for bigjoiner modes (wider than 5120 pixels).
+
+Port of the Intel drm-hwcomposer fork commits 1132e0e ("force bigger
+than 59") and e2eb2c0 ("force bigjoiner mode commit blocking"). The
+refresh filter now applies to all reported modes instead of only the
+vendor.hwcomposer mode selection path.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ drm/DrmAtomicStateManager.cpp | 15 +++++++++++++++
+ hwc/HwcDisplayConfigs.cpp     | 17 +++++++++++++++++
+ utils/properties.cpp          |  5 +++++
+ utils/properties.h            |  1 +
+ 4 files changed, 38 insertions(+)
+
+diff --git a/drm/DrmAtomicStateManager.cpp b/drm/DrmAtomicStateManager.cpp
+index 246a477..2762d8b 100644
+--- a/drm/DrmAtomicStateManager.cpp
++++ b/drm/DrmAtomicStateManager.cpp
+@@ -47,6 +47,7 @@
+ #include "utils/ColorUtil.h"
+ #include "utils/fd.h"
+ #include "utils/log.h"
++#include "utils/properties.h"
+ 
+ namespace android::drm_hwcomposer {
+ 
+@@ -150,6 +151,20 @@ std::optional<AtomicCommitResult> DrmAtomicStateManager::CommitFrame(
+ 
+   bool nonblock = !args.blocking && !args.power_mode;
+ 
++  /* Celadon demo systems: bigjoiner modes (wider than 5120) need blocking
++   * commits */
++  constexpr int32_t kBigjoinerMinWidth = 5120;
++  if (nonblock && Properties::IsDemoSystem()) {
++    int32_t width = 0;
++    if (args.display_mode) {
++      width = args.display_mode->GetRawMode().hdisplay;
++    } else if (whole_display_rect_.i_rect) {
++      width = whole_display_rect_.i_rect->Width();
++    }
++    if (width > kBigjoinerMinWidth)
++      nonblock = false;
++  }
++
+   flags |= nonblock ? DRM_MODE_ATOMIC_NONBLOCK : 0U;
+   int err = 0;
+   {
+diff --git a/hwc/HwcDisplayConfigs.cpp b/hwc/HwcDisplayConfigs.cpp
+index 854b7e8..2d1c175 100644
+--- a/hwc/HwcDisplayConfigs.cpp
++++ b/hwc/HwcDisplayConfigs.cpp
+@@ -118,6 +118,17 @@ bool HwcDisplayConfigs::Init(DrmConnector &connector) {
+   ConfigId first_config_id = next_config_id;
+   uint32_t next_group_id = 1;
+ 
++  /* Celadon demo systems only use refresh rates of at least 59 Hz */
++  constexpr float kDemoMinVRefresh = 58.8F;
++  bool demo_refresh_filter = false;
++  if (Properties::IsDemoSystem()) {
++    /* Keep all modes if none reaches 59 Hz */
++    for (const auto &mode : connector.GetModes()) {
++      if (mode.GetVRefresh() >= kDemoMinVRefresh)
++        demo_refresh_filter = true;
++    }
++  }
++
+   for (const auto &output_type : hwc_supported_output_types) {
+     for (const auto &mode : connector.GetModes()) {
+       bool disabled = false;
+@@ -127,6 +138,12 @@ bool HwcDisplayConfigs::Init(DrmConnector &connector) {
+         disabled = true;
+       }
+ 
++      if (demo_refresh_filter && mode.GetVRefresh() < kDemoMinVRefresh) {
++        ALOGI("Disabling display mode %s (demo system needs >= 59 Hz)",
++              mode.GetName().c_str());
++        disabled = true;
++      }
++
+       const ConfigId new_config_id = next_config_id++;
+       const uint32_t new_group_id = next_group_id++;
+       hwc_configs[new_config_id] = {
+diff --git a/utils/properties.cpp b/utils/properties.cpp
+index f8063a9..bf24f8b 100644
+--- a/utils/properties.cpp
++++ b/utils/properties.cpp
+@@ -168,4 +168,9 @@ auto Properties::DropDrmMasterAfterInit() -> bool {
+   return (property_get_bool("ro.vendor.hwc.drop_drm_master", 0) != 0);
+ }
+ 
++/* Celadon demo systems (androidboot.demo=1) */
++auto Properties::IsDemoSystem() -> bool {
++  return (property_get_bool("ro.boot.demo", 0) != 0);
++}
++
+ }  // namespace android::drm_hwcomposer
+diff --git a/utils/properties.h b/utils/properties.h
+index 1c9b182..c4b48ed 100644
+--- a/utils/properties.h
++++ b/utils/properties.h
+@@ -40,6 +40,7 @@ class Properties {
+   static auto DropDrmMasterAfterInit() -> bool;
+   static auto ForcedHolePunchingEnabled() -> bool;
+   static auto ForceP3Support() -> bool;
++  static auto IsDemoSystem() -> bool;
+ };
+ 
+ }  // namespace android::drm_hwcomposer
+-- 
+2.34.1
+

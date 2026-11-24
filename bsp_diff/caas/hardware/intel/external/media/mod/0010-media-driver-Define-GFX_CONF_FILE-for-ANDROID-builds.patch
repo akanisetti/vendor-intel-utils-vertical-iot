@@ -1,0 +1,43 @@
+From 7bc20f7ce2ffdaa2f3caad0cfd368ce6e0dc5dbd Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 08:41:19 +0000
+Subject: [PATCH] media-driver: Define GFX_CONF_FILE for ANDROID builds
+
+A real flashfiles build failed with 'use of undeclared identifier
+GFX_CONF_FILE' in mos_utilities_specific.cpp's MosParseEnvFromConfig(),
+a new helper added by the intel-media-26.2.3 upgrade (f2bd97064) that
+reads debug-only user-feature-file overrides from a libva-style config
+file, modeled on va_parseConfig() in libva/va/va.c.
+
+GFX_CONF_FILE was only defined in the non-ANDROID branch of the
+existing USER_FEATURE_FILE* #ifdef block -- upstream never added an
+ANDROID-side definition, even though MosParseEnvFromConfig() (which
+references the macro directly in its body) is compiled unconditionally
+regardless of build type; only its call sites are gated behind
+'#if (_DEBUG || _RELEASE_INTERNAL)'.
+
+Added an ANDROID definition following the existing
+USER_FEATURE_FILE*'s /vendor/etc/ convention:
+/vendor/etc/libva.conf.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ media_softlet/linux/common/os/osservice/mos_utilities_specific.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/media_softlet/linux/common/os/osservice/mos_utilities_specific.h b/media_softlet/linux/common/os/osservice/mos_utilities_specific.h
+index 9ef727288..80729b1a2 100644
+--- a/media_softlet/linux/common/os/osservice/mos_utilities_specific.h
++++ b/media_softlet/linux/common/os/osservice/mos_utilities_specific.h
+@@ -51,6 +51,7 @@ class MosMutex;
+ #define USER_FEATURE_FILE                   "/vendor/etc/igfx_user_feature.txt"
+ #define USER_FEATURE_FILE_NEXT              "/vendor/etc/igfx_user_feature_next.txt"
+ #define USER_FEATURE_FILE_REPORT            "/vendor/etc/igfx_user_feature_report.txt"
++#define GFX_CONF_FILE                       "/vendor/etc/libva.conf"
+ #else
+ #define USER_FEATURE_FILE                   "/etc/igfx_user_feature.txt"
+ #define USER_FEATURE_FILE_NEXT              "/etc/igfx_user_feature_next.txt"
+-- 
+2.34.1
+

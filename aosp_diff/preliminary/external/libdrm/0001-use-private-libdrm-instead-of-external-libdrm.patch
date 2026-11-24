@@ -1,4 +1,4 @@
-From c4bb7348fc113cc1d88ceb8e246338599c5e2949 Mon Sep 17 00:00:00 2001
+From 3a98ed126cf99c50a6265cd7f61f1b68ecc83557 Mon Sep 17 00:00:00 2001
 From: Chenglei Ren <chenglei.ren@intel.com>
 Date: Tue, 24 Dec 2024 05:33:37 +0000
 Subject: [PATCH] use private libdrm instead of external libdrm
@@ -8,10 +8,17 @@ libdrm-intel instead of external libdrm, and
 bunches of libdrm_pri renaming patches could
 be removed.
 
+Also renames the license reference in tests/modetest,
+tests/proptest and tests/util (formerly the separate
+"Using private libs instead of google libs." and
+"Update libdrm to use internal libdrm instead" patches).
+
 Change-Id: I3e1dffccd4933a027d4c5db8cb051411056668ef
 Tracked-On: OAM-88717
 Signed-off-by: yifang ma <yifangx.ma@intel.com>
 Signed-off-by: Chenglei Ren <chenglei.ren@intel.com>
+Signed-off-by: Tekriwal, Tanuj <tanuj.tekriwal@intel.com>
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
 ---
  Android.bp                        | 14 +++++++-------
  Android.sources.bp                |  2 +-
@@ -34,15 +41,15 @@ Signed-off-by: Chenglei Ren <chenglei.ren@intel.com>
  radeon/Android.sources.bp         |  2 +-
  tegra/Android.bp                  |  6 +++---
  tests/Android.bp                  |  4 ++--
- tests/modetest/Android.bp         | 10 +++++-----
+ tests/modetest/Android.bp         | 12 ++++++------
  tests/modetest/Android.sources.bp |  2 +-
- tests/proptest/Android.bp         |  8 ++++----
- tests/util/Android.bp             | 12 ++++++------
+ tests/proptest/Android.bp         | 10 +++++-----
+ tests/util/Android.bp             | 14 +++++++-------
  tests/util/Android.sources.bp     |  2 +-
- 26 files changed, 85 insertions(+), 85 deletions(-)
+ 26 files changed, 88 insertions(+), 88 deletions(-)
 
 diff --git a/Android.bp b/Android.bp
-index c38c56f8..44c9772d 100644
+index d5a36f62..8cca6850 100644
 --- a/Android.bp
 +++ b/Android.bp
 @@ -22,11 +22,11 @@
@@ -86,7 +93,7 @@ index c38c56f8..44c9772d 100644
      recovery_available: true,
      host_supported: true,
      vendor_available: true,
-@@ -98,8 +98,8 @@ cc_library {
+@@ -99,8 +99,8 @@ cc_library {
          "//apex_available:anyapex",
      ],
      defaults: [
@@ -536,10 +543,17 @@ index 05a3b3a2..897ae5c8 100644
      vendor_available: true,
  }
 diff --git a/tests/modetest/Android.bp b/tests/modetest/Android.bp
-index aa5d65d8..58e04842 100644
+index 10843c39..58e04842 100644
 --- a/tests/modetest/Android.bp
 +++ b/tests/modetest/Android.bp
-@@ -10,13 +10,13 @@ package {
+@@ -4,19 +4,19 @@ package {
+     // all of the 'license_kinds' from "external_libdrm_license"
+     // to get the below license kinds:
+     //   SPDX-license-identifier-MIT
+-    default_applicable_licenses: ["external_libdrm_license"],
++    default_applicable_licenses: ["external_libdrm_license_orig"],
+ }
+ 
  build = ["Android.sources.bp"]
  
  cc_binary {
@@ -572,10 +586,15 @@ index c6aca2ef..e510bfe8 100644
          "buffers.c",
          "cursor.c",
 diff --git a/tests/proptest/Android.bp b/tests/proptest/Android.bp
-index d7d3280e..696d971e 100644
+index f6315565..696d971e 100644
 --- a/tests/proptest/Android.bp
 +++ b/tests/proptest/Android.bp
-@@ -8,10 +8,10 @@ package {
+@@ -4,14 +4,14 @@ package {
+     // all of the 'license_kinds' from "external_libdrm_license"
+     // to get the below license kinds:
+     //   SPDX-license-identifier-MIT
+-    default_applicable_licenses: ["external_libdrm_license"],
++    default_applicable_licenses: ["external_libdrm_license_orig"],
  }
  
  cc_binary {
@@ -591,10 +610,17 @@ index d7d3280e..696d971e 100644
 +    static_libs: ["libdrm_util_orig"],
  }
 diff --git a/tests/util/Android.bp b/tests/util/Android.bp
-index 7cc95a17..f22d3ead 100644
+index 7cc95a17..9710558c 100644
 --- a/tests/util/Android.bp
 +++ b/tests/util/Android.bp
-@@ -33,13 +33,13 @@ package {
+@@ -27,19 +27,19 @@ package {
+     // all of the 'license_kinds' from "external_libdrm_license"
+     // to get the below license kinds:
+     //   SPDX-license-identifier-MIT
+-    default_applicable_licenses: ["external_libdrm_license"],
++    default_applicable_licenses: ["external_libdrm_license_orig"],
+ }
+ 
  build = ["Android.sources.bp"]
  
  cc_library_static {

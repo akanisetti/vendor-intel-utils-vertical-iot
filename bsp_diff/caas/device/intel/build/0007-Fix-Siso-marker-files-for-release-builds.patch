@@ -1,0 +1,316 @@
+From f1477420c290f9f672647f423da3caf21864e479 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Sat, 8 Aug 2026 12:24:38 +0000
+Subject: [PATCH] Fix Siso marker files for release builds
+
+- Convert .PHONY publish targets to marker file pattern for Siso
+  tracking
+- Make debug-only targets conditional (kernel debug, firmware symbols)
+- Fix caas.img GPT dependency: only required when BUILD_GPTIMAGE=true
+- Add publish_flashfiles marker for userdebug signed builds
+- Move makefile conditionals outside recipe blocks (fix bash syntax
+  error)
+
+Tracked-On: NIACP3-1498
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ tasks/flashfiles.mk |   8 ++-
+ tasks/publish.mk    | 171 +++++++++++++++++++++++++++++++++-----------
+ 2 files changed, 136 insertions(+), 43 deletions(-)
+
+diff --git a/tasks/flashfiles.mk b/tasks/flashfiles.mk
+index 47ca9d4..dc0f893 100755
+--- a/tasks/flashfiles.mk
++++ b/tasks/flashfiles.mk
+@@ -448,7 +448,13 @@ check-vintf-all: $(CHECK_VINTF_ALL_MARKER)
+ FLASHFILES := $(PRODUCT_OUT)/flashfiles
+ 
+ ifeq ($(RELEASE_BUILD),true)
+-$(FLASHFILES): $(INTEL_FACTORY_FLASHFILES_TARGET) $(BUILT_RELEASE_FLASH_FILES_PACKAGE) $(gpt_name) $(PUBLISH_MKDIR_DEST_MARKER) $(PUBLISH_VERTICAL_MARKER) selinux_policy $(CHECK_VINTF_ALL_MARKER)
++ifeq ($(BUILD_GPTIMAGE),true)
++FLASHFILES_DEPS := $(gpt_name)
++else
++FLASHFILES_DEPS :=
++endif
++
++$(FLASHFILES): $(INTEL_FACTORY_FLASHFILES_TARGET) $(BUILT_RELEASE_FLASH_FILES_PACKAGE) $(FLASHFILES_DEPS) $(PUBLISH_MKDIR_DEST_MARKER) $(PUBLISH_VERTICAL_MARKER) selinux_policy $(CHECK_VINTF_ALL_MARKER)
+ 	@$(ACP) $(BUILT_RELEASE_FLASH_FILES_PACKAGE) $(publish_dest)
+ 	@$(ACP) $(BUILT_RELEASE_TARGET_FILES_PACKAGE) $(publish_dest)
+ ifeq (,$(filter  base_aaos aaos_iasw,$(TARGET_PRODUCT)))
+diff --git a/tasks/publish.mk b/tasks/publish.mk
+index 60f2a39..ddd8d06 100644
+--- a/tasks/publish.mk
++++ b/tasks/publish.mk
+@@ -54,40 +54,52 @@ $(PUB_QEMU_SCRIPTS): $(scriptstarball)
+ .PHONY: publish_qemu_scripts
+ publish_qemu_scripts: $(PUB_QEMU_SCRIPTS)
+ 
+-.PHONY: publish_kernel_debug
++# Publish Kernel debug
++PUBLISH_KERNEL_DEBUG_MARKER := $(PRODUCT_OUT)/.publish_kernel_debug_done
++
+ # if kernel is not a prebuilt one
+ # and kernel is built locally
+ ifeq ($(TARGET_PREBUILT_KERNEL),)
+ ifneq ($(LOCAL_KERNEL_PATH),)
+-# Publish Kernel debug
+-PUB_KERNEL_DBG := vmlinux.bz2 System.map.bz2
+ PUB_KERNEL_DBG_PATH := $(publish_dest)/kernel
+-#PUB_KERNEL_DBG := $(addprefix $(PUB_KERNEL_DBG_PATH)/,$(PUB_KERNEL_DBG))
++PUB_KERNEL_DBG_FILES := $(PUB_KERNEL_DBG_PATH)/vmlinux.bz2 $(PUB_KERNEL_DBG_PATH)/System.map.bz2
++
++# Individual file targets for kernel debug files
++$(PUB_KERNEL_DBG_PATH)/vmlinux.bz2: $(LOCAL_KERNEL)
++	@echo "Publish vmlinux"
++	$(hide) mkdir -p $(PUB_KERNEL_DBG_PATH)
++	$(hide) bzip2 -c $(LOCAL_KERNEL_PATH)/vmlinux > $@
+ 
+-.PHONY: $(PUB_KERNEL_DBG)
+-$(PUB_KERNEL_DBG): $(LOCAL_KERNEL)
+-	@echo "Publish $(basename $(@F))"
++$(PUB_KERNEL_DBG_PATH)/System.map.bz2: $(LOCAL_KERNEL)
++	@echo "Publish System.map"
+ 	$(hide) mkdir -p $(PUB_KERNEL_DBG_PATH)
+-	$(hide) bzip2 -c $(LOCAL_KERNEL_PATH)/$(basename $(@F)) > $(PUB_KERNEL_DBG_PATH)/$@
++	$(hide) bzip2 -c $(LOCAL_KERNEL_PATH)/System.map > $@
+ 
+ PUB_KERNEL_MODULES = kernel_modules-$(TARGET_BUILD_VARIANT).tar.bz2
++PUB_KERNEL_MODULES_PATH := $(PUB_KERNEL_DBG_PATH)/$(PUB_KERNEL_MODULES)
+ 
+-.PHONY: $(PUB_KERNEL_MODULES)
+-$(PUB_KERNEL_MODULES): $(LOCAL_KERNEL_PATH)/copy_modules
++$(PUB_KERNEL_MODULES_PATH): $(LOCAL_KERNEL_PATH)/copy_modules
+ 	@echo "Publish Kernel Modules"
+ 	$(hide) mkdir -p $(PUB_KERNEL_DBG_PATH)
+-	-tar -cjf $(PUB_KERNEL_DBG_PATH)/$@ -C $(LOCAL_KERNEL_PATH)/lib/modules .
++	-tar -cjf $@ -C $(LOCAL_KERNEL_PATH)/lib/modules .
+ 
+-publish_kernel_debug: $(PUB_KERNEL_DBG) $(PUB_KERNEL_MODULES)
++$(PUBLISH_KERNEL_DEBUG_MARKER): $(PUB_KERNEL_DBG_FILES) $(PUB_KERNEL_MODULES_PATH)
+ 	@echo "Publish kernel debug: $(notdir $^)"
+-	$(hide)($(ACP) $(PUB_KERNEL_DBG_PATH)/$(PUB_KERNEL_MODULES) $(publish_dest))
++	$(hide)($(ACP) $(PUB_KERNEL_MODULES_PATH) $(publish_dest))
+ 	$(hide)($(ACP) $(PUB_KERNEL_DBG_PATH)/vmlinux.bz2 $(publish_dest))
+ 	$(hide)($(ACP) $(PUB_KERNEL_DBG_PATH)/System.map.bz2 $(publish_dest))
++	@mkdir -p $(dir $@)
++	@touch $@
+ endif # $(LOCAL_KERNEL_PATH)
+ else
+-publish_kernel_debug:
+-	@echo "Publish kernel debug: skipped"
+-endif
++$(PUBLISH_KERNEL_DEBUG_MARKER):
++	@echo "Publish kernel debug: skipped (prebuilt kernel)"
++	@mkdir -p $(dir $@)
++	@touch $@
++endif # $(TARGET_PREBUILT_KERNEL)
++
++.PHONY: publish_kernel_debug
++publish_kernel_debug: $(PUBLISH_KERNEL_DEBUG_MARKER)
+ 
+ # Publish Sofia LTE CMCC images
+ ifeq ($(PUBLISH_CMCC_IMG),true)
+@@ -104,56 +116,101 @@ $(PUB_OSAGNOSTIC_TAG): publish_mkdir_dest $(OS_AGNOSTIC_INFO)
+ endif
+ 
+ # Publish kf4sbl
+-.PHONY: publish_kf4sbl
++PUBLISH_KF4SBL_MARKER := $(PRODUCT_OUT)/.publish_kf4sbl_done
++
+ ifeq ($(KERNELFLINGER_SUPPORT_NON_EFI_BOOT),true)
+-publish_kf4sbl: publish_mkdir_dest kf4sbl-$(TARGET_BUILD_VARIANT)
++$(PUBLISH_KF4SBL_MARKER): publish_mkdir_dest kf4sbl-$(TARGET_BUILD_VARIANT)
+ 	$(hide)($(ACP) $(BOARD_BOOTLOADER_IASIMAGE) $(publish_dest))
++	@mkdir -p $(dir $@)
++	@touch $@
+ else
+-publish_kf4sbl:
++$(PUBLISH_KF4SBL_MARKER):
+ 	@echo "Publish kf4sbl: skipped"
++	@mkdir -p $(dir $@)
++	@touch $@
+ endif
+ 
++.PHONY: publish_kf4sbl
++publish_kf4sbl: $(PUBLISH_KF4SBL_MARKER)
++
+ # Publish kf4sbl symbols files
+-.PHONY: publish_kf4sbl_symbols
++PUBLISH_KF4SBL_SYMBOLS_MARKER := $(PRODUCT_OUT)/.publish_kf4sbl_symbols_done
++
+ ifeq ($(TARGET_BUILD_VARIANT:debug=)|$(KERNELFLINGER_SUPPORT_NON_EFI_BOOT),user|true)
+-publish_kf4sbl_symbols: publish_mkdir_dest kf4sbl-$(TARGET_BUILD_VARIANT) fb4sbl-$(TARGET_BUILD_VARIANT)
++$(PUBLISH_KF4SBL_SYMBOLS_MARKER): publish_mkdir_dest kf4sbl-$(TARGET_BUILD_VARIANT) fb4sbl-$(TARGET_BUILD_VARIANT)
+ 	$(hide)($(ACP) $(KF4SBL_SYMBOLS_ZIP) $(FB4SBL_SYMBOLS_ZIP) $(publish_dest))
++	@mkdir -p $(dir $@)
++	@touch $@
+ else
+-publish_kf4sbl_symbols:
++$(PUBLISH_KF4SBL_SYMBOLS_MARKER):
+ 	@echo "Publish kf4sbl symbols: skipped"
++	@mkdir -p $(dir $@)
++	@touch $@
+ endif
+ 
+-# Publish Firmware symbols
+-.PHONY: publish_firmware_symbols
++.PHONY: publish_kf4sbl_symbols
++publish_kf4sbl_symbols: $(PUBLISH_KF4SBL_SYMBOLS_MARKER)
++
++# Publish Firmware symbols (debug builds only)
++PUBLISH_FIRMWARE_SYMBOLS_MARKER := $(PRODUCT_OUT)/.publish_firmware_symbols_done
+ FIRMWARE_SYMBOLS_FILE := $(TARGET_DEVICE)-symbols_firmware.zip
+ FIRMWARE_SYMBOLS_PATH := $(wildcard $(INTEL_PATH_HARDWARE)/$(TARGET_BOARD_PLATFORM)-fls/$(PRODUCT_MODEL)/symbols/*.elf)
+ 
+-publish_firmware_symbols: publish_mkdir_dest publish_flashfiles
+-ifneq ($(BUILD_OSAS),1) # prebuilt
+-	@echo "------------Publish prebuilt firmware symbols from $(FIRMWARE_SYMBOLS_PATH) -----------"
++ifneq ($(TARGET_BUILD_VARIANT),user)
++ifneq ($(BUILD_OSAS),1)
+ ifneq ($(FIRMWARE_SYMBOLS_PATH),)
++$(PUBLISH_FIRMWARE_SYMBOLS_MARKER): publish_mkdir_dest $(PUBLISH_FLASHFILES_MARKER)
++	@echo "Publish firmware symbols"
++	@echo "------------Publish prebuilt firmware symbols from $(FIRMWARE_SYMBOLS_PATH) -----------"
+ 	$(hide)-(zip -jry $(publish_dest)/$(FIRMWARE_SYMBOLS_FILE) $(FIRMWARE_SYMBOLS_PATH))
++	@mkdir -p $(dir $@)
++	@touch $@
++else
++$(PUBLISH_FIRMWARE_SYMBOLS_MARKER): publish_mkdir_dest $(PUBLISH_FLASHFILES_MARKER)
++	@echo "Publish firmware symbols: skipped (no firmware symbols path)"
++	@mkdir -p $(dir $@)
++	@touch $@
+ endif
+-else # built from source
++else
++$(PUBLISH_FIRMWARE_SYMBOLS_MARKER): publish_mkdir_dest $(PUBLISH_FLASHFILES_MARKER)
++	@echo "Publish firmware symbols"
+ 	@echo "------------Publish compiled firmware symbols-----------"
+-	$(info $(BOOTLOADER_BIN_PATH) $(VMM_BUILD_OUT) $(SECVM_BUILD_DIR))
+ 	$(hide)-(zip -jry $(publish_dest)/$(FIRMWARE_SYMBOLS_FILE) $(BOOTLOADER_BIN_PATH)/*/*.elf $(VMM_BUILD_OUT)/*/*.elf $(SECVM_BUILD_DIR)/*.elf $(THREADX_BUILD_DIR)/*.elf)
++	@mkdir -p $(dir $@)
++	@touch $@
++endif
++else
++$(PUBLISH_FIRMWARE_SYMBOLS_MARKER):
++	@echo "Publish firmware symbols: skipped (user build)"
++	@mkdir -p $(dir $@)
++	@touch $@
+ endif
+ 
++.PHONY: publish_firmware_symbols
++publish_firmware_symbols: $(PUBLISH_FIRMWARE_SYMBOLS_MARKER)
++
+ # Are we doing an 'sdk' type lunch target
+ PUBLISH_SDK := $(strip $(filter sdk sdk_x86,$(TARGET_PRODUCT)))
+ 
+ ifndef PUBLISH_SDK
+ 
+-.PHONY: publish_flashfiles
++PUBLISH_FLASHFILES_MARKER := $(PRODUCT_OUT)/.publish_flashfiles_done
++
+ ifdef INTEL_FACTORY_FLASHFILES_TARGET
+-publish_flashfiles: publish_mkdir_dest $(INTEL_FACTORY_FLASHFILES_TARGET)
++$(PUBLISH_FLASHFILES_MARKER): publish_mkdir_dest $(INTEL_FACTORY_FLASHFILES_TARGET)
+ 	@$(ACP) $(INTEL_FACTORY_FLASHFILES_TARGET) $(publish_dest)
++	@mkdir -p $(dir $@)
++	@touch $@
+ else
+-publish_flashfiles:
++$(PUBLISH_FLASHFILES_MARKER):
+ 	@echo "Warning: Unable to fulfill publish_flashfiles makefile request"
++	@mkdir -p $(dir $@)
++	@touch $@
+ endif
+ 
++.PHONY: publish_flashfiles
++publish_flashfiles: $(PUBLISH_FLASHFILES_MARKER)
++
+ .PHONY:publish_ifwi
+ ifeq ($(USE_INTEL_FLASHFILES),false)
+ publish_ifwi:
+@@ -206,15 +263,23 @@ endif # BUILD_GPTIMAGE
+ .PHONY: publish_gptimage_var
+ publish_gptimage_var: $(PUBLISH_GPTIMAGE_VAR_MARKER)
+ 
+-.PHONY: publish_androidia_image
++PUBLISH_ANDROIDIA_IMAGE_MARKER := $(PRODUCT_OUT)/.publish_androidia_image_done
++
+ ifdef ANDROID_IA_IMAGE
+-publish_androidia_image: publish_mkdir_dest $(ANDROID_IA_IMAGE)
++$(PUBLISH_ANDROIDIA_IMAGE_MARKER): publish_mkdir_dest $(ANDROID_IA_IMAGE)
+ 	@$(ACP) $(ANDROID_IA_IMAGE) $(publish_dest)
++	@mkdir -p $(dir $@)
++	@touch $@
+ else
+-publish_androidia_image:
++$(PUBLISH_ANDROIDIA_IMAGE_MARKER):
+ 	@echo "Warning: Unable to fulfill publish_androidia_image makefile request"
++	@mkdir -p $(dir $@)
++	@touch $@
+ endif
+ 
++.PHONY: publish_androidia_image
++publish_androidia_image: $(PUBLISH_ANDROIDIA_IMAGE_MARKER)
++
+ .PHONY: publish_otapackage
+ publish_otapackage: publish_mkdir_dest $(INTERNAL_OTA_PACKAGE_TARGET)
+ 	@$(ACP) $(INTERNAL_OTA_PACKAGE_TARGET) $(publish_dest)
+@@ -293,26 +358,48 @@ ifeq (,$(PUBLISH_GOALS))
+ PUBLISH_GOALS := $(DEFAULT_GOAL)
+ endif
+ 
+-.PHONY: publish_grubinstaller
++PUBLISH_GRUBINSTALLER_MARKER := $(PRODUCT_OUT)/.publish_grubinstaller_done
++
+ ifeq ($(ENABLE_GRUB_INSTALLER),true)
+ ifneq ($(TARGET_BUILD_VARIANT),user)
+-publish_grubinstaller: publish_mkdir_dest $(PROJECT_CELADON-EFI)
+-	echo compress $(PROJECT_CELADON-EFI) into $(PROJECT_CELADON-EFI).gz
+-	gzip -f $(PROJECT_CELADON-EFI)
++$(PUBLISH_GRUBINSTALLER_MARKER): publish_mkdir_dest $(PROJECT_CELADON-EFI)
++	@echo compress $(PROJECT_CELADON-EFI) into $(PROJECT_CELADON-EFI).gz
++	@gzip -f $(PROJECT_CELADON-EFI)
+ 	@$(ACP) $(PROJECT_CELADON-EFI).gz $(publish_dest)
++	@mkdir -p $(dir $@)
++	@touch $@
+ else
+-publish_grubinstaller:
+-	echo "Do not publish grub installer in user mode"
++$(PUBLISH_GRUBINSTALLER_MARKER):
++	@echo "Do not publish grub installer in user mode"
++	@mkdir -p $(dir $@)
++	@touch $@
+ endif
++else
++$(PUBLISH_GRUBINSTALLER_MARKER):
++	@echo "GRUB installer disabled"
++	@mkdir -p $(dir $@)
++	@touch $@
+ endif # ENABLE_GRUB_INSTALLER
+ 
++.PHONY: publish_grubinstaller
++publish_grubinstaller: $(PUBLISH_GRUBINSTALLER_MARKER)
++
+ .PHONY: publish
+ ifeq ($(ANDROID_AS_GUEST), true)
+ publish: aic
+ 	@echo Publish AIC docker images...
+ 	$(hide) mkdir -p $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)
+ 	$(hide) cp $(PRODUCT_OUT)/$(TARGET_AIC_FILE_NAME) $(TOP)/pub/$(TARGET_PRODUCT)/$(TARGET_BUILD_VARIANT)
++	@touch $@
+ else # ANDROID_AS_GUEST
+-publish: publish_mkdir_dest $(PUBLISH_GOALS) publish_ifwi publish_gptimage_var publish_firmware_symbols $(PUB_OSAGNOSTIC_TAG) publish_kf4sbl publish_kf4sbl_symbols $(PUB_CMCC_ZIP) publish_androidia_image publish_grubinstaller publish_kernel_debug
++# Only publish kernel debug symbols for debug/userdebug builds, not for user (production) builds
++ifneq ($(TARGET_BUILD_VARIANT),user)
++PUBLISH_KERNEL_DEBUG_DEP := publish_kernel_debug
++else
++PUBLISH_KERNEL_DEBUG_DEP :=
++endif
++
++publish: publish_mkdir_dest $(PUBLISH_GOALS) publish_ifwi publish_gptimage_var publish_firmware_symbols $(PUB_OSAGNOSTIC_TAG) publish_kf4sbl publish_kf4sbl_symbols $(PUB_CMCC_ZIP) publish_androidia_image publish_grubinstaller $(PUBLISH_KERNEL_DEBUG_DEP)
+ 	@$(ACP) out/dist/* $(publish_dest)
++	@touch $@
+ endif # ANDROID_AS_GUEST
+-- 
+2.34.1
+

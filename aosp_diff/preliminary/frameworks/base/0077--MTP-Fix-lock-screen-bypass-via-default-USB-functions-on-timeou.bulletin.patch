@@ -1,0 +1,85 @@
+From 25ff242509e57e58376b3b94561fe7e57a0567f8 Mon Sep 17 00:00:00 2001
+From: Febin Thattil <febinthattil@google.com>
+Date: Mon, 3 Aug 2026 00:43:03 -0700
+Subject: [PATCH] [MTP] Fix lock-screen bypass via default USB functions on
+ timeout
+
+When switching USB functions times out in UsbHandlerHal (due to HAL
+delay or host disruption), the MSG_SET_FUNCTIONS_TIMEOUT and
+MSG_FUNCTION_SWITCH_TIMEOUT handlers recover by falling back to the
+default USB configuration (mScreenUnlockedFunctions).
+
+However, neither handler checked the lock screen state. If a user set
+PTP (or MIDI, UVC, RNDIS) as their default USB configuration in
+Developer Options, a malicious host could exploit these timeout paths to
+enable the data transfer interface on a locked device without user
+interaction.
+
+This is a direct follow-up and remediation for the incomplete fix in
+CVE-2024-43085.
+
+This CL adds a check for !isScreenLocked() in both timeout handlers
+before applying the default functions. If the screen is locked, we
+safely fall back to FUNCTION_NONE (charging only).
+
+Bug: 519884370
+Flag: EXEMPT BUGFIX
+Test: Compile check services.usb
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:5683ad06943e188cf04a03bffd3c3157d2c455b2
+Merged-In: Id85a3170c8b42b9d38be01eb230fa7d6b8ff7983
+Change-Id: Id85a3170c8b42b9d38be01eb230fa7d6b8ff7983
+---
+ .../android/server/usb/UsbDeviceManager.java  | 23 +++++++++++++++----
+ 1 file changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/services/usb/java/com/android/server/usb/UsbDeviceManager.java b/services/usb/java/com/android/server/usb/UsbDeviceManager.java
+index e01965492380..0a587f8cbdea 100644
+--- a/services/usb/java/com/android/server/usb/UsbDeviceManager.java
++++ b/services/usb/java/com/android/server/usb/UsbDeviceManager.java
+@@ -1960,6 +1960,10 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+             return mScreenUnlockedFunctions;
+         }
+ 
++        protected boolean isScreenLocked() {
++            return mScreenLocked;
++        }
++
+         public int getUsbSpeed() {
+             return mUsbSpeed;
+         }
+@@ -2550,8 +2554,13 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+                     Slog.e(TAG, "Set functions timed out! no reply from usb hal"
+                                 + " ,operationId:" + operationId);
+                     if (msg.arg1 != 1) {
+-                        // Set this since default function may be selected from Developer options
+-                        setEnabledFunctions(mScreenUnlockedFunctions, false, operationId);
++                        // If the screen is locked, we must not enable default data functions
++                        // on timeout to prevent lock-screen bypass.
++                        if (!isScreenLocked()) {
++                            setEnabledFunctions(mScreenUnlockedFunctions, false, operationId);
++                        } else {
++                            setEnabledFunctions(UsbManager.FUNCTION_NONE, false, operationId);
++                        }
+                     }
+                     break;
+                 case MSG_GET_CURRENT_USB_FUNCTIONS:
+@@ -2583,9 +2592,13 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+                         if (mCurrentFunctions == UsbManager.FUNCTION_ACCESSORY) {
+                             notifyAccessoryModeExit(operationId);
+                         } else {
+-                            // Set this since default function may be selected from Developer
+-                            // options
+-                            setEnabledFunctions(mScreenUnlockedFunctions, false, operationId);
++                            // If the screen is locked, we must not enable default
++                            // data functions on timeout to prevent bypass.
++                            if (!isScreenLocked()) {
++                                setEnabledFunctions(mScreenUnlockedFunctions, false, operationId);
++                            } else {
++                                setEnabledFunctions(UsbManager.FUNCTION_NONE, false, operationId);
++                            }
+                         }
+                     }
+                     break;
+-- 
+2.56.0.385.gac671c819a-goog
+

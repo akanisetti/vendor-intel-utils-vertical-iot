@@ -1,0 +1,123 @@
+From c0d3ccaf3e9542c0406db9ebef96fe318802dca7 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 13 Nov 2026 10:32:04 +0000
+Subject: [PATCH] AUDIO: Fix onboard mic recording routing to incorrect ALSA
+ device
+
+getCardAndDeviceId() derived the capture PCM device id the same way
+as for output streams, defaulting to device 0 (the output-only
+"Jack Out" PCM) whenever no HDMI jack was active. This caused the
+wired headset mic and onboard mic capture streams to open against a
+playback-only device, so AudioFlinger's startInput() always failed
+with -38 and no audio could ever be recorded.
+
+Pass the stream direction into getCardAndDeviceId() and resolve the
+capture device id directly from the connected device type instead
+(pcm1c for the wired headset mic, pcm4c for the onboard mic).
+
+Separately, the generic ALSA mixer only recognized plain "Capture
+Switch"/"Capture Volume" control names, but the WCL rt722 codec
+exposes these as "rt722 FU0F Capture Switch"/"rt722 FU0F Capture
+Volume". Because of this mismatch, the HAL's mic mute/gain caching
+silently failed to apply to hardware, leaving the capture path muted
+after every boot even once routed to the correct device. Add the
+rt722-specific names as additional recognized control names so the
+HAL can unmute and set gain on the real hardware control.
+
+Verified on WCL CRB: recorded audio via a test app over the wired
+headset mic is now audible with real signal (previously 0 bytes,
+then silence even after the device-id fix alone).
+
+Tracked-On: NIACP3-1695
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ audio/aidl/default/alsa/Mixer.cpp             |  8 +++++--
+ .../default/include/core-impl/StreamPrimary.h |  1 +
+ audio/aidl/default/primary/StreamPrimary.cpp  | 24 +++++++++++++++----
+ 3 files changed, 27 insertions(+), 6 deletions(-)
+
+diff --git a/audio/aidl/default/alsa/Mixer.cpp b/audio/aidl/default/alsa/Mixer.cpp
+index cd9287d17a..7eb38e273f 100644
+--- a/audio/aidl/default/alsa/Mixer.cpp
++++ b/audio/aidl/default/alsa/Mixer.cpp
+@@ -49,8 +49,12 @@ const std::map<Mixer::Control, std::vector<Mixer::ControlNamesAndExpectedCtlType
+                  {{"Headphone Playback Volume", MIXER_CTL_TYPE_INT},
+                   {"Headset Playback Volume", MIXER_CTL_TYPE_INT},
+                   {"PCM Playback Volume", MIXER_CTL_TYPE_INT}}},
+-                {Mixer::MIC_SWITCH, {{"Capture Switch", MIXER_CTL_TYPE_BOOL}}},
+-                {Mixer::MIC_GAIN, {{"Capture Volume", MIXER_CTL_TYPE_INT}}}};
++                {Mixer::MIC_SWITCH,
++                 {{"Capture Switch", MIXER_CTL_TYPE_BOOL},
++                  {"rt722 FU0F Capture Switch", MIXER_CTL_TYPE_BOOL}}},
++                {Mixer::MIC_GAIN,
++                 {{"Capture Volume", MIXER_CTL_TYPE_INT},
++                  {"rt722 FU0F Capture Volume", MIXER_CTL_TYPE_INT}}}};
+ 
+ // static
+ Mixer::Controls Mixer::initializeMixerControls(struct mixer* mixer) {
+diff --git a/audio/aidl/default/include/core-impl/StreamPrimary.h b/audio/aidl/default/include/core-impl/StreamPrimary.h
+index 87dcc3b166..5599cc9c8e 100644
+--- a/audio/aidl/default/include/core-impl/StreamPrimary.h
++++ b/audio/aidl/default/include/core-impl/StreamPrimary.h
+@@ -64,6 +64,7 @@ class StreamPrimary : public StreamAlsaMonoPipe {
+             primary::PrimaryMixer::kInvalidAlsaCard, primary::PrimaryMixer::kInvalidAlsaDevice};
+ 
+     static AlsaDeviceId getCardAndDeviceId(
++            bool isInput,
+             const std::vector<::aidl::android::media::audio::common::AudioDevice>& devices);
+     static bool useStubStream(bool isInput,
+                               const ::aidl::android::media::audio::common::AudioDevice& device);
+diff --git a/audio/aidl/default/primary/StreamPrimary.cpp b/audio/aidl/default/primary/StreamPrimary.cpp
+index 34b7599511..c36910f356 100644
+--- a/audio/aidl/default/primary/StreamPrimary.cpp
++++ b/audio/aidl/default/primary/StreamPrimary.cpp
+@@ -149,7 +149,8 @@ ndk::ScopedAStatus StreamPrimary::setConnectedDevices(const ConnectedDevices& de
+         return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
+     }
+     const bool useStubDriver = devices.empty() || useStubStream(mIsInput, devices[0]);
+-    const AlsaDeviceId alsaDeviceId = useStubDriver ? kStubDeviceId : getCardAndDeviceId(devices);
++    const AlsaDeviceId alsaDeviceId =
++            useStubDriver ? kStubDeviceId : getCardAndDeviceId(mIsInput, devices);
+     {
+         std::lock_guard l(mLock);
+         mAlsaDeviceId = alsaDeviceId;
+@@ -181,7 +182,7 @@ bool StreamPrimary::isStubStream() {
+ 
+ // static
+ StreamPrimary::AlsaDeviceId StreamPrimary::getCardAndDeviceId(
+-        const std::vector<AudioDevice>& devices) {
++        bool isInput, const std::vector<AudioDevice>& devices) {
+     if (devices.empty() || devices[0].address.getTag() != AudioDeviceAddress::id) {
+         return kDefaultCardAndDeviceId;
+     }
+@@ -190,10 +191,25 @@ StreamPrimary::AlsaDeviceId StreamPrimary::getCardAndDeviceId(
+     // "sofsoundwire" is the card registered by SOF on SoundWire-based platforms (e.g. WCL);
+     // "PCH" is the legacy HDA card name used by older platforms (e.g. RPL-S). Try both so a
+     // single HAL binary works across platform generations.
+-    cardAndDeviceId.first = primary::PrimaryMixer::get_pcm_card("sofsoundwire");
+-    if (cardAndDeviceId.first == primary::PrimaryMixer::kInvalidAlsaCard) {
++    const bool isSofSoundwire =
++            (cardAndDeviceId.first = primary::PrimaryMixer::get_pcm_card("sofsoundwire")) !=
++            primary::PrimaryMixer::kInvalidAlsaCard;
++    if (!isSofSoundwire) {
+         cardAndDeviceId.first = primary::PrimaryMixer::get_pcm_card("PCH");
+     }
++    if (isInput && isSofSoundwire) {
++        // The HDMI jack lookup below only applies to output routing; capture PCM device
++        // numbering is fixed per device type (e.g. pcm1c for the wired headset mic,
++        // pcm4c for the onboard mic), so derive it directly instead of defaulting to device 0
++        // (which is the output-only "Jack Out" PCM and has no capture capability). This
++        // numbering is specific to the WCL/SoundWire topology; legacy PCH platforms fall
++        // through to the generic lookup below, preserving their existing routing.
++        cardAndDeviceId.second =
++                devices[0].type.type == AudioDeviceType::IN_HEADSET ? 1 : 4;
++        LOG(DEBUG) << __func__ << ": parsed with card id " << cardAndDeviceId.first
++                   << ", device id " << cardAndDeviceId.second;
++        return cardAndDeviceId;
++    }
+     cardAndDeviceId.second = primary::PrimaryMixer::get_pcm_device(cardAndDeviceId.first);
+     if (cardAndDeviceId.second == -1) {
+            cardAndDeviceId.second = 0;
+-- 
+2.34.1
+

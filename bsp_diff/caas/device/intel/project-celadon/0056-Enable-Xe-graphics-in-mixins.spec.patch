@@ -1,0 +1,27 @@
+From 7b7f247d90c00c886330bf35bd6b8ee0a62945bb Mon Sep 17 00:00:00 2001
+From: Basil Chew <basil.chew@intel.com>
+Date: Thu, 14 May 2026 15:36:09 +0800
+Subject: [PATCH] Enable Xe graphics in mixins.spec
+
+Tracked-On: NIACP3-1254
+Signed-off-by: Basil Chew <basil.chew@intel.com>
+---
+ caas/mixins.spec | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/caas/mixins.spec b/caas/mixins.spec
+index 51ffeb01..9902c433 100755
+--- a/caas/mixins.spec
++++ b/caas/mixins.spec
+@@ -26,7 +26,7 @@ allow-missing-dependencies: true
+ dexpreopt: true
+ pstore: false
+ media: auto(enable_msdk_omx=false, add_sw_msdk=false, opensource_msdk=true, opensource_msdk_omx_il=false)
+-graphics: auto(gen9+=true,vulkan=true,minigbm=true,gralloc1=true,enable_guc=false,use_vulkan=false)
++graphics: auto(gen9+=true,vulkan=true,minigbm=true,gralloc1=true,enable_guc=false,use_vulkan=false,graphics_xe=true,graphics_i915=false)
+ storage: sdcard-v-usb-only(adoptablesd=false,adoptableusb=false)
+ ethernet: dhcp
+ camera-ext: ext-camera-only
+-- 
+2.35.3
+

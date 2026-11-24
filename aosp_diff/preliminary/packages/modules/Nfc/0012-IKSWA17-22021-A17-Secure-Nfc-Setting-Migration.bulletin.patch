@@ -1,0 +1,45 @@
+From 1b24381d4caba7a505ca6def6eb9ee3eb9fb1481 Mon Sep 17 00:00:00 2001
+From: Kyle Hsiao <kylehsiao@google.com>
+Date: Mon, 29 Jun 2026 09:07:50 +0000
+Subject: [PATCH] IKSWA17-22021: A17 Secure Nfc Setting Migration
+
+In version A16, the default user setting is stored in `secere_nfc_on`.
+Upon upgrading to A17, the value from `secere_nfc_on` must be
+migrated to `secere_nfc_on_0` when NFC starts up.
+Remove old setting after Migration is complete.
+
+Bug: 504619730
+Bug: 368376056
+Test: atest NfcNciUnitTests, atest NfcServiceTest
+Flag: EXEMPT BUGFIX
+Change-Id: I0a27f6bfcc46a2b7333c814a55aeea93185f2c93
+Merged-In: I0a27f6bfcc46a2b7333c814a55aeea93185f2c93
+(cherry picked from commit 8975685598cd95a9a64afffbae7c94fd345b0c59)
+---
+ NfcNci/src/com/android/nfc/NfcService.java | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/NfcNci/src/com/android/nfc/NfcService.java b/NfcNci/src/com/android/nfc/NfcService.java
+index 9dc6a3cd6..53f5184c9 100644
+--- a/NfcNci/src/com/android/nfc/NfcService.java
++++ b/NfcNci/src/com/android/nfc/NfcService.java
+@@ -1385,6 +1385,16 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback
+         mForegroundUtils = mNfcInjector.getForegroundUtils();
+         mIsSecureNfcCapable = mIsHceCapable && mDeviceConfigFacade.isSecureNfcCapable();
+         String secureNfcPreferenceKey = getSecureNfcPreferenceKeyForUser(mUserId);
++        if (mUserId == UserHandle.SYSTEM.getIdentifier() && mPrefs.contains(PREF_SECURE_NFC_ON)) {
++            boolean oldSecureNfcEnabled = mPrefs.getBoolean(PREF_SECURE_NFC_ON,
++                    mDeviceConfigFacade.getDefaultSecureNfcState())
++                    && mIsSecureNfcCapable;
++            mPrefsEditor.putBoolean(secureNfcPreferenceKey, oldSecureNfcEnabled);
++            mPrefsEditor.remove(PREF_SECURE_NFC_ON);
++            mPrefsEditor.apply();
++            Log.i(TAG, "OTA Migration: Successfully migrated legacy PREF_SECURE_NFC_ON ("
++                + oldSecureNfcEnabled + ") to " + secureNfcPreferenceKey + " and removed old key.");
++        }
+         mIsSecureNfcEnabled = mPrefs.getBoolean(secureNfcPreferenceKey,
+             mDeviceConfigFacade.getDefaultSecureNfcState())
+             && mIsSecureNfcCapable;
+-- 
+2.56.0.385.gac671c819a-goog
+

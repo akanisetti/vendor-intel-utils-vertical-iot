@@ -1,0 +1,89 @@
+From d2a6a090b15cf28658e54409faa54e6722095759 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 13 Oct 2026 02:25:03 +0000
+Subject: [PATCH] Build against AOSP external/minigbm
+
+Gralloc moved from hardware/intel/external/minigbm-intel to AOSP
+external/minigbm, which now carries i915_private_android_types.h
+(Intel private HAL formats) as an Intel adaptation patch.
+
+ - Point the cros_gralloc include dir at external/minigbm/cros_gralloc.
+ - Drop the minigbm-intel root include dir from c2_utils.
+ - Remove the unused cros_gralloc_helpers.h includes from the mapper5
+   and gralloc4 wrappers; nothing from minigbm internals is used.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ Android.bp                    | 2 +-
+ c2_utils/Android.bp           | 1 -
+ c2_utils/src/mfx_gralloc4.cpp | 1 -
+ c2_utils/src/mfx_mapper5.cpp  | 1 -
+ fuzzer/Android.bp             | 2 +-
+ 5 files changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/Android.bp b/Android.bp
+index eb6e49b..f4f7aaf 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -62,7 +62,7 @@ mfx_cc_defaults {
+     export_include_dirs: ["include"],
+ 
+     include_dirs: [
+-        "hardware/intel/external/minigbm-intel/cros_gralloc", // remove then minigbm gets Android.bp
++        "external/minigbm/cros_gralloc",
+         "frameworks/av/media/codec2/sfplugin/utils",
+         "frameworks/av/media/codec2/vndk/include",
+         "frameworks/native/include",
+diff --git a/c2_utils/Android.bp b/c2_utils/Android.bp
+index ac1a17c..ce88b74 100644
+--- a/c2_utils/Android.bp
++++ b/c2_utils/Android.bp
+@@ -52,7 +52,6 @@ cc_library_static {
+     ],
+ 
+     include_dirs: [
+-        "hardware/intel/external/minigbm-intel",
+         "frameworks/native/include",
+         "frameworks/native/libs/ui/include",
+         "frameworks/native/libs/nativewindow/include",
+diff --git a/c2_utils/src/mfx_gralloc4.cpp b/c2_utils/src/mfx_gralloc4.cpp
+index 09a7145..fd01499 100644
+--- a/c2_utils/src/mfx_gralloc4.cpp
++++ b/c2_utils/src/mfx_gralloc4.cpp
+@@ -19,7 +19,6 @@
+ // SOFTWARE.
+ 
+ #include "mfx_gralloc4.h"
+-#include "cros_gralloc/cros_gralloc_helpers.h"
+ #include "mfx_c2_utils.h"
+ #include "mfx_debug.h"
+ #include "mfx_c2_debug.h"
+diff --git a/c2_utils/src/mfx_mapper5.cpp b/c2_utils/src/mfx_mapper5.cpp
+index 12a4822..e302e59 100644
+--- a/c2_utils/src/mfx_mapper5.cpp
++++ b/c2_utils/src/mfx_mapper5.cpp
+@@ -19,7 +19,6 @@
+ #include <vndksupport/linker.h>
+ 
+ #include "mfx_mapper5.h"
+-#include "cros_gralloc/cros_gralloc_helpers.h"
+ #include "mfx_c2_utils.h"
+ #include "mfx_debug.h"
+ #include "mfx_c2_debug.h"
+diff --git a/fuzzer/Android.bp b/fuzzer/Android.bp
+index 1d077a9..c14c1ad 100644
+--- a/fuzzer/Android.bp
++++ b/fuzzer/Android.bp
+@@ -50,7 +50,7 @@ cc_defaults {
+ 
+     include_dirs: [
+         "vendor/intel/mediasdk_c2/c2_store/include",
+-        "hardware/intel/external/minigbm-intel/cros_gralloc",
++        "external/minigbm/cros_gralloc",
+     ],
+ 
+     header_libs: [
+-- 
+2.34.1
+

@@ -1,0 +1,130 @@
+From 05856980b87d6e1efa0f14fd854b858e35658df2 Mon Sep 17 00:00:00 2001
+From: Aishwarya Mallampati <amallampati@google.com>
+Date: Wed, 12 Aug 2026 12:13:52 -0700
+Subject: [PATCH] Enforce allowInteractingWithEntryOfSubscription for all 
+ MmsProvider insert tables
+
+Move the allowInteractingWithEntryOfSubscription check outside the TABLE_PDU condition block
+in MmsProvider.insertInternal to enforce subscription ownership validation for TABLE_ADDR
+and TABLE_PART inserts, preventing cross-profile MMS content injection.
+
+Bug: 517376786
+Test: MmsProviderTest
+Flag: EXEMPT BUGFIX
+TAG=agy
+CONV=52c8d323-cfed-4763-aabf-6442f55efd1e
+Change-Id: Id1eea6c96f7f5733140d738544ccfac4291c8be2
+Merged-In: Id1eea6c96f7f5733140d738544ccfac4291c8be2
+(cherry picked from commit a8cf618a797f4b8c33f95434cfff24b71b3a9cd1)
+---
+ .../providers/telephony/MmsProvider.java      | 14 +++---
+ .../providers/telephony/MmsProviderTest.java  | 47 ++++++++++++++++++-
+ 2 files changed, 53 insertions(+), 8 deletions(-)
+
+diff --git a/src/com/android/providers/telephony/MmsProvider.java b/src/com/android/providers/telephony/MmsProvider.java
+index 769941b6..71bc8254 100644
+--- a/src/com/android/providers/telephony/MmsProvider.java
++++ b/src/com/android/providers/telephony/MmsProvider.java
+@@ -752,14 +752,14 @@ public class MmsProvider extends ContentProvider {
+             }
+         }
+ 
+-        if (table.equals(TABLE_PDU)) {
+-            if (!ProviderUtil.allowInteractingWithEntryOfSubscription(getContext(), subId,
+-                    callerUserHandle)) {
+-                TelephonyUtils.showSwitchToManagedProfileDialogIfAppropriate(getContext(), subId,
+-                        callerUid, callerPkg);
+-                return null;
+-            }
++        if (!ProviderUtil.allowInteractingWithEntryOfSubscription(
++                getContext(), subId, callerUserHandle)) {
++            TelephonyUtils.showSwitchToManagedProfileDialogIfAppropriate(
++                    getContext(), subId, callerUid, callerPkg);
++            return null;
++        }
+ 
++        if (table.equals(TABLE_PDU)) {
+             boolean addDate = !values.containsKey(Mms.DATE);
+             boolean addMsgBox = !values.containsKey(Mms.MESSAGE_BOX);
+ 
+diff --git a/tests/src/com/android/providers/telephony/MmsProviderTest.java b/tests/src/com/android/providers/telephony/MmsProviderTest.java
+index 0a6883e1..167d8658 100644
+--- a/tests/src/com/android/providers/telephony/MmsProviderTest.java
++++ b/tests/src/com/android/providers/telephony/MmsProviderTest.java
+@@ -36,7 +36,11 @@ import android.content.res.Resources;
+ import android.database.ContentObserver;
+ import android.database.Cursor;
+ import android.net.Uri;
++import android.os.UserHandle;
++import android.os.UserManager;
+ import android.provider.Telephony;
++import android.telephony.SubscriptionInfo;
++import android.telephony.SubscriptionManager;
+ import android.telephony.TelephonyManager;
+ import android.test.mock.MockContentResolver;
+ import com.android.internal.telephony.metrics.ReadRestrictionStatsLogger;
+@@ -47,7 +51,8 @@ import java.nio.file.Files;
+ import java.nio.file.Path;
+ import java.nio.file.Paths;
+ import org.mockito.Mock;
+-
++import java.util.ArrayList;
++import java.util.List;
+ import junit.framework.TestCase;
+ 
+ import org.junit.Test;
+@@ -95,6 +100,28 @@ public class MmsProviderTest extends TestCase {
+         when(resources.getString(anyInt())).thenReturn("");
+         ReadRestrictionStatsLogger.setInstance(mock(ReadRestrictionStatsLogger.class));
+ 
++        SubscriptionManager subscriptionManager = mock(SubscriptionManager.class);
++        UserManager userManager = mock(UserManager.class);
++        when(context.getSystemServiceName(eq(SubscriptionManager.class)))
++                .thenReturn(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
++        when(context.getSystemService(eq(Context.TELEPHONY_SUBSCRIPTION_SERVICE)))
++                .thenReturn(subscriptionManager);
++        when(context.getSystemServiceName(eq(UserManager.class)))
++                .thenReturn(Context.USER_SERVICE);
++        when(context.getSystemService(eq(Context.USER_SERVICE)))
++                .thenReturn(userManager);
++
++        List<SubscriptionInfo> subInfoList = new ArrayList<>();
++        SubscriptionInfo subInfo = mock(SubscriptionInfo.class);
++        when(subInfo.getSubscriptionId()).thenReturn(1);
++        subInfoList.add(subInfo);
++
++        when(subscriptionManager.getSubscriptionInfoListAssociatedWithUser(any(UserHandle.class)))
++                .thenReturn(subInfoList);
++        when(subscriptionManager.isSubscriptionAssociatedWithUser(anyInt(), any(UserHandle.class)))
++                .thenReturn(true);
++        when(userManager.isManagedProfile(anyInt())).thenReturn(false);
++
+         /**
+          * This is used to give the MmsProviderTest a mocked context which takes a
+          * MmsProvider and attaches it to the ContentResolver with telephony authority.
+@@ -273,4 +300,22 @@ public class MmsProviderTest extends TestCase {
+             }
+         }
+     }
++
++    @Test
++    public void testInsert_unassociatedSubId_forAddrOrPartTable_isBlocked() {
++        SubscriptionManager mockSubManager = mock(SubscriptionManager.class);
++        when(context.getSystemService(SubscriptionManager.class)).thenReturn(mockSubManager);
++        when(context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE)).thenReturn(mockSubManager);
++        when(mockSubManager.isSubscriptionAssociatedWithUser(eq(1), any(UserHandle.class)))
++                .thenReturn(false);
++
++        ContentValues values = new ContentValues();
++        values.put(Telephony.Mms.SUBSCRIPTION_ID, 1);
++        values.put(Telephony.Mms.Addr.ADDRESS, "12345");
++        values.put(Telephony.Mms.Addr.TYPE, 151);
++
++        Uri addrUri = Uri.parse("content://mms/1/addr");
++        Uri resultUri = mContentResolver.insert(addrUri, values);
++        assertNull(resultUri);
++    }
+ }
+-- 
+2.34.1
+

@@ -1,0 +1,95 @@
+From e427285170ef8741f34f41c0ac9392af7a901f5b Mon Sep 17 00:00:00 2001
+From: Hyein Yu <hyeinyu@google.com>
+Date: Thu, 2 Jul 2026 08:24:48 +0000
+Subject: [PATCH] ImsPhone: Catch RuntimeException and fix P-Associated-URI
+ parse
+
+Fixes an uncaught ArrayIndexOutOfBoundsException in
+PhoneNumberManagerService and ImsPhone caused by processing a
+P-Associated-URI composed only of the delimiter (e.g., sip:@). By
+passing a limit to split, the array is never empty. Additionally,
+catches RuntimeException from PhoneNumberManager in ImsPhone to prevent
+crash loops.
+
+Bug: 517377202
+Test: atest ImsPhoneTest
+Flag: EXEMPT BUGFIX
+
+TAG=agy
+CONV=96a2cb83-a901-4037-81da-7fa7df3a933f
+
+Change-Id: I9aff02cca1107dfcfca14b06710ec8e7d0d2b258
+---
+ .../internal/telephony/imsphone/ImsPhone.java   |  6 +++---
+ .../telephony/imsphone/ImsPhoneTest.java        | 17 +++++++++++++++++
+ 2 files changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/src/java/com/android/internal/telephony/imsphone/ImsPhone.java b/src/java/com/android/internal/telephony/imsphone/ImsPhone.java
+index 8f50371135..c1bebe8348 100644
+--- a/src/java/com/android/internal/telephony/imsphone/ImsPhone.java
++++ b/src/java/com/android/internal/telephony/imsphone/ImsPhone.java
+@@ -2766,7 +2766,7 @@ public class ImsPhone extends ImsPhoneBase {
+                         loge("setPhoneNumberForSourceIms: PhoneNumberManager return error "
+                                 + result.getErrorCode());
+                     }
+-                } catch (IllegalArgumentException e) {
++                } catch (RuntimeException e) {
+                     loge("setPhoneNumberForSourceIms: failed to parse phone number, " + e);
+                 }
+             } else {
+@@ -2849,7 +2849,7 @@ public class ImsPhone extends ImsPhoneBase {
+             // "Global number" should be in E.164 format starting with "+" e.g. "+447539447777"
+             return intermediate.filter(ssp -> ssp != null && ssp.startsWith("+"))
+                     // Remove whatever after "@" for sip URI
+-                    .map(ssp -> ssp.split("@")[0])
++                    .map(ssp -> ssp.split("@", 2)[0])
+                     // Returns the first winner
+                     .findFirst()
+                     .orElse(null);
+@@ -2857,7 +2857,7 @@ public class ImsPhone extends ImsPhoneBase {
+             // non global number format
+             return intermediate.filter(ssp -> ssp != null)
+                     // Remove whatever after "@" for sip URI
+-                    .map(ssp -> ssp.split("@")[0])
++                    .map(ssp -> ssp.split("@", 2)[0])
+                     // regular expression, allow only number
+                     .filter(ssp -> ssp.matches("^[0-9]+$"))
+                     // Returns the first winner
+diff --git a/tests/telephonytests/src/com/android/internal/telephony/imsphone/ImsPhoneTest.java b/tests/telephonytests/src/com/android/internal/telephony/imsphone/ImsPhoneTest.java
+index 85baa715d4..0941a7c153 100644
+--- a/tests/telephonytests/src/com/android/internal/telephony/imsphone/ImsPhoneTest.java
++++ b/tests/telephonytests/src/com/android/internal/telephony/imsphone/ImsPhoneTest.java
+@@ -1124,6 +1124,14 @@ public class ImsPhoneTest extends TelephonyTest {
+ 
+         verify(mSubscriptionManagerService, never()).setNumberFromIms(anyInt(), anyString());
+ 
++        // 5. Malformed URI (sip:@); do not set
++        associatedUris = new Uri[] {
++            Uri.parse("sip:@")
++        };
++        mImsPhoneUT.setPhoneNumberForSourceIms(associatedUris);
++
++        verify(mSubscriptionManagerService, never()).setNumberFromIms(anyInt(), anyString());
++
+         // Clean up
+         mContextFixture.addCallingOrSelfPermission("");
+     }
+@@ -1236,6 +1244,15 @@ public class ImsPhoneTest extends TelephonyTest {
+             throw new AssertionError("not expected exception", IllegalArgumentException);
+         }
+ 
++        // set throw RuntimeException for mock
++        doThrow(new NullPointerException("test"))
++            .when(mPhoneNumberManager).parsePhoneNumber(any(), any());
++        try {
++            mImsPhoneUT.setPhoneNumberForSourceIms(associatedUris);
++        } catch (Exception e) {
++            throw new AssertionError("not expected exception", e);
++        }
++
+         // put input with null
+         mImsPhoneUT.setPhoneNumberForSourceIms(null);
+ 
+-- 
+2.56.0.385.gac671c819a-goog
+

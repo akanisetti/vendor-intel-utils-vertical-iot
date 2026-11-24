@@ -1,0 +1,38 @@
+From 97d7f2a57ad70f987e9712044376e2fe04fcd626 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 7 Aug 2026 08:45:49 +0000
+Subject: [PATCH] Remove unused adb variable
+
+changes:
+- recovery.cpp: delete unused bool adb variable and assignment
+  statements that served no functional purpose in PromptAndWait()
+
+Tracked-On: NIACP3-1498
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ recovery.cpp | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/recovery.cpp b/recovery.cpp
+index 6bb126e8..2ff51d45 100644
+--- a/recovery.cpp
++++ b/recovery.cpp
+@@ -490,7 +490,6 @@ static Device::BuiltinAction PromptAndWait(Device* device, InstallResult status)
+         update_in_progress = true;
+         WriteUpdateInProgress();
+ 
+-        bool adb = true;
+         Device::BuiltinAction reboot_action{};
+         if (chosen_action == Device::ENTER_RESCUE) {
+           // Switch to graphics screen.
+@@ -499,7 +498,6 @@ static Device::BuiltinAction PromptAndWait(Device* device, InstallResult status)
+         } else if (chosen_action == Device::APPLY_ADB_SIDELOAD) {
+           status = ApplyFromAdb(device, false /* rescue_mode */, &reboot_action);
+         } else {
+-          adb = false;
+           if (chosen_action == Device::APPLY_SDCARD)
+             status = ApplyFromSdcard(device);
+           else if (chosen_action == Device::APPLY_UDISK)
+-- 
+2.34.1
+

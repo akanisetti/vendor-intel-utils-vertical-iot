@@ -1,0 +1,126 @@
+From 6af54b00a2d48c4d49564a4058d045d3726c2628 Mon Sep 17 00:00:00 2001
+From: Aishwarya Mallampati <amallampati@google.com>
+Date: Wed, 15 Jul 2026 14:26:40 -0700
+Subject: [PATCH] Restrict sub_id=-1 filter inclusion to system user in
+ ProviderUtil.getSelectionBySubIds
+
+Modify ProviderUtil.getSelectionBySubIds so that INVALID_SUBSCRIPTION_ID (-1) is only added
+to associatedSubscriptionsList when the calling user is the system user (userHandle.isSystem()),
+preventing guest and secondary profile callers from accessing backup-restored messages with sub_id=-1.
+
+Bug: 496454250
+Test: ProviderUtilTest
+TAG=agy
+Flag: EXEMPT BUGFIX
+CONV=52c8d323-cfed-4763-aabf-6442f55efd1e
+Change-Id: Ia187054c18fdf7fb112acebe3aef74b9f4f4f94a
+Merged-In: Ia187054c18fdf7fb112acebe3aef74b9f4f4f94a
+(cherry picked from commit 14567ebd50eb068cb1e2b531a4f924440832ac5a)
+---
+ .../providers/telephony/ProviderUtil.java     |  9 ++-
+ .../providers/telephony/ProviderUtilTest.java | 58 +++++++++++++++++++
+ 2 files changed, 62 insertions(+), 5 deletions(-)
+
+diff --git a/src/com/android/providers/telephony/ProviderUtil.java b/src/com/android/providers/telephony/ProviderUtil.java
+index c8953c98..68cf6755 100644
+--- a/src/com/android/providers/telephony/ProviderUtil.java
++++ b/src/com/android/providers/telephony/ProviderUtil.java
+@@ -257,10 +257,10 @@ public class ProviderUtil {
+                             .filter(info -> userHandle.equals(subManager
+                                             .getSubscriptionUserHandle(info.getSubscriptionId())))
+                             .collect(Collectors.toList());
+-                } else {
++                } else if (userHandle.isSystem()) {
+                     // SMS/MMS restored from another device have sub_id=-1.
+                     // To query/update/delete those messages, sub_id=-1 should be in the selection
+-                    // string.
++                    // string for the system user.
+                     SubscriptionInfo invalidSubInfo = new SubscriptionInfo.Builder()
+                             .setId(SubscriptionManager.INVALID_SUBSCRIPTION_ID)
+                             .build();
+@@ -274,11 +274,10 @@ public class ProviderUtil {
+                         .getSubscriptionInfoListAssociatedWithUser(userHandle);
+             }
+ 
+-            if ((userManager != null)
+-                    && (!userManager.isManagedProfile(userHandle.getIdentifier()))) {
++            if (userHandle.isSystem()) {
+                 // SMS/MMS restored from another device have sub_id=-1.
+                 // To query/update/delete those messages, sub_id=-1 should be in the selection
+-                // string.
++                // string for the system user.
+                 SubscriptionInfo invalidSubInfo = new SubscriptionInfo.Builder()
+                         .setId(SubscriptionManager.INVALID_SUBSCRIPTION_ID)
+                         .build();
+diff --git a/tests/src/com/android/providers/telephony/ProviderUtilTest.java b/tests/src/com/android/providers/telephony/ProviderUtilTest.java
+index cad9a598..1d3e1413 100644
+--- a/tests/src/com/android/providers/telephony/ProviderUtilTest.java
++++ b/tests/src/com/android/providers/telephony/ProviderUtilTest.java
+@@ -165,6 +165,64 @@ public class ProviderUtilTest {
+                 .isEqualTo(tableName + "." + "sub_id IN ('1','2','-1')");
+     }
+ 
++    @Test
++    public void getSelectionBySubIds_nonSystemUser_noSubscription() {
++        UserHandle nonSystemUser = UserHandle.of(10);
++        List<SubscriptionInfo> subscriptionInfoList = new ArrayList<>();
++        doReturn(subscriptionInfoList).when(mSubscriptionManager)
++                .getSubscriptionInfoListAssociatedWithUser(nonSystemUser);
++
++        assertThat(ProviderUtil.getSelectionBySubIds(mContext, nonSystemUser, null))
++                .isNull();
++    }
++
++    @Test
++    public void getSelectionBySubIds_nonSystemUser_withActiveSubscriptions() {
++        UserHandle nonSystemUser = UserHandle.of(10);
++        SubscriptionInfo subscriptionInfo1 = new SubscriptionInfo.Builder()
++                .setId(1)
++                .setSimSlotIndex(0)
++                .build();
++        List<SubscriptionInfo> subscriptionInfoList = new ArrayList<>();
++
++        SubscriptionInfo subscriptionInfo2 = new SubscriptionInfo.Builder()
++                .setId(2)
++                .setSimSlotIndex(1)
++                .build();
++
++        subscriptionInfoList.add(subscriptionInfo1);
++        subscriptionInfoList.add(subscriptionInfo2);
++        doReturn(subscriptionInfoList).when(mSubscriptionManager)
++                .getSubscriptionInfoListAssociatedWithUser(nonSystemUser);
++
++        assertThat(ProviderUtil.getSelectionBySubIds(mContext, nonSystemUser, null))
++                .isEqualTo("sub_id IN ('1','2')");
++    }
++
++    @Test
++    public void getSelectionBySubIds_nonSystemUser_withTableName_withActiveSubscriptions() {
++        String tableName = "pdu";
++        UserHandle nonSystemUser = UserHandle.of(10);
++        SubscriptionInfo subscriptionInfo1 = new SubscriptionInfo.Builder()
++                .setId(1)
++                .setSimSlotIndex(0)
++                .build();
++        List<SubscriptionInfo> subscriptionInfoList = new ArrayList<>();
++
++        SubscriptionInfo subscriptionInfo2 = new SubscriptionInfo.Builder()
++                .setId(2)
++                .setSimSlotIndex(1)
++                .build();
++
++        subscriptionInfoList.add(subscriptionInfo1);
++        subscriptionInfoList.add(subscriptionInfo2);
++        doReturn(subscriptionInfoList).when(mSubscriptionManager)
++                .getSubscriptionInfoListAssociatedWithUser(nonSystemUser);
++
++        assertThat(ProviderUtil.getSelectionBySubIds(mContext, nonSystemUser, tableName))
++                .isEqualTo(tableName + "." + "sub_id IN ('1','2')");
++    }
++
+     @Test
+     public void getSelectionByEmergencyNumbers_nullEmergencyNumberList() {
+         doReturn(null).when(mTelephonyManager).getEmergencyNumberList();
+-- 
+2.56.0.385.gac671c819a-goog
+

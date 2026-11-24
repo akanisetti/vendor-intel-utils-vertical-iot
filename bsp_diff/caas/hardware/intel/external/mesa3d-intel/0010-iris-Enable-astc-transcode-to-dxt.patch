@@ -1,0 +1,33 @@
+From ef998d0d98b8fb03326a79d86c7d7644aedd6106 Mon Sep 17 00:00:00 2001
+From: "Lin, Shenghua" <shenghua.lin@intel.com>
+Date: Tue, 9 Apr 2024 06:37:06 +0000
+Subject: [PATCH 10/19] iris: Enable astc transcode to dxt
+
+for iris, astc will be converted to dxt.
+for vulkan, astc will be decompressed using compute shader.
+
+Tracked-On: OAM-117170
+Signed-off-by: Lin, Shenghua <shenghua.lin@intel.com>
+(cherry picked from commit 3405c45972e3abe9e79f0a3278efe87f1d28ba65)
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ src/gallium/auxiliary/pipe-loader/driinfo_gallium.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/gallium/auxiliary/pipe-loader/driinfo_gallium.h b/src/gallium/auxiliary/pipe-loader/driinfo_gallium.h
+index 4886abe9f62d..09050c6df533 100644
+--- a/src/gallium/auxiliary/pipe-loader/driinfo_gallium.h
++++ b/src/gallium/auxiliary/pipe-loader/driinfo_gallium.h
+@@ -45,7 +45,7 @@ DRI_CONF_SECTION_DEBUG
+    DRI_CONF_FORCE_GL_MAP_BUFFER_SYNCHRONIZED(false)
+    DRI_CONF_FORCE_GL_DEPTH_COMPONENT_TYPE_INT(false)
+    DRI_CONF_TRANSCODE_ETC(false)
+-   DRI_CONF_TRANSCODE_ASTC(false)
++   DRI_CONF_TRANSCODE_ASTC(true)
+    DRI_CONF_ALLOW_COMPRESSED_FALLBACK(true)
+    DRI_CONF_FORCE_EXPLICIT_UNIFORM_LOC_ZERO()
+    DRI_CONF_FORCE_GL_VENDOR()
+-- 
+2.34.1
+

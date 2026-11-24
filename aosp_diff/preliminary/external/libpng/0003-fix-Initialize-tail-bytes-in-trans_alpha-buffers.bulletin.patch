@@ -1,0 +1,54 @@
+From baa75ef5fe0a1e7f6b2545d6f5ef3714728e7047 Mon Sep 17 00:00:00 2001
+From: Oblivionsage <cookieandcream560@gmail.com>
+Date: Tue, 17 Mar 2026 08:55:18 +0100
+Subject: [PATCH] fix: Initialize tail bytes in `trans_alpha` buffers
+
+Although the arrays `info_ptr->trans_alpha` and `png_ptr->trans_alpha`
+are allocated 256 bytes, only `num_trans` bytes are copied.
+The remaining entries were left uninitialized. Set them to 0xff (fully
+opaque) before copying, which matches the conventional treatment of
+entries beyond `num_trans`.
+
+This is a follow-up to the previous use-after-free fix.
+
+Reported-by: Cosmin Truta <ctruta@gmail.com>
+Reviewed-by: Cosmin Truta <ctruta@gmail.com>
+Signed-off-by: Cosmin Truta <ctruta@gmail.com>
+Bug: 496614216
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:735832705bce6de8ea2f60d2f9b8c125827c613a
+Merged-In: I4797759c9709950ba57edc4cfd75d7d19fbea295
+Change-Id: I4797759c9709950ba57edc4cfd75d7d19fbea295
+---
+ pngset.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/pngset.c b/pngset.c
+index ac4292a4..6db28705 100644
+--- a/pngset.c
++++ b/pngset.c
+@@ -1158,9 +1158,13 @@ png_set_tRNS(png_structrp png_ptr, png_inforp info_ptr,
+ 
+        if (num_trans > 0 && num_trans <= PNG_MAX_PALETTE_LENGTH)
+        {
+-          /* Allocate info_ptr's copy of the transparency data. */
++          /* Allocate info_ptr's copy of the transparency data.
++           * Initialize all entries to fully opaque (0xff), then overwrite
++           * the first num_trans entries with the actual values.
++           */
+           info_ptr->trans_alpha = png_voidcast(png_bytep,
+               png_malloc(png_ptr, PNG_MAX_PALETTE_LENGTH));
++          memset(info_ptr->trans_alpha, 0xff, PNG_MAX_PALETTE_LENGTH);
+           memcpy(info_ptr->trans_alpha, trans_alpha, (size_t)num_trans);
+           info_ptr->free_me |= PNG_FREE_TRNS;
+           info_ptr->valid |= PNG_INFO_tRNS;
+@@ -1176,6 +1180,7 @@ png_set_tRNS(png_structrp png_ptr, png_inforp info_ptr,
+           png_free(png_ptr, png_ptr->trans_alpha);
+           png_ptr->trans_alpha = png_voidcast(png_bytep,
+               png_malloc(png_ptr, PNG_MAX_PALETTE_LENGTH));
++          memset(png_ptr->trans_alpha, 0xff, PNG_MAX_PALETTE_LENGTH);
+           memcpy(png_ptr->trans_alpha, trans_alpha, (size_t)num_trans);
+        }
+        else
+-- 
+2.56.0.385.gac671c819a-goog
+

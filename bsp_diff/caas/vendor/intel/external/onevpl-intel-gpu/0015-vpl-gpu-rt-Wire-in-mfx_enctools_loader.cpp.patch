@@ -1,0 +1,41 @@
+From e53e2585df3415a4e2565488cc83ad32d71612c2 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 14:55:09 +0000
+Subject: [PATCH] vpl-gpu-rt: Wire in mfx_enctools_loader.cpp, completes
+ enctools link
+
+A real flashfiles build failed to link libmfx-gen.so with 3 undefined
+symbols: mfxEncToolsLoader::LoadEncToolsLib(),
+mfxEncToolsLoader::UnLoadEncToolsLib(), and MFXNewEncTools(), all
+referenced from mfx_enctools.cpp (wired in by the previous fix) but
+defined in its sibling, shared/enctools/src/mfx_enctools_loader.cpp --
+the only other file in that directory, also never added to
+Android.mk.
+
+Added it to the same MFX_SHARED_FILES_HW += block. Checked its own
+dependency, mfx_loader_utils.h: all inline functions, no further .cpp
+needed.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ _studio/mfx_lib/Android.mk | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/_studio/mfx_lib/Android.mk b/_studio/mfx_lib/Android.mk
+index 4f810f5c..b8513553 100644
+--- a/_studio/mfx_lib/Android.mk
++++ b/_studio/mfx_lib/Android.mk
+@@ -248,7 +248,8 @@ MFX_SHARED_FILES_HW := \
+ #enctools' CreateEncTools/DestroyEncTools implementation: not under
+ #mfx_lib/shared/src/, which MFX_SHARED_FILES_IMPL's addprefix covers
+ MFX_SHARED_FILES_HW += $(addprefix shared/enctools/src/, \
+-    mfx_enctools.cpp)
++    mfx_enctools.cpp \
++    mfx_enctools_loader.cpp)
+ 
+ MFX_SHARED_FILES_HW += $(addprefix mfx_lib/ext/genx/asc/isa/, \
+     genx_scd_gen12lp_isa.cpp)
+-- 
+2.34.1
+

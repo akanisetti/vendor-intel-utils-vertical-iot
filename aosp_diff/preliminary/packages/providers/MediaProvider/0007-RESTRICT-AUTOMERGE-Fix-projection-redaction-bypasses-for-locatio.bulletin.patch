@@ -1,0 +1,482 @@
+From 5589ad59b1e70c71bec2c7a61d68e17ff59ce6a3 Mon Sep 17 00:00:00 2001
+From: Riya Maheshwari <riyamaheshwri@google.com>
+Date: Tue, 9 Jun 2026 09:29:48 +0000
+Subject: [PATCH] RESTRICT AUTOMERGE Fix projection redaction bypasses for
+ location and OEM metadata in MediaProvider.
+
+Implement robust projection sanitization and validation to prevent
+bypasses of sensitive geolocation and OEM metadata column redactions
+via SQL aggregate functions, repeated columns, and wildcard projections.
+
+* Pre-validate projections early using the query builder compiler to
+  block comma-separated projections and invalid space-containing
+  aliases.
+* Isolate SQL expressions from their aliases using a strict single-
+  spaced ALIAS_PATTERN.
+* Apply word-boundary regex (e.g., \blatitude\b) to detect sensitive
+  columns even when wrapped inside aggregate functions.
+* Redact sensitive columns as "null as alias" (preserving the original
+  alias) to avoid breaking cursor column expectations in the caller.
+* Expand explicit asterisk (*) wildcards in-place to ensure they undergo
+  the same location and metadata redaction checks.
+* Clone the static compatibility allowlist dynamically per-query to
+  prevent memory leaks and side-effects.
+
+SECURITY_PRESUBMIT_BYPASS_REASON=The comma-separated projection bypass
+is completely blocked by early projection validation because
+SQLiteQueryBuilder.setStrictColumns(true) is enabled for all non-system
+callers. This causes the query to be rejected with an Invalid Column
+exception before reaching the filter.
+
+DISABLE_TOPIC_PROTECTOR
+
+Bug: 484925508
+Test: atest MediaProviderTests
+Flag: EXEMPT BUGFIX
+
+Change-Id: Iae687adceb85abbae48dcb7ce47e8d7badaa0630
+---
+ .../providers/media/MediaProvider.java        | 206 ++++++++++++++----
+ .../media/util/SQLiteQueryBuilder.java        |   5 +-
+ .../providers/media/MediaProviderTest.java    | 144 ++++++++++++
+ 3 files changed, 306 insertions(+), 49 deletions(-)
+
+diff --git a/src/com/android/providers/media/MediaProvider.java b/src/com/android/providers/media/MediaProvider.java
+index 5dba84b21..ad8ccc6b9 100644
+--- a/src/com/android/providers/media/MediaProvider.java
++++ b/src/com/android/providers/media/MediaProvider.java
+@@ -4462,28 +4462,34 @@ public class MediaProvider extends ContentProvider {
+             Arrays.asList(projection).replaceAll(String::toLowerCase);
+         }
+ 
++        qb.enforceStrictColumns(projection);
++        projection = maybeReplaceNullProjection(projection, qb);
++
++        // Collect columns that need to be filtered to return as NULL.
++        List<String> columnsToFilter = new ArrayList<>();
++
+         if (Flags.enableOemMetadata()
+-                && hasColumnsToFilterInProjection(qb, projection, List.of(OEM_METADATA))
+                 && !mCallingIdentity.get().checkCallingPermissionOemMetadata()) {
+-            // Filter oem_data column to return as NULL
+-            projection = updateProjectionToFilterColumns(qb, projection, List.of(OEM_METADATA));
++            // Add OEM_METADATA column to columnsToFilter list
++            columnsToFilter.add(OEM_METADATA);
+         }
+ 
+         // The prev deprecated latitude and longitude columns are being populated again for
+         // picker search. We prevent any read access to them if they are present in the
+         // query projection.
+-        if (indexMediaLatitudeLongitude() && hasColumnsToFilterInProjection(
+-                        qb, projection, List.of(LATITUDE, LONGITUDE)) && !isCallingPackageSelf()) {
+-            // Filter latitude and longitude to return as NULL
+-            projection = updateProjectionToFilterColumns(
+-                    qb, projection,  List.of(LATITUDE, LONGITUDE));
++        if (indexMediaLatitudeLongitude() && !isCallingPackageSelf()) {
++            // Add LATITUDE and LONGITUDE column to columnsToFilter list
++            columnsToFilter.add(LATITUDE);
++            columnsToFilter.add(LONGITUDE);
+         }
+ 
+-        if (!enableSpecialFormatColumn() && hasColumnsToFilterInProjection(
+-                qb, projection, List.of(_SPECIAL_FORMAT)) && !isCallingPackageSelf()) {
+-            // Filter _SPECIAL_FORMAT column to return as NULL
+-            projection = updateProjectionToFilterColumns(
+-                    qb, projection,  List.of(_SPECIAL_FORMAT));
++        if (!enableSpecialFormatColumn() && !isCallingPackageSelf()) {
++            // Add _SPECIAL_FORMAT column to columnsToFilter list
++            columnsToFilter.add(_SPECIAL_FORMAT);
++        }
++
++        if (!columnsToFilter.isEmpty()) {
++            projection = updateProjectionToFilterColumns(qb, projection, columnsToFilter);
+         }
+ 
+         if (shouldFilterOwnerPackageNameFlag()
+@@ -4533,51 +4539,109 @@ public class MediaProvider extends ContentProvider {
+         return c;
+     }
+ 
+-    private boolean hasColumnsToFilterInProjection(
++    private String[] updateProjectionToFilterColumns(
+             SQLiteQueryBuilder qb, String[] projection, List<String> columnsToFilter) {
+-        boolean columnsFound = false;
+-        List<String> projectionList = projection == null ? new ArrayList<>() : Arrays.asList(
+-                projection);
+-        for (String column: columnsToFilter) {
+-            columnsFound = (!projectionList.isEmpty() && projectionList.contains(column))
+-                    || (projection == null && qb.getProjectionMap() != null
+-                    && qb.getProjectionMap().containsKey(column));
+-            if (columnsFound) {
+-                return columnsFound;
++        if (projection == null) return null;
++
++        String[] updatedProjection = new String[projection.length];
++        boolean isUpdated = false;
++
++        for (int i = 0; i < projection.length; i++) {
++            String projElement = projection[i];
++            if (projElement == null) {
++                updatedProjection[i] = null;
++                continue;
++            }
++
++            // Extract DISTINCT or ALL prefix
++            String prefix = "";
++            String cleaned = projElement.trim();
++            String upper = cleaned.toUpperCase(Locale.ROOT);
++            if (upper.startsWith("DISTINCT ")) {
++                prefix = "DISTINCT ";
++                cleaned = cleaned.substring("DISTINCT ".length()).trim();
++            } else if (upper.startsWith("ALL ")) {
++                prefix = "ALL ";
++                cleaned = cleaned.substring("ALL ".length()).trim();
++            }
++
++            String[] split = splitProjection(projElement);
++            String expr = split[0];
++            String alias = split[1];
++            String targetProjection = projElement;
++
++            boolean elementUpdated = false;
++            for (String columnToFilter : columnsToFilter) {
++                if (containsWord(expr, columnToFilter)) {
++                    targetProjection = constructNullProjectionForExpression(expr, alias,
++                            columnToFilter);
++                    if (qb.getProjectionAllowlist() == null) {
++                        qb.setProjectionAllowlist(new ArrayList<>());
++                    }
++                    // Allow constructed null column in projection (with prefix preserved)
++                    final String escapedColumnCase = Pattern.quote(prefix + targetProjection);
++                    qb.getProjectionAllowlist().add(Pattern.compile(escapedColumnCase));
++                    elementUpdated = true;
++                    isUpdated = true;
++                    break;
++                }
++            }
++
++            if (elementUpdated) {
++                updatedProjection[i] = prefix + targetProjection;
++            } else {
++                updatedProjection[i] = projElement;
+             }
+         }
+-        return columnsFound;
++
++        return isUpdated ? updatedProjection : projection;
+     }
+ 
+-    private String[] updateProjectionToFilterColumns(
+-            SQLiteQueryBuilder qb, String[] projection, List<String> columnsToFilter) {
+-        projection = maybeReplaceNullProjection(projection, qb);
+-        List<String> projectionList = Arrays.asList(projection); // Creates a copy by reference
+-        projectionList.replaceAll(String::toLowerCase); // Re-assert projection list is in lowercase
++    private static boolean containsWord(String projElement, String columnToFilter) {
++        if (projElement == null || columnToFilter == null) return false;
+ 
+-        if (qb.getProjectionAllowlist() == null) {
+-            qb.setProjectionAllowlist(new ArrayList<>());
++        // Fast path: avoid expensive Pattern/Matcher allocations if there is no substring match.
++        if (!projElement.toLowerCase(Locale.ROOT)
++                .contains(columnToFilter.toLowerCase(Locale.ROOT))) {
++            return false;
+         }
+ 
+-        for (String columnToFilter: columnsToFilter) {
+-            if (projectionList.contains(columnToFilter)) {
+-                int indexOfColumnToBeFiltered = projectionList.indexOf(columnToFilter);
+-                String newProjection = constructNullProjectionForColumn(columnToFilter);
+-                projectionList.set(
+-                        indexOfColumnToBeFiltered,
+-                        newProjection
+-                );
+-                // Allow constructed null column in projection
+-                final String escapedColumnCase = Pattern.quote(newProjection);
+-                qb.getProjectionAllowlist().add(Pattern.compile(escapedColumnCase));
+-            }
++        Pattern pattern = FILTER_COLUMN_PATTERNS.get(columnToFilter);
++        if (pattern == null) {
++            pattern = Pattern.compile("\\b" + Pattern.quote(columnToFilter) + "\\b",
++                    Pattern.CASE_INSENSITIVE);
+         }
+-        String[] updatedProjection = new String[projectionList.size()];
+-        return projectionList.toArray(updatedProjection);
++        return pattern.matcher(projElement).find();
+     }
+ 
+-    private String constructNullProjectionForColumn(String columnName) {
+-        return "null as " + columnName;
++    private String[] splitProjection(String projElement) {
++        String cleaned = projElement.trim();
++        Matcher matcher = ALIAS_PATTERN.matcher(cleaned);
++
++        String[] result;
++        if (matcher.find()) {
++            String expr = cleaned.substring(0, matcher.start()).trim();
++            String alias = matcher.group(1).trim();
++            result = new String[]{expr, alias};
++        } else {
++            result = new String[]{cleaned, null};
++        }
++        return result;
++    }
++
++    private String constructNullProjectionForExpression(String expr, String alias,
++            String columnToFilter) {
++        if (alias != null) {
++            return "null as " + alias;
++        } else {
++            if (expr.equalsIgnoreCase(columnToFilter)) {
++                return "null as " + expr;
++            } else {
++                // Escape double quotes by doubling them to prevent SQL injection/syntax errors
++                String escapedExpr = expr.replace("\"", "\"\"");
++                return "null as \"" + escapedExpr + "\"";
++            }
++        }
+     }
+ 
+     /**
+@@ -4649,6 +4713,28 @@ public class MediaProvider extends ContentProvider {
+             projection = qb.getAllColumnsFromProjectionMap();
+             // Allow all columns from the projection map
+             qb.setStrictColumns(false);
++            return projection;
++        }
++
++        // Only expand explicit wildcards ("*") for legacy callers (targetSdkVersion < Q)
++        if (getCallingPackageTargetSdkVersion() < Build.VERSION_CODES.Q) {
++            boolean hasWildcard = false;
++            String[] allColumns = qb.getAllColumnsFromProjectionMap();
++            ArrayList<String> expanded = new ArrayList<>();
++            for (String element : projection) {
++                if (element != null && "*".equals(element.trim())) {
++                    if (allColumns != null) {
++                        expanded.addAll(Arrays.asList(allColumns));
++                    }
++                    hasWildcard = true;
++                } else {
++                    expanded.add(element);
++                }
++            }
++            if (hasWildcard) {
++                projection = expanded.toArray(new String[0]);
++                qb.setStrictColumns(false);
++            }
+         }
+         return projection;
+     }
+@@ -6978,7 +7064,7 @@ public class MediaProvider extends ContentProvider {
+         // If caller is an older app, we're willing to let through a
+         // allowlist of technically invalid columns
+         if (getCallingPackageTargetSdkVersion() < Build.VERSION_CODES.Q) {
+-            qb.setProjectionAllowlist(sAllowlist);
++            qb.setProjectionAllowlist(new ArrayList<>(sAllowlist));
+         }
+ 
+         // Starting U, if owner package name is used in query arguments,
+@@ -13425,6 +13511,30 @@ public class MediaProvider extends ContentProvider {
+         sPlacementColumns.add(MediaStore.MediaColumns.DATE_EXPIRES);
+     }
+ 
++    private static final Map<String, Pattern> FILTER_COLUMN_PATTERNS = Map.of(
++            LATITUDE, Pattern.compile("\\b" + Pattern.quote(LATITUDE) + "\\b",
++                    Pattern.CASE_INSENSITIVE),
++            LONGITUDE, Pattern.compile("\\b" + Pattern.quote(LONGITUDE) + "\\b",
++                    Pattern.CASE_INSENSITIVE),
++            OEM_METADATA, Pattern.compile("\\b" + Pattern.quote(OEM_METADATA) + "\\b",
++                    Pattern.CASE_INSENSITIVE),
++            _SPECIAL_FORMAT, Pattern.compile("\\b" + Pattern.quote(_SPECIAL_FORMAT) + "\\b",
++                    Pattern.CASE_INSENSITIVE)
++    );
++
++    /**
++     * Matches SQL alias clauses at the end of a projection column expression.
++     * Components:
++     * <ul>
++     *   <li>{@code " "}: Matches a single space separator preceding the alias.</li>
++     *   <li>{@code (?:as )?}: Optionally matches the "as" keyword.</li>
++     *   <li>{@code ([_a-z0-9]+)$}: Captures the alphanumeric/underscore alias name at the end of
++     *   the string.</li>
++     * </ul>
++     */
++    private static final Pattern ALIAS_PATTERN = Pattern.compile(
++            " (?:as )?([_a-z0-9]+)$", Pattern.CASE_INSENSITIVE);
++
+     /**
+      * List of abusive custom columns that we're willing to allow via
+      * {@link SQLiteQueryBuilder#setProjectionAllowlist(Collection)}.
+diff --git a/src/com/android/providers/media/util/SQLiteQueryBuilder.java b/src/com/android/providers/media/util/SQLiteQueryBuilder.java
+index a0b6fdc8f..df33e763c 100644
+--- a/src/com/android/providers/media/util/SQLiteQueryBuilder.java
++++ b/src/com/android/providers/media/util/SQLiteQueryBuilder.java
+@@ -800,7 +800,10 @@ public class SQLiteQueryBuilder {
+         return !Strings.isNullOrEmpty(selection);
+     }
+ 
+-    private void enforceStrictColumns(@Nullable String[] projection) {
++    /**
++     * Enforces strict columns on the given projection.
++     */
++    public void enforceStrictColumns(@Nullable String[] projection) {
+         Objects.requireNonNull(mProjectionMap, "No projection map defined");
+         if (!isStrictColumns()) {
+             return;
+diff --git a/tests/src/com/android/providers/media/MediaProviderTest.java b/tests/src/com/android/providers/media/MediaProviderTest.java
+index d203dabcb..218c55231 100644
+--- a/tests/src/com/android/providers/media/MediaProviderTest.java
++++ b/tests/src/com/android/providers/media/MediaProviderTest.java
+@@ -2368,6 +2368,150 @@ public class MediaProviderTest {
+         }
+     }
+ 
++    @Test
++    @RequiresFlagsEnabled(Flags.FLAG_INDEX_MEDIA_LATITUDE_LONGITUDE)
++    public void testQueryingMediaGeolocationData_returnsNull() throws Exception {
++        // We will test several bypass projections that should all return NULL (or be redacted)
++        String[][] projections = new String[][] {
++                // Repeated columns
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        ImageColumns.LATITUDE,
++                        ImageColumns.LATITUDE
++                },
++                // Aggregate column
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        "MIN(" + ImageColumns.LATITUDE + ")"
++                },
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        ImageColumns.LATITUDE,
++                        "MAX(" + ImageColumns.LONGITUDE + ")",
++                }
++        };
++
++        String testFileName = "test" + System.nanoTime() + ".jpg";
++        final File downloads = Environment.getExternalStoragePublicDirectory(
++             Environment.DIRECTORY_DOWNLOADS);
++        File file = stage(R.raw.lg_g4_iso_800_jpg, new File(downloads, testFileName));
++        Uri testFileUri = MediaStore.scanFile(sContentResolver, file);
++
++        try {
++            for (String[] projection : projections) {
++                try (Cursor cursor = sContentResolver.query(testFileUri, projection,
++                        /* selection */ null, /* selectionArgs */ null, /* sortOrder */ null)) {
++                    assertNotNull(cursor);
++                    assertThat(cursor.getCount()).isEqualTo(1);
++                    cursor.moveToFirst();
++
++                    // Check each requested column in the projection (except DISPLAY_NAME)
++                    for (int j = 1; j < projection.length; j++) {
++                        String projElement = projection[j];
++                        // Extract expected column name in cursor
++                        String expectedColumnName = getExpectedColumnName(projElement);
++                        int colIndex = cursor.getColumnIndex(expectedColumnName);
++                        assertTrue("Column " + expectedColumnName + " should be present",
++                                colIndex != -1);
++                        assertTrue("Column " + expectedColumnName + " should be null",
++                                cursor.isNull(colIndex));
++                    }
++                }
++            }
++        } finally {
++            file.delete();
++        }
++    }
++
++    @Test
++    @RequiresFlagsEnabled(Flags.FLAG_INDEX_MEDIA_LATITUDE_LONGITUDE)
++    public void testQueryingMediaGeolocationDataBypasses_throwsException() throws Exception {
++        String[][] projections = new String[][] {
++                // Aliased aggregate column
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        "MIN(" + ImageColumns.LATITUDE + ") AS min_lat"
++                },
++                // Simple aliased column
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        ImageColumns.LATITUDE + " AS my_lat"
++                },
++                // Simple aliased column without AS
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        ImageColumns.LATITUDE + " my_lat"
++                },
++                // Aliased aggregate column without AS
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        "MIN(" + ImageColumns.LATITUDE + ") min_lat"
++                },
++                // Comma separated projection in a single column
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        ImageColumns.LATITUDE + ", " + ImageColumns.LONGITUDE
++                },
++                // DISTINCT and ALL prefixes (should throw for SDK>=Q)
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        "DISTINCT " + ImageColumns.LATITUDE
++                },
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        "ALL " + ImageColumns.LATITUDE
++                },
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        "distinct " + ImageColumns.LATITUDE
++                },
++                new String[] {
++                        ImageColumns.DISPLAY_NAME,
++                        "DISTINCT MIN(" + ImageColumns.LATITUDE + ")"
++                }
++        };
++
++        String testFileName = "test" + System.nanoTime() + ".jpg";
++        final File downloads = Environment.getExternalStoragePublicDirectory(
++             Environment.DIRECTORY_DOWNLOADS);
++        File file = stage(R.raw.lg_g4_iso_800_jpg, new File(downloads, testFileName));
++        Uri testFileUri = MediaStore.scanFile(sContentResolver, file);
++
++        try {
++            for (String[] projection : projections) {
++                try {
++                    sContentResolver.query(testFileUri, projection,
++                            /* selection */ null, /* selectionArgs */ null, /* sortOrder */ null);
++                    fail("Should have thrown IllegalArgumentException for projection: "
++                            + Arrays.toString(projection));
++                } catch (IllegalArgumentException expected) {
++                    // Expected
++                }
++            }
++        } finally {
++            file.delete();
++        }
++    }
++
++    private String getExpectedColumnName(String projElement) {
++        String cleaned = projElement.trim();
++        String upper = cleaned.toUpperCase(Locale.ROOT);
++        if (upper.startsWith("DISTINCT ")) {
++            cleaned = cleaned.substring("DISTINCT ".length()).trim();
++        } else if (upper.startsWith("ALL ")) {
++            cleaned = cleaned.substring("ALL ".length()).trim();
++        }
++
++        int lastCloseParen = cleaned.lastIndexOf(')');
++        int lastSpace = cleaned.lastIndexOf(' ');
++
++        if (lastSpace != -1 && lastSpace > lastCloseParen) {
++            return cleaned.substring(lastSpace + 1).trim();
++        } else {
++            return cleaned;
++        }
++    }
++
+     @Test
+     @RequiresFlagsEnabled(Flags.FLAG_INDEX_MEDIA_LATITUDE_LONGITUDE)
+     public void testQueryingMediaGeolocationDataInSelectionShouldReturnEmptyCursor()
+-- 
+2.56.0.385.gac671c819a-goog
+

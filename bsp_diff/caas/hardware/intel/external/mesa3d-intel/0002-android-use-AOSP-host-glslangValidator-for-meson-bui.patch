@@ -1,0 +1,64 @@
+From 85cacd0cb83a6ec1d17c6f1dd799368cc5b44d90 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Mon, 12 Oct 2026 12:15:41 +0000
+Subject: [PATCH 02/19] android: use AOSP host glslangValidator for meson
+ builds
+
+Mesa 26 requires glslang >= 12.2 when building Vulkan drivers (BVH
+shaders). Build hosts commonly ship older versions (Ubuntu 22.04 has
+11.8), which makes configure fail.
+
+Generate a meson native file pointing glslangValidator at the AOSP host
+build ($(HOST_OUT_EXECUTABLES)/glslangValidator, from
+external/deqp-deps/glslang) and make the meson build depend on it.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ android/mesa3d_cross.mk | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/android/mesa3d_cross.mk b/android/mesa3d_cross.mk
+index ddb29151df30..287e021935da 100644
+--- a/android/mesa3d_cross.mk
++++ b/android/mesa3d_cross.mk
+@@ -85,6 +85,7 @@ MESA3D_GLES_BINS := \
+ MESON_GEN_NINJA := \
+ 	cd $(MESON_OUT_DIR) && PATH=/usr/bin:/usr/local/bin:$$PATH meson ./build     \
+ 	--cross-file $(call relative-to-absolute,$(MESON_GEN_DIR))/aosp_cross        \
++	--native-file $(call relative-to-absolute,$(MESON_GEN_DIR))/aosp_native      \
+ 	--buildtype=release                                                          \
+ 	-Dplatforms=android                                                          \
+ 	-Dplatform-sdk-version=$(PLATFORM_SDK_VERSION)                               \
+@@ -101,6 +102,10 @@ MESON_GEN_NINJA := \
+ 
+ MESON_BUILD := PATH=/usr/bin:/bin:/sbin:$$PATH ninja -C $(MESON_OUT_DIR)/build
+ 
++# Mesa requires glslang >= 12.2 to build Vulkan drivers (BVH shaders), which is
++# newer than most build hosts provide. Use the AOSP host build instead.
++MESA3D_GLSLANG := $(HOST_OUT_EXECUTABLES)/glslangValidator
++
+ $(MESON_GEN_FILES_TARGET): MESON_CPU_FAMILY := $(subst arm64,aarch64,$(TARGET_$(M_TARGET_PREFIX)ARCH))
+ 
+ define create-pkgconfig
+@@ -265,13 +270,16 @@ $(MESON_GEN_FILES_TARGET): $(sort $(shell find -L $(MESA3D_TOP) -not -path '*/\.
+ 		"cpu = '$(MESON_CPU_FAMILY)'\n"                                                                                   \
+ 		"endian = 'little'" > $(dir $@)/aosp_cross
+ 
++	echo -e "[binaries]\n"                                                                                                   \
++		"glslangValidator = '$(call relative-to-absolute,$(MESA3D_GLSLANG))'\n" > $(dir $@)/aosp_native
++
+ 	#
+ 	$(foreach pkg, $(MESON_GEN_PKGCONFIGS), $(call create-pkgconfig,$(dir $@),$(word 1, $(subst :, ,$(pkg))),$(word 2, $(subst :, ,$(pkg)))))
+ 	touch $@
+ 
+ $(MESON_OUT_DIR)/.build.timestamp: MESON_GEN_NINJA:=$(MESON_GEN_NINJA)
+ $(MESON_OUT_DIR)/.build.timestamp: MESON_BUILD:=$(MESON_BUILD)
+-$(MESON_OUT_DIR)/.build.timestamp: $(MESON_GEN_FILES_TARGET) $(link_deps)
++$(MESON_OUT_DIR)/.build.timestamp: $(MESON_GEN_FILES_TARGET) $(link_deps) $(MESA3D_GLSLANG)
+ 	rm -rf $(dir $@)
+ 	mkdir -p $(dir $@)
+ 	mkdir -p $(dir $@)/build
+-- 
+2.34.1
+

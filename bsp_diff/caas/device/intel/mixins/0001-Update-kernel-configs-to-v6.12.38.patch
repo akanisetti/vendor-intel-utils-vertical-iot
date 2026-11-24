@@ -1,0 +1,139 @@
+From f7ca9146816b22a5d271ba629ec904fae1575127 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Thu, 12 Nov 2026 09:29:19 +0000
+Subject: [PATCH] Update kernel configs to v6.12.38
+
+Tracked-On: NIACP3-1704
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ .../linux-intel-lts2025/x86_64_defconfig      | 26 ++++++++-----------
+ 1 file changed, 11 insertions(+), 15 deletions(-)
+
+diff --git a/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig b/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig
+index d61b74b2..efa68e78 100644
+--- a/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig
++++ b/groups/kernel/gmin64/config-lts/linux-intel-lts2025/x86_64_defconfig
+@@ -1,6 +1,6 @@
+ #
+ # Automatically generated file; DO NOT EDIT.
+-# Linux/x86_64 6.18.20 Kernel Configuration
++# Linux/x86_64 6.18.38 Kernel Configuration
+ #
+ CONFIG_CC_VERSION_TEXT="Android (15071444, +pgo, +bolt, +lto, +mlgo, based on r596125) clang version 22.0.2 (https://android.googlesource.com/toolchain/llvm-project de03d430485c884861198b25459851f429cbdbad)"
+ CONFIG_GCC_VERSION=0
+@@ -21,19 +21,14 @@ CONFIG_TOOLS_SUPPORT_RELR=y
+ CONFIG_CC_HAS_ASM_INLINE=y
+ CONFIG_CC_HAS_ASSUME=y
+ CONFIG_CC_HAS_NO_PROFILE_FN_ATTR=y
++CONFIG_CC_HAS_COUNTED_BY=y
++CONFIG_CC_HAS_MULTIDIMENSIONAL_NONSTRING=y
++CONFIG_LD_CAN_USE_KEEP_IN_OVERLAY=y
+ CONFIG_PAHOLE_VERSION=0
+ CONFIG_IRQ_WORK=y
+ CONFIG_BUILDTIME_TABLE_SORT=y
+ CONFIG_THREAD_INFO_IN_TASK=y
+ 
+-CONFIG_CC_HAS_COUNTED_BY=y
+-CONFIG_CC_HAS_KCFI_ARITY=y
+-CONFIG_CC_HAS_MULTIDIMENSIONAL_NONSTRING=y
+-CONFIG_CC_HAS_SANCOV_STACK_DEPTH_CALLBACK=y
+-# CONFIG_KSTACK_ERASE is not set
+-CONFIG_LD_CAN_USE_KEEP_IN_OVERLAY=y
+-
+-
+ #
+ # General setup
+ #
+@@ -369,7 +364,6 @@ CONFIG_X86_HV_CALLBACK_VECTOR=y
+ # CONFIG_JAILHOUSE_GUEST is not set
+ CONFIG_ACRN_GUEST=y
+ # CONFIG_BHYVE_GUEST is not set
+-# CONFIG_PKVM_X86_GUEST is not set
+ CONFIG_CC_HAS_MARCH_NATIVE=y
+ # CONFIG_X86_NATIVE_CPU is not set
+ CONFIG_X86_INTERNODE_CACHE_SHIFT=6
+@@ -497,6 +491,7 @@ CONFIG_CC_HAS_NAMED_AS_FIXED_SANITIZERS=y
+ CONFIG_CC_HAS_SLS=y
+ CONFIG_CC_HAS_RETURN_THUNK=y
+ CONFIG_CC_HAS_ENTRY_PADDING=y
++CONFIG_CC_HAS_KCFI_ARITY=y
+ CONFIG_FUNCTION_PADDING_CFI=11
+ CONFIG_FUNCTION_PADDING_BYTES=11
+ CONFIG_CALL_PADDING=y
+@@ -811,7 +806,6 @@ CONFIG_HAS_LTO_CLANG=y
+ # CONFIG_LTO_CLANG_FULL is not set
+ CONFIG_LTO_CLANG_THIN=y
+ # CONFIG_AUTOFDO_CLANG is not set
+-CONFIG_ARCH_SUPPORTS_PROPELLER_CLANG=y
+ # CONFIG_PROPELLER_CLANG is not set
+ CONFIG_ARCH_SUPPORTS_CFI=y
+ CONFIG_ARCH_USES_CFI_TRAPS=y
+@@ -1009,6 +1003,7 @@ CONFIG_ARCH_HAS_SYSCALL_WRAPPER=y
+ # CONFIG_GKI_HIDDEN_GPIO_CONFIGS is not set
+ # CONFIG_GKI_HIDDEN_X86_CONFIGS is not set
+ # CONFIG_GKI_HIDDEN_QCOM_CONFIGS is not set
++# CONFIG_GKI_HIDDEN_MTK_CONFIGS is not set
+ # CONFIG_GKI_HIDDEN_MEDIA_CONFIGS is not set
+ # CONFIG_GKI_HIDDEN_VIRTUAL_CONFIGS is not set
+ # CONFIG_GKI_LEGACY_WEXT_ALLCONFIG is not set
+@@ -1155,7 +1150,6 @@ CONFIG_VM_EVENT_COUNTERS=y
+ # CONFIG_DMAPOOL_TEST is not set
+ CONFIG_ARCH_HAS_PTE_SPECIAL=y
+ CONFIG_MEMFD_CREATE=y
+-CONFIG_MEMFD_ASHMEM_SHIM=y
+ CONFIG_SECRETMEM=y
+ CONFIG_ANON_VMA_NAME=y
+ CONFIG_HAVE_ARCH_USERFAULTFD_WP=y
+@@ -1190,6 +1184,7 @@ CONFIG_NET_CRC32C=y
+ #
+ # Networking options
+ #
++# CONFIG_NET_APF is not set
+ CONFIG_PACKET=y
+ # CONFIG_PACKET_DIAG is not set
+ # CONFIG_INET_PSP is not set
+@@ -4783,7 +4778,6 @@ CONFIG_FB=y
+ # CONFIG_FB_UVESA is not set
+ CONFIG_FB_VESA=y
+ CONFIG_FB_EFI=y
+-# CONFIG_FB_SIMPLE is not set
+ # CONFIG_FB_N411 is not set
+ # CONFIG_FB_HGA is not set
+ # CONFIG_FB_OPENCORES is not set
+@@ -4814,6 +4808,7 @@ CONFIG_FB_EFI=y
+ # CONFIG_FB_VIRTUAL is not set
+ # CONFIG_FB_METRONOME is not set
+ # CONFIG_FB_MB862XX is not set
++# CONFIG_FB_SIMPLE is not set
+ # CONFIG_FB_SSD1307 is not set
+ # CONFIG_FB_SM712 is not set
+ CONFIG_FB_CORE=y
+@@ -6445,8 +6440,6 @@ CONFIG_STAGING=y
+ # CONFIG_FB_TFT is not set
+ # CONFIG_VME_BUS is not set
+ # CONFIG_GPIB is not set
+-CONFIG_ASHMEM=y
+-CONFIG_ASHMEM_C=y
+ CONFIG_ANDROID_FWDATA=y
+ # CONFIG_GOLDFISH is not set
+ # CONFIG_CHROME_PLATFORMS is not set
+@@ -7789,6 +7782,8 @@ CONFIG_CC_HAS_AUTO_VAR_INIT_ZERO=y
+ # CONFIG_INIT_STACK_NONE is not set
+ # CONFIG_INIT_STACK_ALL_PATTERN is not set
+ CONFIG_INIT_STACK_ALL_ZERO=y
++CONFIG_CC_HAS_SANCOV_STACK_DEPTH_CALLBACK=y
++# CONFIG_KSTACK_ERASE is not set
+ CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
+ # CONFIG_INIT_ON_FREE_DEFAULT_ON is not set
+ CONFIG_CC_HAS_ZERO_CALL_USED_REGS=y
+@@ -8283,6 +8278,7 @@ CONFIG_SLUB_DEBUG=y
+ # CONFIG_SLUB_DEBUG_ON is not set
+ # CONFIG_PAGE_OWNER is not set
+ # CONFIG_PAGE_TABLE_CHECK is not set
++# CONFIG_PAGE_PINNER is not set
+ # CONFIG_PAGE_POISONING is not set
+ # CONFIG_DEBUG_PAGE_REF is not set
+ # CONFIG_DEBUG_RODATA_TEST is not set
+-- 
+2.34.1
+

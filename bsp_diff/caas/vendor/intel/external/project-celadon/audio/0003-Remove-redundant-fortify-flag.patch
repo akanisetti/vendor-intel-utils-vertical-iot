@@ -1,0 +1,57 @@
+From 91385763a70b5c7ffc0c46daf1c6a690da3e2dc8 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 7 Aug 2026 09:29:58 +0000
+Subject: [PATCH] Remove redundant fortify flags
+
+changes:
+- hdmi/Android.mk, primary/Android.mk, usb/Android.mk: remove
+  -D_FORTIFY_SOURCE=2 from LOCAL_CFLAGS; source fortification handled
+  by -fstack-protector-strong and Clang's built-in protections for A17
+
+Tracked-On: NIACP3-1498
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ hdmi/Android.mk    | 1 -
+ primary/Android.mk | 1 -
+ usb/Android.mk     | 1 -
+ 3 files changed, 3 deletions(-)
+
+diff --git a/hdmi/Android.mk b/hdmi/Android.mk
+index 2144962..efd9908 100755
+--- a/hdmi/Android.mk
++++ b/hdmi/Android.mk
+@@ -37,7 +37,6 @@ LOCAL_C_INCLUDES += \
+ 
+ LOCAL_CFLAGS :=\
+  -fwrapv \
+- -D_FORTIFY_SOURCE=2 \
+  -fstack-protector-strong \
+  -Wno-conversion-null \
+  -Wnull-dereference \
+diff --git a/primary/Android.mk b/primary/Android.mk
+index 8b227d3..6eb902c 100755
+--- a/primary/Android.mk
++++ b/primary/Android.mk
+@@ -37,7 +37,6 @@ LOCAL_C_INCLUDES += \
+ 
+ LOCAL_CFLAGS :=\
+  -fwrapv \
+- -D_FORTIFY_SOURCE=2 \
+  -fstack-protector-strong \
+  -Wno-conversion-null \
+  -Wnull-dereference \
+diff --git a/usb/Android.mk b/usb/Android.mk
+index f4bd3e6..cfacf8a 100755
+--- a/usb/Android.mk
++++ b/usb/Android.mk
+@@ -38,7 +38,6 @@ LOCAL_C_INCLUDES += \
+ 
+ LOCAL_CFLAGS :=\
+  -fwrapv \
+- -D_FORTIFY_SOURCE=2 \
+  -fstack-protector-strong \
+  -Wno-conversion-null \
+  -Wnull-dereference \
+-- 
+2.34.1
+

@@ -1,0 +1,68 @@
+From 13217b5620718f3a4ac2bc34d31b0999b1c4ca09 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Fri, 13 Nov 2026 03:06:03 +0000
+Subject: [PATCH] android: Adapt upstream Android.bp for Celadon A17
+
+Upstream libdrm ships its own Android.bp since 2.4.124 (21ac1816a
+"Convert to Android.bp"), so the Intel conversion of the Android.mk
+files carried since 2.4.115 ("Changes to compile libdrm in Android") is
+no longer needed. Only three adjustments remain:
+
+- Rename the generated_static_table_fourcc_h genrule to
+  libdrm_intel_generated_static_table_fourcc_h. AOSP external/libdrm
+  stays in the tree (its libdrm_sys bindings are used by the drm-ffi
+  crate) and defines a genrule with the same name.
+- min_sdk_version "35" on libdrm for A17 and the com.android.virt apex.
+- -D_GNU_SOURCE, as meson's config.h does, so that the glibc host
+  variants see mmap64() and asprintf().
+
+The KW fix for intel_bufmgr_gem.c is dropped: no binary in the image
+links libdrm_intel. The xe_drm.h copy is dropped as well: libva now
+takes the kernel UAPI header from bionic.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Change-Id: I5290fa079d85d1465be2171d1fbc004107d92b6e
+---
+ Android.bp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/Android.bp b/Android.bp
+index 4a2bd9852..829d9aa65 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -28,6 +28,7 @@ cc_defaults {
+     name: "libdrm_defaults",
+     cflags: [
+         // XXX: Consider moving these to config.h analogous to autoconf.
++        "-D_GNU_SOURCE",
+         "-DMAJOR_IN_SYSMACROS=1",
+         "-DHAVE_VISIBILITY=1",
+         "-DHAVE_LIBDRM_ATOMIC_PRIMITIVES=1",
+@@ -60,7 +61,7 @@ cc_library_headers {
+ }
+ 
+ genrule {
+-    name: "generated_static_table_fourcc_h",
++    name: "libdrm_intel_generated_static_table_fourcc_h",
+     out: ["generated_static_table_fourcc.h"],
+     srcs: ["include/drm/drm_fourcc.h"],
+     tool_files: ["gen_table_fourcc.py"],
+@@ -79,7 +80,7 @@ cc_library {
+     ],
+ 
+     generated_headers: [
+-        "generated_static_table_fourcc_h",
++        "libdrm_intel_generated_static_table_fourcc_h",
+     ],
+ 
+     export_include_dirs: ["include/drm", "android"],
+@@ -94,4 +95,5 @@ cc_library {
+         "//apex_available:platform",
+         "com.android.virt",
+     ],
++    min_sdk_version: "35",
+ }
+-- 
+2.34.1
+

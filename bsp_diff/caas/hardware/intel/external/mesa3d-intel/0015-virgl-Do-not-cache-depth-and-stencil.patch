@@ -1,0 +1,40 @@
+From de5ba31abc9cb8ac14b3b36f249a3dc3cf998199 Mon Sep 17 00:00:00 2001
+From: lyintel <yang.a.lu@intel.com>
+Date: Tue, 31 May 2022 20:28:06 +0000
+Subject: [PATCH 15/19] virgl: Do not cache depth and stencil
+
+On Android, there will be garbage when screen rotation
+during video playback.
+This is to revert d245d7b
+
+Signed-off-by: Chenglei Ren <chenglei.ren@intel.com>
+Tracked-On: OAM-99738
+(cherry picked from commit 223a3a7b8dcbcaa1a3a76f5fa1ee7bbdbed77b87)
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ src/gallium/winsys/virgl/drm/virgl_drm_winsys.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/gallium/winsys/virgl/drm/virgl_drm_winsys.c b/src/gallium/winsys/virgl/drm/virgl_drm_winsys.c
+index 45147c44f8a6..abb13d5aa679 100644
+--- a/src/gallium/winsys/virgl/drm/virgl_drm_winsys.c
++++ b/src/gallium/winsys/virgl/drm/virgl_drm_winsys.c
+@@ -62,10 +62,14 @@ static inline bool can_cache_resource(uint32_t bind)
+           bind == VIRGL_BIND_INDEX_BUFFER ||
+           bind == VIRGL_BIND_VERTEX_BUFFER ||
+           bind == VIRGL_BIND_CUSTOM ||
++#if defined(ANDROID)
++          bind == VIRGL_BIND_STAGING;
++#else
+           bind == VIRGL_BIND_STAGING ||
+           bind == VIRGL_BIND_DEPTH_STENCIL ||
+           bind == VIRGL_BIND_RENDER_TARGET ||
+           bind == 0;
++#endif
+ }
+ 
+ static void virgl_hw_res_destroy(struct virgl_drm_winsys *qdws,
+-- 
+2.34.1
+

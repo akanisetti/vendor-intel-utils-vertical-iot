@@ -1,6 +1,6 @@
-From 1b77414f2122691864ec7fb3a610156fed555fc9 Mon Sep 17 00:00:00 2001
+From 75cfb1ceee2bb0e8742d7ad224e2b02d8ee12034 Mon Sep 17 00:00:00 2001
 From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
-Date: Mon, 2 Feb 2026 06:29:45 +0000
+Date: Mon, 3 Aug 2026 18:10:29 +0000
 Subject: [PATCH] Add implementations required to enable audio on 3.5mm jack
 
 Enable audio over 3.5mm jack by adding few function implementations
@@ -9,43 +9,38 @@ for primary/default audio method.
 Tracked-On: NIACP3-1031
 Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
 ---
- audio/aidl/default/ModulePrimary.cpp          | 19 +++++
+ audio/aidl/default/ModulePrimary.cpp          | 18 +++++
  .../default/include/core-impl/ModulePrimary.h |  6 ++
  audio/aidl/default/primary/PrimaryMixer.cpp   | 69 +++++++++++++++++++
  audio/aidl/default/primary/PrimaryMixer.h     | 21 +++++-
- 4 files changed, 113 insertions(+), 2 deletions(-)
+ 4 files changed, 112 insertions(+), 2 deletions(-)
 
 diff --git a/audio/aidl/default/ModulePrimary.cpp b/audio/aidl/default/ModulePrimary.cpp
-index 6cb92519a3..b6bcccc666 100644
+index 9e4e9e7575..ca53f55a3e 100644
 --- a/audio/aidl/default/ModulePrimary.cpp
 +++ b/audio/aidl/default/ModulePrimary.cpp
-@@ -20,11 +20,13 @@
- #include <Utils.h>
- #include <android-base/logging.h>
- 
-+#include "alsa/Utils.h"
- #include "core-impl/ModulePrimary.h"
- #include "core-impl/StreamMmapStub.h"
- #include "core-impl/StreamOffloadStub.h"
+@@ -27,6 +27,8 @@
  #include "core-impl/StreamPrimary.h"
+ #include "core-impl/StreamStub.h"
  #include "core-impl/Telephony.h"
++#include "alsa/UtilsAlsa.h"
 +#include "primary/PrimaryMixer.h"
  
  using aidl::android::hardware::audio::common::areAllBitPositionFlagsSet;
  using aidl::android::hardware::audio::common::hasMmapFlag;
-@@ -129,4 +131,21 @@ int32_t ModulePrimary::getNominalLatencyMs(const AudioPortConfig& portConfig) {
-     return hasMmapFlag(portConfig.flags.value()) ? kLowLatencyMs : kStandardLatencyMs;
+@@ -169,5 +171,21 @@ ndk::ScopedAStatus ModulePrimary::getFlushFromFrameSupport(const AudioPortConfig
+                             : FlushFromFrameSupport::UNSUPPORTED;
+     return ndk::ScopedAStatus::ok();
  }
- 
 +void ModulePrimary::onExternalDeviceConnectionChanged(
-+        const ::aidl::android::media::audio::common::AudioPort& audioPort, bool connected) {
++	const ::aidl::android::media::audio::common::AudioPort& audioPort, bool connected) {
 +    if (audioPort.ext.getTag() != AudioPortExt::Tag::device) {
-+        return;
++	return;
 +    }
 +    int card = primary::PrimaryMixer::get_pcm_card("PCH");
 +    if (card != -1) {
-+        primary::PrimaryMixer::getInstance().setDeviceConnectionState(
-+                card, getMasterMute(), getMasterVolume(), connected);
++	primary::PrimaryMixer::getInstance().setDeviceConnectionState(
++	    card, getMasterMute(), getMasterVolume(), connected);
 +    }
 +}
 +
@@ -53,13 +48,13 @@ index 6cb92519a3..b6bcccc666 100644
 +    LOG(DEBUG) << __func__ << ": portId=" << audioPort->id << ", nextPortId=" << nextPortId;
 +    return ndk::ScopedAStatus::ok();
 +}
-+
+ 
  }  // namespace aidl::android::hardware::audio::core
 diff --git a/audio/aidl/default/include/core-impl/ModulePrimary.h b/audio/aidl/default/include/core-impl/ModulePrimary.h
-index c93deedfea..ca36861dfb 100644
+index 0d2bf67c26..261fde40ec 100644
 --- a/audio/aidl/default/include/core-impl/ModulePrimary.h
 +++ b/audio/aidl/default/include/core-impl/ModulePrimary.h
-@@ -47,6 +47,12 @@ class ModulePrimary final : public Module {
+@@ -52,6 +52,12 @@ class ModulePrimary final : public Module {
              int32_t bufferSizeFrames, int32_t frameSizeBytes, MmapBufferDescriptor* desc) override;
      int32_t getNominalLatencyMs(
              const ::aidl::android::media::audio::common::AudioPortConfig& portConfig) override;

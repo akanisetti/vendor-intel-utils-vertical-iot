@@ -1,0 +1,49 @@
+From 11365fcb66c9faf2710cbf2b65c6fd903e460049 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Fri, 16 Oct 2026 09:43:08 +0000
+Subject: [PATCH] vpl-gpu-rt: Fix stale av1ehw_xe2_cdef.cpp reference after
+ real build test
+
+Discovered via an actual flashfiles build attempt (not reachable in
+this session's sandbox, which lacks a working nsjail/build
+environment): ninja failed needing
+vendor/intel/external/onevpl-intel-gpu/_studio/mfx_lib/encode_hw/av1/agnostic/Xe2/av1ehw_xe2_cdef.cpp,
+"missing and no known rule to make it".
+
+This exposed a gap in the earlier glue-reconciliation pass: AV1 and
+HEVC HW encode were already extensively wired into this Android.mk
+via large explicit MFX_LOCAL_SRC_FILES_HW file lists (139 explicit
+.cpp/.c references total) well before this version bump -- contrary
+to what an earlier commit in this series claimed, this was not left
+unwired out of scope. The intel-onevpl-26.2.3 overlay renamed
+agnostic/Xe2/av1ehw_xe2_cdef.cpp to agnostic/base/av1ehw_base_cdef.cpp
+(confirmed a 98%-similar content rename), and this one explicit
+reference was not updated to match.
+
+A scripted audit of all 139 explicit file references in this
+Android.mk, plus the srcs lists in gmmlib/libva's Android.bp and a
+regenerated-content check of media-driver's Android.bp, found this to
+be the only stale reference introduced by the whole upgrade effort.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ _studio/mfx_lib/Android.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/_studio/mfx_lib/Android.mk b/_studio/mfx_lib/Android.mk
+index de706a40..9f2eaf5e 100644
+--- a/_studio/mfx_lib/Android.mk
++++ b/_studio/mfx_lib/Android.mk
+@@ -69,7 +69,7 @@ MFX_LOCAL_SRC_FILES_HW += \
+     mfx_lib/encode_hw/av1/agnostic/base/av1ehw_base_enctools.cpp \
+     mfx_lib/encode_hw/av1/agnostic/base/av1ehw_base_hdr.cpp \
+     mfx_lib/encode_hw/av1/agnostic/base/av1ehw_base_scc.cpp \
+-    mfx_lib/encode_hw/av1/agnostic/Xe2/av1ehw_xe2_cdef.cpp \
++    mfx_lib/encode_hw/av1/agnostic/base/av1ehw_base_cdef.cpp \
+     mfx_lib/encode_hw/av1/agnostic/Xe2/av1ehw_xe2_scc.cpp \
+ 
+ MFX_LOCAL_SRC_FILES_HW += \
+-- 
+2.34.1
+

@@ -1,27 +1,21 @@
-From a6a5e6ba8bfd58e8a9430ca1b19c6636938adb73 Mon Sep 17 00:00:00 2001
-From: Ankit Agarwal <ankit.agarwal@intel.com>
-Date: Tue, 28 Jan 2025 13:40:35 +0000
+From 011efddd211d4006ffa900ebf4389e700bcfd995 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
+Date: Wed, 22 Jul 2026 11:05:00 +0000
 Subject: [PATCH] Build-soong errors.
 
 Signed-off-by: Ankit Agarwal <ankit.agarwal@intel.com>
----
- cc/config/global.go |  4 ++--
- ui/build/build.go   |  1 +
- ui/build/kati.go    | 10 +++++-----
- ui/build/ninja.go   |  1 -
- ui/build/soong.go   |  8 ++++----
- 5 files changed, 12 insertions(+), 12 deletions(-)
+Signed-off-by: Basanagouda Nagappa Koppad <Basanagouda.Nagappa.Koppad@intel.com>
 
 diff --git a/cc/config/global.go b/cc/config/global.go
-index 44079678a..2a7036c84 100644
+index 2188687602..70ebc05793 100644
 --- a/cc/config/global.go
 +++ b/cc/config/global.go
-@@ -50,10 +50,10 @@ var (
- 		"-Werror=int-conversion",
+@@ -58,10 +58,10 @@ var (
+ 		"-Werror=multichar",
  		// Detects unterminated alignment modification pragmas, which often lead
  		// to ABI mismatch between modules and hard-to-debug crashes.
 -		"-Werror=pragma-pack",
-+		//"-Werror=pragma-pack",
++		// "-Werror=pragma-pack",
  		// Same as above, but detects alignment pragmas around a header
  		// inclusion.
 -		"-Werror=pragma-pack-suspicious-include",
@@ -30,10 +24,10 @@ index 44079678a..2a7036c84 100644
  		// leads to bugs.
  		"-Werror=sizeof-array-div",
 diff --git a/ui/build/build.go b/ui/build/build.go
-index ea867826c..c3df5a621 100644
+index bf1c93b316..605b862fef 100644
 --- a/ui/build/build.go
 +++ b/ui/build/build.go
-@@ -109,6 +109,7 @@ builddir = {{.OutDir}}
+@@ -104,6 +104,7 @@ builddir = {{.OutDir}}
  {{end -}}
  pool highmem_pool
   depth = {{.HighmemParallel}}
@@ -42,10 +36,10 @@ index ea867826c..c3df5a621 100644
  subninja {{.KatiBuildNinjaFile}}
  subninja {{.KatiPackageNinjaFile}}
 diff --git a/ui/build/kati.go b/ui/build/kati.go
-index 6519573ac..12f760adf 100644
+index 6bd8e7294a..82b405101c 100644
 --- a/ui/build/kati.go
 +++ b/ui/build/kati.go
-@@ -104,7 +104,7 @@ func runKati(ctx Context, config Config, extraSuffix string, args []string, envF
+@@ -112,7 +112,7 @@ func runKati(ctx Context, config Config, e *TraceEvent, extraSuffix string, args
  		// using 'include'.
  		"--no_ninja_prelude",
  		// Support declaring phony outputs in AOSP Ninja.
@@ -54,7 +48,7 @@ index 6519573ac..12f760adf 100644
  		// Regenerate the Ninja file if environment inputs have changed. e.g.
  		// CLI flags, .mk file timestamps, env vars, $(wildcard ..) and some
  		// $(shell ..) results.
-@@ -128,14 +128,14 @@ func runKati(ctx Context, config Config, extraSuffix string, args []string, envF
+@@ -136,14 +136,14 @@ func runKati(ctx Context, config Config, e *TraceEvent, extraSuffix string, args
  		// Fail when suffix rules are used.
  		"--werror_suffix_rules",
  		// Fail when a real target depends on a phony target.
@@ -72,7 +66,7 @@ index 6519573ac..12f760adf 100644
  		// Print Kati's internal statistics, such as the number of variables,
  		// implicit/explicit/suffix rules, and so on.
  		"--kati_stats",
-@@ -244,7 +244,7 @@ func runKatiBuild(ctx Context, config Config) {
+@@ -253,7 +253,7 @@ func runKatiBuild(ctx Context, config Config) {
  
  	if !config.BuildBrokenDupRules() {
  		// Fail when redefining / duplicating a target.
@@ -82,37 +76,33 @@ index 6519573ac..12f760adf 100644
  
  	args = append(args, config.KatiArgs()...)
 diff --git a/ui/build/ninja.go b/ui/build/ninja.go
-index 1d4285f2c..a3b9361bd 100644
+index d608b9a83d..aa85bf6402 100644
 --- a/ui/build/ninja.go
 +++ b/ui/build/ninja.go
-@@ -83,7 +83,6 @@ func runNinjaForBuild(ctx Context, config Config) {
+@@ -158,7 +158,6 @@ func runNinja(ctx Context, config Config, ninjaArgs []string) {
  			"-d", "keeprsp",
  			"-d", "stats",
  			"--frontend_file", fifo,
 -			"-o", "usesphonyoutputs=yes",
  			"-w", "dupbuild=err",
  			"-w", "missingdepfile=err",
- 		}
+ 			"-j", strconv.Itoa(parallel),
 diff --git a/ui/build/soong.go b/ui/build/soong.go
-index 58334a907..1ca4190d9 100644
+index 4521b4abef..095ceaae21 100644
 --- a/ui/build/soong.go
 +++ b/ui/build/soong.go
-@@ -651,11 +651,11 @@ func runSoong(ctx Context, config Config) {
- 			ninjaArgs = []string{
- 				"-d", "keepdepfile",
- 				"-d", "stats",
--				"-o", "usesphonyoutputs=yes",
--				"-o", "preremoveoutputs=yes",
-+				//"-o", "usesphonyoutputs=yes",
-+				//"-o", "preremoveoutputs=yes",
- 				"-w", "dupbuild=err",
--				"-w", "outputdir=err",
--				"-w", "missingoutfile=err",
-+				//"-w", "outputdir=err",
-+				//"-w", "missingoutfile=err",
- 				"-j", strconv.Itoa(config.Parallel()),
- 				"--frontend_file", fifo,
- 				"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
+@@ -725,11 +725,7 @@ func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
+ 				ninjaArgs = []string{
+ 					"-d", "keepdepfile",
+ 					"-d", "stats",
+-					"-o", "usesphonyoutputs=yes",
+-					"-o", "preremoveoutputs=yes",
+ 					"-w", "dupbuild=err",
+-					"-w", "outputdir=err",
+-					"-w", "missingoutfile=err",
+ 					"-j", strconv.Itoa(config.Parallel()),
+ 					"--frontend_file", fifo,
+ 					"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
 -- 
 2.34.1
 

@@ -25,7 +25,7 @@ function lunch
     # $(TOP)/build/release/release_configs/*
     # When updating TARGET_RELEASE value here please change in 
     # "function _get_build_var_cached" below too.
-    TARGET_RELEASE=bp2a
+    TARGET_RELEASE=cp2a
     if [ "$1" ]; then
         local valid_targets=`mixinup -t`
         local count=`echo "$1" | grep -o "-" | wc -l`
@@ -79,7 +79,7 @@ function _get_build_var_cached()
     # Set the TARGET_RELEASE variable to the release_config for
     # which we want to build CELADON. It should be one among
     # $(TOP)/build/release/release_configs/*
-    TARGET_RELEASE=bp2a
+    TARGET_RELEASE=cp2a
     if [ "$1" = "COMMON_LUNCH_CHOICES" ]
     then
         valid_targets=`mixinup -t`

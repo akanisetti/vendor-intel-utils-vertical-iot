@@ -1,0 +1,312 @@
+From ba73782e22b27f8eb45384e9c0f27c5ab485888a Mon Sep 17 00:00:00 2001
+From: aee-gfx-buildserver <aee-gfx-buildserver@intel.com>
+Date: Wed, 5 Apr 2023 10:36:04 +0000
+Subject: [PATCH 17/19] Perfetto: Modify to make perfetto and AGI run ok
+
+Ported from Intel A17 25.0.1 (a7cd4efcc3a) to Mesa 26.0.8:
+
+ - Link Android's libperfetto_client_experimental (and its
+   perfetto_flags_c_lib), the way AOSP external/mesa3d does, and configure
+   with -Dperfetto=true -Dandroid-libperfetto=enabled (upstream option
+   since 25.3). The generated perfetto.pc only satisfies meson's
+   dependency lookup. No copy of the perfetto SDK is carried.
+ - Install upstream's Android libgpudataproducer.so (exports start(),
+   loaded by /system/bin/gpu_counter_producer) as the
+   'libgpudataproducer' vendor module. The Intel pps-producer wrapper
+   executable and libpps-producer are no longer needed.
+ - AGI validation: non-zero submission ids and non-null command buffer
+   handles in render stage / submission events (intel_ds_end_submit()
+   gains a cmd_buf argument; iris, anv and hasvk callers updated).
+ - Android: initialize perfetto lazily from util_perfetto_trace_begin()
+   instead of util_cpu_trace_init(), which runs while zygote preloads
+   the GL driver and would spawn a thread there, hanging zygote.
+ - Recreate IntelPerf per DRM device in init_perfcnt() for multi-GPU
+   (iGPU + dGPU) systems.
+
+Dropped because upstream now provides them: GpuCounterDescriptor
+registration at data source registration time, and the pps-producer
+Android entry point.
+
+Tracked-On: OAM-110834
+Signed-off-by: chenyanxzhu <chenyanx.zhu@intel.com>
+(cherry picked from commit a7cd4efcc3a11b5e32c9f415c796ee7cf024589e)
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ android/Android.mk                       | 10 ++++++++--
+ android/mesa3d_cross.mk                  |  6 +++++-
+ src/gallium/drivers/iris/iris_batch.c    |  6 +++++-
+ src/intel/ds/intel_driver_ds.cc          | 11 ++++++++++-
+ src/intel/ds/intel_driver_ds.h           |  4 ++--
+ src/intel/ds/intel_pps_driver.cc         | 14 +++++++++++---
+ src/intel/vulkan/anv_batch_chain.c       |  5 ++++-
+ src/intel/vulkan_hasvk/anv_batch_chain.c |  2 +-
+ src/util/perf/cpu_trace.h                |  6 ++++++
+ src/util/perf/u_perfetto.cc              |  5 +++++
+ 10 files changed, 57 insertions(+), 12 deletions(-)
+
+diff --git a/android/Android.mk b/android/Android.mk
+index 2f2416a29f89..af4fbcc9780e 100644
+--- a/android/Android.mk
++++ b/android/Android.mk
+@@ -24,6 +24,7 @@
+ ifneq ($(filter true, $(BOARD_MESA3D_USES_MESON_BUILD)),)
+ 
+ LOCAL_PATH := $(call my-dir)
++
+ MESA3D_TOP := $(dir $(LOCAL_PATH))
+ 
+ LIBDRM_VERSION = $(shell cat hardware/intel/external/drm-intel/meson.build | grep -o "\<version\>\s*:\s*'\w*\.\w*\.\w*'" | grep -o "\w*\.\w*\.\w*" | head -1)
+@@ -55,9 +56,10 @@ MESA_VK_LIB_SUFFIX_swrast := lvp
+ include $(CLEAR_VARS)
+ 
+ LOCAL_SHARED_LIBRARIES := libc libdl libdrm libm liblog libcutils libz libc++ libnativewindow libsync libhardware
+-LOCAL_STATIC_LIBRARIES := libexpat libarect libelf
++# Perfetto: the Android platform client library, as AOSP external/mesa3d uses
++LOCAL_STATIC_LIBRARIES := libexpat libarect libelf libperfetto_client_experimental perfetto_flags_c_lib
+ LOCAL_HEADER_LIBRARIES := libnativebase_headers hwvulkan_headers
+-MESON_GEN_PKGCONFIGS := log cutils expat hardware libdrm:$(LIBDRM_VERSION) nativewindow sync zlib:1.2.11 libelf
++MESON_GEN_PKGCONFIGS := log cutils expat hardware libdrm:$(LIBDRM_VERSION) nativewindow sync zlib:1.2.11 libelf perfetto
+ LOCAL_CFLAGS += $(BOARD_MESA3D_CFLAGS)
+ 
+ ifneq ($(filter i915 r300,$(BOARD_MESA3D_GALLIUM_DRIVERS)),)
+@@ -201,6 +203,10 @@ ifneq ($(strip $(BOARD_MESA3D_GALLIUM_DRIVERS)),)
+ # This module also trigger DRI symlinks creation process
+ $(eval $(call mesa3d-lib,libgallium_dri,,MESA3D_GALLIUM_BIN))
+ 
++# Module 'libgpudataproducer', produces '/vendor/lib{64}/libgpudataproducer.so',
++# loaded by /system/bin/gpu_counter_producer for GPU profiling (AGI, CTS)
++$(eval $(call mesa3d-lib,libgpudataproducer,,MESA3D_LIBGPUDATAPRODUCER))
++
+ # Module 'libEGL_mesa', produces '/vendor/lib{64}/egl/libEGL_mesa.so'
+ $(eval $(call mesa3d-lib,libEGL_mesa,egl,MESA3D_LIBEGL_BIN))
+ # Module 'libGLESv1_CM_mesa', produces '/vendor/lib{64}/egl/libGLESv1_CM_mesa.so'
+diff --git a/android/mesa3d_cross.mk b/android/mesa3d_cross.mk
+index 287e021935da..e8faf8bdd3e8 100644
+--- a/android/mesa3d_cross.mk
++++ b/android/mesa3d_cross.mk
+@@ -70,7 +70,9 @@ $(M_TARGET_PREFIX)MESA3D_LIBGLESV1_BIN   := $(MESON_OUT_DIR)/install/usr/local/l
+ $(M_TARGET_PREFIX)MESA3D_LIBGLESV2_BIN   := $(MESON_OUT_DIR)/install/usr/local/lib/libGLESv2.so
+ $(M_TARGET_PREFIX)MESA3D_LIBGBM_BIN      := $(MESON_OUT_DIR)/install/usr/local/lib/$(MESA_LIBGBM_NAME).so
+ $(M_TARGET_PREFIX)MESA3D_DRI_GBM_BIN     := $(MESON_OUT_DIR)/install/usr/local/lib/gbm/dri_gbm.so
++$(M_TARGET_PREFIX)MESA3D_LIBGPUDATAPRODUCER := $(MESON_OUT_DIR)/install/usr/local/lib/libgpudataproducer.so
+ 
++MESA3D_GPUDATAPRODUCER_BIN := $($(M_TARGET_PREFIX)MESA3D_LIBGPUDATAPRODUCER)
+ 
+ MESA3D_GBM_BINS := \
+     $($(M_TARGET_PREFIX)MESA3D_LIBGBM_BIN) \
+@@ -98,6 +100,8 @@ MESON_GEN_NINJA := \
+ 	-Dcpp_rtti=false                                                             \
+ 	-Dlmsensors=disabled                                                         \
+ 	-Dandroid-libbacktrace=disabled                                              \
++	-Dperfetto=true                                                              \
++	-Dandroid-libperfetto=enabled                                                \
+ 	$(BOARD_MESA3D_MESON_ARGS)                                                   \
+ 
+ MESON_BUILD := PATH=/usr/bin:/bin:/sbin:$$PATH ninja -C $(MESON_OUT_DIR)/build
+@@ -303,7 +307,7 @@ $(MESON_OUT_DIR)/install/.install.timestamp: $(MESON_OUT_DIR)/.build.timestamp
+ 	DESTDIR=$(call relative-to-absolute,$(dir $@)) $(MESON_BUILD) install
+ 	touch $@
+ 
+-$(MESA3D_GBM_BINS) $(MESA3D_GLES_BINS): $(MESON_OUT_DIR)/install/.install.timestamp
++$(MESA3D_GPUDATAPRODUCER_BIN) $(MESA3D_GBM_BINS) $(MESA3D_GLES_BINS): $(MESON_OUT_DIR)/install/.install.timestamp
+ 	echo "Build $@"
+ 	touch $@
+ 
+diff --git a/src/gallium/drivers/iris/iris_batch.c b/src/gallium/drivers/iris/iris_batch.c
+index 02ac54073b81..ab384ac6bc6f 100644
+--- a/src/gallium/drivers/iris/iris_batch.c
++++ b/src/gallium/drivers/iris/iris_batch.c
+@@ -948,7 +948,11 @@ _iris_batch_flush(struct iris_batch *batch, const char *file, int line)
+    uint64_t start_ts = intel_ds_begin_submit(&batch->ds);
+    uint64_t submission_id = batch->ds.submission_id;
+    int ret = iris_bufmgr_get_kernel_driver_backend(bufmgr)->batch_submit(batch);
+-   intel_ds_end_submit(&batch->ds, start_ts);
++   /*
++   * To make AGI validation passthrough, CommandBuffers can't be null.
++   * Just use bo. TODO: check if need to change to other more meaningful var.
++   */
++   intel_ds_end_submit(&batch->ds, start_ts, (uint64_t)(&batch->bo));
+ 
+    /* When batch submission fails, our end-of-batch syncobj remains
+     * unsignalled, and in fact is not even considered submitted.
+diff --git a/src/intel/ds/intel_driver_ds.cc b/src/intel/ds/intel_driver_ds.cc
+index 3f79d7df1fd5..d0cbd2032ba5 100644
+--- a/src/intel/ds/intel_driver_ds.cc
++++ b/src/intel/ds/intel_driver_ds.cc
+@@ -298,6 +298,7 @@ end_event(struct intel_ds_queue *queue, uint64_t ts_ns,
+       event->set_event_id(evt_id);
+       event->set_duration(ts_ns - start_ns);
+       event->set_submission_id(submission_id);
++      event->set_command_buffer_handle((uint64_t)&submission_id);
+ 
+       if ((payload || indirect_data) && payload_as_extra) {
+          payload_as_extra(event, payload, indirect_data);
+@@ -615,12 +616,18 @@ intel_ds_end_barrier(struct intel_ds_device *device,
+ uint64_t
+ intel_ds_begin_submit(struct intel_ds_queue *queue)
+ {
++   /*
++    * To make AGI validation passthrough, submission_id can't be 0.
++    * Since initial value of submission_id in queue struct is 0,
++    * make it start from 1 instead of 0.
++    */
++   if (queue->submission_id == 0) queue->submission_id = 1;
+    return perfetto::base::GetBootTimeNs().count();
+ }
+ 
+ void
+ intel_ds_end_submit(struct intel_ds_queue *queue,
+-                    uint64_t start_ts)
++                    uint64_t start_ts, uint64_t cmd_buf)
+ {
+    if (!u_trace_should_process(&queue->device->trace_context))
+       return;
+@@ -639,6 +646,8 @@ intel_ds_end_submit(struct intel_ds_queue *queue,
+       submit->set_duration_ns(end_ts - start_ts);
+       submit->set_vk_queue((uintptr_t) queue);
+       submit->set_submission_id(submission_id);
++      // To make AGI validation passthrough, CommandBuffers can't be null.
++      submit->add_vk_command_buffers(cmd_buf);
+    });
+ }
+ 
+diff --git a/src/intel/ds/intel_driver_ds.h b/src/intel/ds/intel_driver_ds.h
+index 8157419d6a96..ced087a9ccf9 100644
+--- a/src/intel/ds/intel_driver_ds.h
++++ b/src/intel/ds/intel_driver_ds.h
+@@ -235,7 +235,7 @@ void intel_ds_device_process(struct intel_ds_device *device, bool eof);
+ 
+ uint64_t intel_ds_begin_submit(struct intel_ds_queue *queue);
+ void intel_ds_end_submit(struct intel_ds_queue *queue,
+-                         uint64_t start_ts);
++                         uint64_t start_ts, uint64_t cmd_bufs);
+ 
+ void intel_ds_perfetto_set_debug_utils_object_name(struct intel_ds_device *device,
+    const struct VkDebugUtilsObjectNameInfoEXT *pNameInfo);
+@@ -251,7 +251,7 @@ static inline uint64_t intel_ds_begin_submit(struct intel_ds_queue *queue)
+ }
+ 
+ static inline void intel_ds_end_submit(struct intel_ds_queue *queue,
+-                                       uint64_t start_ts)
++                                       uint64_t start_ts, uint64_t cmd_bufs)
+ {
+ }
+ 
+diff --git a/src/intel/ds/intel_pps_driver.cc b/src/intel/ds/intel_pps_driver.cc
+index 8a038c3ccebb..88768f0fe707 100644
+--- a/src/intel/ds/intel_pps_driver.cc
++++ b/src/intel/ds/intel_pps_driver.cc
+@@ -73,8 +73,11 @@ bool IntelDriver::init_perfcnt()
+     */
+    this->clock_id = intel_pps_clock_id(drm_device.gpu_num);
+ 
+-   if (perf)
+-      return true;
++   /* A single IntelDriver serves all Intel GPUs (e.g. iGPU + dGPU) and
++    * init_perfcnt() is called once per DRM device, so recreate perf for the
++    * current device instead of reusing the one from the previous device.
++    */
++   perf = nullptr;
+ 
+    perf = std::make_unique<IntelPerf>(drm_device.fd);
+ 
+@@ -82,14 +85,19 @@ bool IntelDriver::init_perfcnt()
+ 
+    struct intel_perf_query_info *default_query = nullptr;
+    selected_query = nullptr;
++   int cnt = 0;
+    for (auto &query : perf->get_queries()) {
+       if (!strcmp(query->symbol_name, "RenderBasic"))
+          default_query = query;
+       if (metric_set_name && !strcmp(query->symbol_name, metric_set_name))
+          selected_query = query;
++      cnt ++;
+    }
+ 
+-   assert(default_query);
++   if (!default_query) {
++      PPS_LOG_ERROR("No default query found! total_cnt=%d", cnt);
++      return false;
++   }
+ 
+    if (!selected_query) {
+       if (metric_set_name) {
+diff --git a/src/intel/vulkan/anv_batch_chain.c b/src/intel/vulkan/anv_batch_chain.c
+index 83e51c2dcb3a..e1e9388183d7 100644
+--- a/src/intel/vulkan/anv_batch_chain.c
++++ b/src/intel/vulkan/anv_batch_chain.c
+@@ -1646,7 +1646,10 @@ anv_queue_submit(struct vk_queue *vk_queue,
+       pthread_mutex_unlock(&device->mutex);
+    }
+ 
+-   intel_ds_end_submit(&queue->ds, start_ts);
++   /* To make AGI validation pass, the submission's command buffers can't be
++    * null.
++    */
++   intel_ds_end_submit(&queue->ds, start_ts, (uint64_t)(&submit->command_buffers));
+    intel_ds_device_process(&device->ds, false);
+ 
+    return result;
+diff --git a/src/intel/vulkan_hasvk/anv_batch_chain.c b/src/intel/vulkan_hasvk/anv_batch_chain.c
+index 2ecb8a48b7c5..b2391c884866 100644
+--- a/src/intel/vulkan_hasvk/anv_batch_chain.c
++++ b/src/intel/vulkan_hasvk/anv_batch_chain.c
+@@ -2367,7 +2367,7 @@ anv_queue_submit(struct vk_queue *vk_queue,
+    result = anv_queue_submit_locked(queue, submit);
+    pthread_mutex_unlock(&device->mutex);
+ 
+-   intel_ds_end_submit(&queue->ds, start_ts);
++   intel_ds_end_submit(&queue->ds, start_ts, (uint64_t)(&submit->command_buffers));
+ 
+    return result;
+ }
+diff --git a/src/util/perf/cpu_trace.h b/src/util/perf/cpu_trace.h
+index 27b7a72b4ef3..380aa6d527f0 100644
+--- a/src/util/perf/cpu_trace.h
++++ b/src/util/perf/cpu_trace.h
+@@ -219,7 +219,13 @@ static inline void
+ util_cpu_trace_init()
+ {
+ #if defined(HAVE_PERFETTO)
++#if !DETECT_OS_ANDROID
++   /* On Android perfetto is initialized lazily from util_perfetto_trace_begin():
++    * initializing it here spawns a thread while zygote preloads the GL driver,
++    * which makes zygote hang waiting for all threads to stop before forking.
++    */
+    util_perfetto_init();
++#endif
+ #elif DETECT_OS_ANDROID && !defined(__cplusplus)
+    atrace_init();
+ #endif /* HAVE_PERFETTO */
+diff --git a/src/util/perf/u_perfetto.cc b/src/util/perf/u_perfetto.cc
+index d34d470780fd..4a95d4e1c1f3 100644
+--- a/src/util/perf/u_perfetto.cc
++++ b/src/util/perf/u_perfetto.cc
+@@ -44,6 +44,7 @@ PERFETTO_DEFINE_CATEGORIES(
+ PERFETTO_TRACK_EVENT_STATIC_STORAGE();
+ 
+ int util_perfetto_tracing_state;
++static int inited = false;
+ 
+ static uint64_t util_perfetto_unique_id = 1;
+ 
+@@ -105,6 +106,9 @@ util_perfetto_now(perfetto_clock_id clock)
+ void
+ util_perfetto_trace_begin(const char *name)
+ {
++   if (!inited)
++      util_perfetto_init();
++
+    TRACE_EVENT_BEGIN(
+       UTIL_PERFETTO_CATEGORY_DEFAULT_STR, nullptr,
+       util_perfetto_now(util_perfetto_get_default_clock()),
+@@ -219,4 +223,5 @@ void
+ util_perfetto_init(void)
+ {
+    call_once(&perfetto_once_flag, util_perfetto_init_once);
++   inited = true;
+ }
+-- 
+2.34.1
+

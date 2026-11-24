@@ -1,0 +1,306 @@
+From e6399af21cf8e7c6786eaa2d890d35fc2a1a4981 Mon Sep 17 00:00:00 2001
+From: JeevakaPrabu <jeevaka.badrappan@intel.com>
+Date: Mon, 25 Nov 2024 15:07:17 +0000
+Subject: [PATCH 04/19] gralloc/imapper5: Revert "Android15 support gralloc
+ IMapper5"
+
+This reverts commit 122fd46b1508aaa60e586e80ff592544c2994ee6.
+
+Reason for revert was libui was not allowed to be accessed from the vendor hal.
+In android 16, it is allowed but not in android 15
+
+(cherry picked from commit 9f0157f21a98f7427d1359dda178d3185564144e)
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ android/Android.mk                            |   6 +-
+ meson.build                                   |   4 -
+ src/util/u_gralloc/meson.build                |   7 +-
+ src/util/u_gralloc/u_gralloc_imapper5_api.cpp | 218 ------------------
+ 4 files changed, 2 insertions(+), 233 deletions(-)
+ delete mode 100644 src/util/u_gralloc/u_gralloc_imapper5_api.cpp
+
+diff --git a/android/Android.mk b/android/Android.mk
+index 8abf00081951..33c5b8f63d35 100644
+--- a/android/Android.mk
++++ b/android/Android.mk
+@@ -122,11 +122,7 @@ LOCAL_SHARED_LIBRARIES += \
+     libgralloctypes \
+     libhidlbase \
+     libutils
+-ifeq ($(shell test $(PLATFORM_SDK_VERSION) -ge 35; echo $$?), 0)
+-LOCAL_SHARED_LIBRARIES += libui
+-LOCAL_STATIC_LIBRARIES += libzstd
+-MESON_GEN_PKGCONFIGS += ui
+-endif
++
+ MESON_GEN_PKGCONFIGS += android.hardware.graphics.mapper:4.0
+ endif
+ 
+diff --git a/meson.build b/meson.build
+index f16a35cafbf5..c3d3fdf76004 100644
+--- a/meson.build
++++ b/meson.build
+@@ -965,7 +965,6 @@ with_libbacktrace = get_option('android-libbacktrace') \
+   .allowed()
+ 
+ if with_platform_android
+-  dep_android_ui = null_dep
+   dep_android_mapper4 = null_dep
+   if not with_android_stub
+     dep_android = [
+@@ -984,9 +983,6 @@ if with_platform_android
+     if get_option('platform-sdk-version') >= 30
+       dep_android_mapper4 = dependency('android.hardware.graphics.mapper', version : '>= 4.0', required : false)
+     endif
+-    if get_option('platform-sdk-version') >= 35
+-      dep_android_ui = dependency('ui', required : false)
+-    endif
+     dep_hwvulkan_headers = dependency('android-hwvulkan-headers', required : false)
+     if dep_hwvulkan_headers.found() and with_any_vk
+       dep_android += dep_hwvulkan_headers
+diff --git a/src/util/u_gralloc/meson.build b/src/util/u_gralloc/meson.build
+index a4aee6f5c3f1..40b4aa2363ac 100644
+--- a/src/util/u_gralloc/meson.build
++++ b/src/util/u_gralloc/meson.build
+@@ -17,12 +17,7 @@ files_u_gralloc = files(
+   'u_gralloc_qcom.c',
+ )
+ 
+-if dep_android_ui.found()
+-  files_u_gralloc += files('u_gralloc_imapper5_api.cpp')
+-  c_args_for_u_gralloc += '-DUSE_IMAPPER4_METADATA_API'
+-  cpp_args_for_u_gralloc += '-DUSE_IMAPPER4_METADATA_API'
+-  options_for_u_gralloc += 'cpp_std=c++17'
+-elif dep_android_mapper4.found()
++if dep_android_mapper4.found()
+   files_u_gralloc += files('u_gralloc_imapper4_api.cpp')
+   c_args_for_u_gralloc += '-DUSE_IMAPPER4_METADATA_API'
+   cpp_args_for_u_gralloc += '-DUSE_IMAPPER4_METADATA_API'
+diff --git a/src/util/u_gralloc/u_gralloc_imapper5_api.cpp b/src/util/u_gralloc/u_gralloc_imapper5_api.cpp
+deleted file mode 100644
+index ae6604bd5060..000000000000
+--- a/src/util/u_gralloc/u_gralloc_imapper5_api.cpp
++++ /dev/null
+@@ -1,218 +0,0 @@
+-/*
+- * Mesa 3-D graphics library
+- *
+- * Copyright (C) 2021 GlobalLogic Ukraine
+- * Copyright (C) 2021-2022 Roman Stratiienko (r.stratiienko@gmail.com)
+- * SPDX-License-Identifier: MIT
+- */
+-#include <aidl/android/hardware/graphics/common/BufferUsage.h>
+-#include <aidl/android/hardware/graphics/common/ChromaSiting.h>
+-#include <aidl/android/hardware/graphics/common/Dataspace.h>
+-#include <aidl/android/hardware/graphics/common/ExtendableType.h>
+-#include <aidl/android/hardware/graphics/common/PlaneLayoutComponent.h>
+-#include <aidl/android/hardware/graphics/common/PlaneLayoutComponentType.h>
+-#include <ui/GraphicBufferMapper.h>
+-
+-#include <system/window.h>
+-
+-#include "util/log.h"
+-#include "u_gralloc_internal.h"
+-
+-using aidl::android::hardware::graphics::common::BufferUsage;
+-using aidl::android::hardware::graphics::common::ChromaSiting;
+-using aidl::android::hardware::graphics::common::ExtendableType;
+-using aidl::android::hardware::graphics::common::PlaneLayout;
+-using aidl::android::hardware::graphics::common::PlaneLayoutComponent;
+-using aidl::android::hardware::graphics::common::PlaneLayoutComponentType;
+-using android::hardware::graphics::common::V1_2::Dataspace;
+-using android::GraphicBufferMapper;
+-using android::OK;
+-using android::status_t;
+-
+-std::optional<std::vector<PlaneLayout>>
+-GetPlaneLayouts(const native_handle_t *buffer)
+-{
+-   std::vector<PlaneLayout> plane_layouts;
+-   status_t  error = GraphicBufferMapper::get().getPlaneLayouts(buffer, &plane_layouts);
+-
+-   if (error != OK)
+-      return std::nullopt;
+-
+-   return plane_layouts;
+-}
+-
+-struct gralloc_mapper {
+-   struct u_gralloc base;
+-};
+-
+-extern "C" {
+-
+-static int
+-mapper5_get_buffer_basic_info(struct u_gralloc *gralloc,
+-                              struct u_gralloc_buffer_handle *hnd,
+-                              struct u_gralloc_buffer_basic_info *out)
+-{
+-   if (!hnd->handle)
+-      return -EINVAL;
+-
+-   uint32_t drm_fourcc;
+-   status_t error = GraphicBufferMapper::get().getPixelFormatFourCC(hnd->handle, &drm_fourcc);
+-   if (error != OK)
+-      return -EINVAL;
+-
+-   uint64_t modifier;
+-   error = GraphicBufferMapper::get().getPixelFormatModifier(hnd->handle,&modifier);
+-   if (error != OK)
+-      return  -EINVAL;
+-
+-
+-   out->drm_fourcc = drm_fourcc;
+-   out->modifier = modifier;
+-
+-   auto layouts_opt = GetPlaneLayouts(hnd->handle);
+-
+-   if (!layouts_opt)
+-      return  -EINVAL;
+-
+-   std::vector<PlaneLayout> &layouts = *layouts_opt;
+-
+-   out->num_planes = layouts.size();
+-
+-   int fd_index = 0;
+-
+-   for (uint32_t i = 0; i < layouts.size(); i++) {
+-      out->strides[i] = layouts[i].strideInBytes;
+-      out->offsets[i] = layouts[i].offsetInBytes;
+-
+-      /* offset == 0 means layer is located in different dma-buf */
+-      if (out->offsets[i] == 0 && i > 0)
+-         fd_index++;
+-
+-      if (fd_index >= hnd->handle->numFds)
+-         return -EINVAL;
+-
+-      out->fds[i] = hnd->handle->data[fd_index];
+-   }
+-
+-   return 0;
+-}
+-
+-static int
+-mapper5_get_buffer_color_info(struct u_gralloc *gralloc,
+-                              struct u_gralloc_buffer_handle *hnd,
+-                              struct u_gralloc_buffer_color_info *out)
+-{
+-   if (!hnd->handle)
+-      return  -EINVAL;
+-
+-   /* optional attributes */
+-   ChromaSiting chroma_siting;
+-   status_t error = GraphicBufferMapper::get().getChromaSiting(hnd->handle, &chroma_siting);
+-   if (error != OK)
+-      return  -EINVAL;
+-
+-   Dataspace dataspace;
+-   error = GraphicBufferMapper::get().getDataspace(hnd->handle, &dataspace);
+-   if (error != OK)
+-      return  -EINVAL;
+-
+-   /* default to __DRI_YUV_COLOR_SPACE_ITU_REC601 */
+-   Dataspace standard =
+-      (Dataspace)((int)dataspace & (uint32_t)Dataspace::STANDARD_MASK);
+-   switch (standard) {
+-      case Dataspace::STANDARD_BT709:
+-         out->yuv_color_space = __DRI_YUV_COLOR_SPACE_ITU_REC709;
+-         break;
+-      case Dataspace::STANDARD_BT2020:
+-      case Dataspace::STANDARD_BT2020_CONSTANT_LUMINANCE:
+-         out->yuv_color_space = __DRI_YUV_COLOR_SPACE_ITU_REC2020;
+-         break;
+-      case Dataspace::STANDARD_BT601_625:
+-      case Dataspace::STANDARD_BT601_625_UNADJUSTED:
+-      case Dataspace::STANDARD_BT601_525:
+-      case Dataspace::STANDARD_BT601_525_UNADJUSTED:
+-      default:
+-         out->yuv_color_space = __DRI_YUV_COLOR_SPACE_ITU_REC601;
+-         break;
+-      }
+-
+-      /* default to __DRI_YUV_NARROW_RANGE */
+-      Dataspace range =
+-         (Dataspace)((int)dataspace & (uint32_t)Dataspace::RANGE_MASK);
+-      switch (range) {
+-         case Dataspace::RANGE_FULL:
+-            out->sample_range = __DRI_YUV_FULL_RANGE;
+-            break;
+-         case Dataspace::RANGE_LIMITED:
+-         default:
+-            out->sample_range = __DRI_YUV_NARROW_RANGE;
+-            break;
+-      }
+-
+-      /* default to __DRI_YUV_CHROMA_SITING_0_5 */
+-      switch (chroma_siting) {
+-      case ChromaSiting::COSITED_HORIZONTAL:
+-         out->horizontal_siting = __DRI_YUV_CHROMA_SITING_0;
+-         out->vertical_siting = __DRI_YUV_CHROMA_SITING_0_5;
+-         break;
+-      case ChromaSiting::COSITED_VERTICAL:
+-         out->horizontal_siting = __DRI_YUV_CHROMA_SITING_0_5;
+-         out->vertical_siting = __DRI_YUV_CHROMA_SITING_0;
+-         break;
+-      case ChromaSiting::COSITED_BOTH:
+-         out->horizontal_siting = __DRI_YUV_CHROMA_SITING_0;
+-         out->vertical_siting = __DRI_YUV_CHROMA_SITING_0;
+-         break;
+-      case ChromaSiting::SITED_INTERSTITIAL:
+-      default:
+-         out->horizontal_siting = __DRI_YUV_CHROMA_SITING_0_5;
+-         out->vertical_siting = __DRI_YUV_CHROMA_SITING_0_5;
+-         break;
+-      }
+-
+-   return 0;
+-}
+-
+-static int
+-mapper5_get_front_rendering_usage(struct u_gralloc *gralloc,
+-                                  uint64_t *out_usage)
+-{
+-   assert(out_usage);
+-#if ANDROID_API_LEVEL >= 33
+-   *out_usage = static_cast<uint64_t>(BufferUsage::FRONT_BUFFER);
+-
+-   return 0;
+-#else
+-   return -ENOTSUP;
+-#endif
+-}
+-
+-static int
+-destroy(struct u_gralloc *gralloc)
+-{
+-   gralloc_mapper *gr = (struct gralloc_mapper *)gralloc;
+-   delete gr;
+-
+-   return 0;
+-}
+-
+-struct u_gralloc *
+-u_gralloc_imapper_api_create()
+-{
+-   auto &mapper = GraphicBufferMapper::get();
+-   if(mapper.getMapperVersion() < GraphicBufferMapper::GRALLOC_4) {
+-      mesa_logi("Could not find IMapper v4/v5 API");
+-      return NULL;
+-   }
+-   auto gr = new gralloc_mapper;
+-   gr->base.ops.get_buffer_basic_info = mapper5_get_buffer_basic_info;
+-   gr->base.ops.get_buffer_color_info = mapper5_get_buffer_color_info;
+-   gr->base.ops.get_front_rendering_usage = mapper5_get_front_rendering_usage;
+-   gr->base.ops.destroy = destroy;
+-
+-   mesa_logi("Using IMapper %d API", mapper.getMapperVersion());
+-
+-   return &gr->base;
+-}
+-} // extern "C"
+-
+-- 
+2.34.1
+

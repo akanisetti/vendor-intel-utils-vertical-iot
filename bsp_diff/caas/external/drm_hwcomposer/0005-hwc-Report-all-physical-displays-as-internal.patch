@@ -1,0 +1,60 @@
+From 02fef32291117f72f894a62746e3e7ef04de25d1 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 13 Oct 2026 02:46:17 +0000
+Subject: [PATCH 5/6] hwc: Report all physical displays as internal
+
+SurfaceFlinger uses a fixed density (213 dpi) for external displays,
+so secondary displays on Celadon (multi-display, dGPU passthrough)
+report a density that does not match their real resolution. Report
+every non-virtual display as internal.
+
+Port of the Intel drm-hwcomposer fork commit 8bc1a87 ("Marking External
+Connector as Internal Connector"). vendor.hwc.drm.internal_display_names
+cannot be used instead because MST connector names are not stable.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ hwc/HwcDisplay.cpp | 25 ++++++-------------------
+ 1 file changed, 6 insertions(+), 19 deletions(-)
+
+diff --git a/hwc/HwcDisplay.cpp b/hwc/HwcDisplay.cpp
+index 7f3b7ee..5d4cf55 100644
+--- a/hwc/HwcDisplay.cpp
++++ b/hwc/HwcDisplay.cpp
+@@ -522,26 +522,13 @@ auto HwcDisplay::GetDisplayType() const -> DisplayType {
+     return kInternal;
+   }
+ 
+-  /* Primary display should be always internal,
+-   * otherwise SF will be unhappy and will crash
++  /*
++   * Celadon: report every physical display as internal, including the
++   * primary display (SurfaceFlinger requires it). SurfaceFlinger uses a
++   * fixed density (213 dpi) for external displays, which does not match the
++   * real resolution of the secondary displays.
+    */
+-  if (handle_ == kPrimaryDisplay) {
+-    return kInternal;
+-  }
+-
+-  auto displays = hwc_->GetResMan().GetInternalDisplayNames();
+-  if (!displays.empty()) {
+-    std::string name = GetPipe().connector->Get()->GetName();
+-    const bool is_internal = (displays.find(name) != displays.end());
+-    return is_internal ? kInternal : kExternal;
+-  }
+-
+-  if (GetPipe().connector->Get()->IsInternal())
+-    return kInternal;
+-
+-  ALOGW_IF(!GetPipe().connector->Get()->IsExternal(),
+-           "Connector type is neither internal nor external.");
+-  return kExternal;
++  return kInternal;
+ }
+ 
+ void HwcDisplay::SetVsyncCallbacksEnabled(bool enabled) {
+-- 
+2.34.1
+

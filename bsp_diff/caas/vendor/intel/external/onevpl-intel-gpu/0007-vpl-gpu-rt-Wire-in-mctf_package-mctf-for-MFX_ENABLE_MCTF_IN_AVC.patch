@@ -1,0 +1,67 @@
+From 338a5708be5f1db9329a50167315519770bd3cae Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Sat, 17 Oct 2026 09:23:39 +0000
+Subject: [PATCH] vpl-gpu-rt: Wire in mctf_package/mctf for
+ MFX_ENABLE_MCTF_IN_AVC
+
+A real build failed with a fatal "'mctf_common.h' file not found"
+compiling mfx_h264_enc_common_hw.cpp.
+
+mfx_h264_encode_hw_utils.h's #include "mctf_common.h" is unchanged
+from the pre-upgrade tree, gated behind
+"#if defined(MFX_ENABLE_MCTF) && defined(MFX_ENABLE_KERNELS) ->
+#define MFX_ENABLE_MCTF_IN_AVC" in mfx_config_encode.h (also
+unchanged). The old Android.mk build never defined MFX_ENABLE_MCTF or
+MFX_ENABLE_KERNELS at all (mfx_config.h's #include "mfx_features.h"
+is new in this release), so this AVC-specific MCTF integration path
+was always compiled out -- this commit's own earlier
+mfx_features.h addition in this series is what newly activates it,
+by correctly enabling MFX_ENABLE_MCTF/MFX_ENABLE_KERNELS to match
+what Android.mk's generic encode_hw MCTF wiring already assumed.
+
+mctf_package/mctf was never fully wired into Android.mk to begin
+with: MFX_LOCAL_DIRS_HW lists "mctf_package/mctf", but its generic
+wildcard glob builds mfx_lib/mctf_package/mctf/{include,src}, missing
+the real tree's extra ext/ segment
+(mfx_lib/ext/mctf_package/mctf/{include,src}) -- silently resolving
+to nothing in both the include-path and source-glob mechanisms, for
+both the header (now fixed) and mctf_common.cpp's implementation
+(also fixed here, to avoid a follow-up link failure for the same
+reason cmrt_cross_platform -- which sits right next to it in the same
+MFX_LOCAL_DIRS_HW list -- already has its own explicit, correctly
+pathed include and src entries).
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ _studio/mfx_lib/Android.mk | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/_studio/mfx_lib/Android.mk b/_studio/mfx_lib/Android.mk
+index a71da6e7..655e123b 100644
+--- a/_studio/mfx_lib/Android.mk
++++ b/_studio/mfx_lib/Android.mk
+@@ -37,6 +37,12 @@ MFX_LOCAL_SRC_FILES_HW := \
+ MFX_LOCAL_SRC_FILES_HW += $(addprefix mfx_lib/decode/mpeg2/hw/src/, \
+     mfx_mpeg2_decode.cpp)
+ 
++#mctf (MFX_LOCAL_DIRS_HW's generic glob misses this: it builds
++#mfx_lib/mctf_package/mctf/src/*.cpp, but the real path has an extra ext/
++#segment: mfx_lib/ext/mctf_package/mctf/src/)
++MFX_LOCAL_SRC_FILES_HW += $(addprefix mfx_lib/ext/mctf_package/mctf/src/, \
++    mctf_common.cpp)
++
+ MFX_LOCAL_SRC_FILES_HW += $(addprefix mfx_lib/ext/genx/h264_encode/isa/, \
+     genx_simple_me_gen12lp_isa.cpp \
+     genx_histogram_gen12lp_isa.cpp)
+@@ -151,6 +157,7 @@ MFX_LOCAL_INCLUDES_HW := \
+     $(MFX_HOME)/_studio/mfx_lib/ext/genx/field_copy/isa \
+     $(MFX_HOME)/_studio/mfx_lib/ext/genx/copy_kernels/isa \
+     $(MFX_HOME)/_studio/mfx_lib/ext/cmrt_cross_platform/include \
++    $(MFX_HOME)/_studio/mfx_lib/ext/mctf_package/mctf/include \
+     $(MFX_HOME)/_studio/mfx_lib/ext/genx/mctf/isa \
+     $(MFX_HOME)/_studio/mfx_lib/ext/genx/asc/isa \
+     $(MFX_HOME)/_studio/mfx_lib/ext/h264/include \
+-- 
+2.34.1
+

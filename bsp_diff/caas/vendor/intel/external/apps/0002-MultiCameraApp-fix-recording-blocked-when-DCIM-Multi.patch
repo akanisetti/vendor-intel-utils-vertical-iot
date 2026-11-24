@@ -1,0 +1,65 @@
+From 96bbb7173016b9f17e4e15678f572469ebeeafa1 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Wed, 18 Nov 2026 10:21:11 +0000
+Subject: [PATCH] MultiCameraApp: fix recording blocked when DCIM/MultiCamera
+ is missing
+
+Utils.getAvailableSpace() returned -1 if DCIM/MultiCamera did not exist.
+VideoRecord.startRecordingVideo() treated that as low storage, logged
+"Storage issue, ignore the start request" and never started recording.
+Media is saved via MediaStore with RELATIVE_PATH=DCIM/MultiCamera, which
+creates the folder on first save, so the folder could never be created.
+This broke recording on fresh images and after a data wipe.
+
+Tracked-On: NIACP3-1527
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ .../java/com/intel/multicamera/Utils.java     | 31 ++++++++++++-------
+ 1 file changed, 20 insertions(+), 11 deletions(-)
+
+diff --git a/camera/MultiCameraApplication/java/com/intel/multicamera/Utils.java b/camera/MultiCameraApplication/java/com/intel/multicamera/Utils.java
+index a5a012f..d055a89 100644
+--- a/camera/MultiCameraApplication/java/com/intel/multicamera/Utils.java
++++ b/camera/MultiCameraApplication/java/com/intel/multicamera/Utils.java
+@@ -538,18 +538,27 @@ public class Utils {
+         if(Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
+             //External storage is used to store large media files that need to be accessible
+             //even when the app is not running. The files are encrypted to ensure security.
+-            File directory = new File(Environment.getExternalStorageDirectory(),"DCIM/MultiCamera");
+-            if(!directory.exists())
+-            {
+-                Log.e(TAG,"MultiCamera Directory Does not Exist");
+-                return -1;
++            File root = Environment.getExternalStorageDirectory();
++            File directory = new File(root, DCIM + '/' + DIRECTORY);
++            // Media is saved through MediaStore (RELATIVE_PATH = DCIM/MultiCamera), which
++            // creates the folder on the first save. On a fresh image/user data the folder
++            // does not exist yet, so measure free space on the nearest existing parent
++            // (same volume) instead of reporting the storage as unavailable.
++            while (directory != null && !directory.exists() && !directory.equals(root)) {
++                directory = directory.getParentFile();
++            }
++            if (directory == null || !directory.exists()) {
++                Log.e(TAG, "External storage path does not exist: " + root);
++                return UNAVAILABLE;
++            }
++            try {
++                StatFs statFs = new StatFs(directory.getAbsolutePath());
++                return statFs.getAvailableBlocksLong() * statFs.getBlockSizeLong();
++            } catch (IllegalArgumentException e) {
++                Log.e(TAG, "Unable to stat " + directory, e);
++                return UNAVAILABLE;
+             }
+-            StatFs statFs = new StatFs(directory.getAbsolutePath());
+-            long availableBlocks = statFs.getAvailableBlocksLong();
+-            long blocksize = statFs.getBlockSizeLong();
+-
+-            return availableBlocks * blocksize;
+         }
+-        return -1;
++        return UNAVAILABLE;
+     }
+ }
+-- 
+2.34.1
+

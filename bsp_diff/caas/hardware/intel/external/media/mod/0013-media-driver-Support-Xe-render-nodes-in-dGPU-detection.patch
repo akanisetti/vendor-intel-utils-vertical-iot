@@ -1,0 +1,118 @@
+From d63e42276e5803b1b18aba32c45e237ad0d33c70 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Tue, 3 Nov 2026 15:25:29 +0000
+Subject: [PATCH] media-driver: Support Xe render nodes in dGPU detection
+
+DdiMedia_SelectIntelDevice()'s backend check only matched driver
+name "i915", so on Xe-only configurations the no-FD fallback in
+DdiMedia_GetDeviceFD() could never find a candidate DRM device.
+
+Accept both "i915" and "xe" driver names, and dispatch
+DdiMedia_IsIntelDgpu() to a backend-appropriate memory-region query
+(DRM_IOCTL_I915_QUERY vs DRM_IOCTL_XE_DEVICE_QUERY) instead of
+issuing i915-specific ioctls against Xe nodes. Same fix as libva's
+va_SelectIntelDevice()/va_IsIntelDgpu().
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ media_driver/linux/common/ddi/media_libva.cpp | 53 +++++++++++++++++--
+ 1 file changed, 49 insertions(+), 4 deletions(-)
+
+diff --git a/media_driver/linux/common/ddi/media_libva.cpp b/media_driver/linux/common/ddi/media_libva.cpp
+index f4f2a88d7..7c8fbff78 100755
+--- a/media_driver/linux/common/ddi/media_libva.cpp
++++ b/media_driver/linux/common/ddi/media_libva.cpp
+@@ -38,6 +38,7 @@
+ 
+ #include <linux/fb.h>
+ #include <xf86drm.h>
++#include <xe_drm.h>
+ 
+ #include "media_libva.h"
+ 
+@@ -1558,7 +1559,42 @@ void DestroyMediaContextMutex(PDDI_MEDIA_CONTEXT mediaCtx)
+     return;
+ }
+ 
+-static int DdiMedia_IsIntelDgpu(int fd)
++static int DdiMedia_IsIntelDgpuXe(int fd)
++{
++    struct drm_xe_device_query query = {
++        .query = DRM_XE_DEVICE_QUERY_MEM_REGIONS,
++    };
++    if (drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query) || !query.size) {
++        DDI_NORMALMESSAGE("drv: Failed to DRM_XE_DEVICE_QUERY_MEM_REGIONS");
++        return 0;
++    }
++
++    struct drm_xe_query_mem_regions *meminfo = (struct drm_xe_query_mem_regions *)calloc(1, query.size);
++    if (!meminfo) {
++        DDI_NORMALMESSAGE("drv: %s Exit due to memory allocation failure", __func__);
++        return 0;
++    }
++
++    query.data = (uintptr_t)meminfo;
++    if (drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query)) {
++        free(meminfo);
++        DDI_NORMALMESSAGE("%s:%d DRM_XE_DEVICE_QUERY_MEM_REGIONS error", __FUNCTION__, __LINE__);
++        return 0;
++    }
++
++    int has_local = 0;
++    for (uint32_t i = 0; i < meminfo->num_mem_regions; i++) {
++        if (meminfo->mem_regions[i].mem_class == DRM_XE_MEM_REGION_CLASS_VRAM) {
++            has_local = 1;
++            break;
++        }
++    }
++
++    free(meminfo);
++    return has_local;
++}
++
++static int DdiMedia_IsIntelDgpuI915(int fd)
+ {
+     struct drm_i915_query_item item = {
+         .query_id = DRM_I915_QUERY_MEMORY_REGIONS,
+@@ -1604,6 +1640,13 @@ static int DdiMedia_IsIntelDgpu(int fd)
+     return has_local;
+ }
+ 
++// Dispatches to the backend-appropriate memory-region query -- the i915
++// ioctl is a no-op (or worse, undefined) on Xe nodes and vice versa.
++static int DdiMedia_IsIntelDgpu(int fd, bool is_xe)
++{
++    return is_xe ? DdiMedia_IsIntelDgpuXe(fd) : DdiMedia_IsIntelDgpuI915(fd);
++}
++
+ static int DdiMedia_SelectIntelDevice()
+ {
+     int use_dgpu = 1;
+@@ -1627,18 +1670,20 @@ static int DdiMedia_SelectIntelDevice()
+             close(temp);
+             continue;
+         }
+-        if (strncmp(version->name, "i915", strlen("i915")) == 0) {
++        bool is_i915 = strncmp(version->name, "i915", strlen("i915")) == 0;
++        bool is_xe = strncmp(version->name, "xe", strlen("xe")) == 0;
++        if (is_i915 || is_xe) {
+             intel_gpu_index = i;
+             // If specify to use dgpu and found dgpu, return the first found dgpu,
+             // else if specify to use igpu and found igpu, return the first found igpu,
+             // otherwise use the last available intel node for codec
+-            if (use_dgpu && DdiMedia_IsIntelDgpu(temp)) {
++            if (use_dgpu && DdiMedia_IsIntelDgpu(temp, is_xe)) {
+                 DDI_NORMALMESSAGE("%s:%d find dgpu", __FUNCTION__, __LINE__);
+                 drmFreeVersion(version);
+                 close(temp);
+                 break;
+             }
+-            if (!use_dgpu && !DdiMedia_IsIntelDgpu(temp)) {
++            if (!use_dgpu && !DdiMedia_IsIntelDgpu(temp, is_xe)) {
+                 DDI_NORMALMESSAGE("%s:%d find igpu", __FUNCTION__, __LINE__);
+                 drmFreeVersion(version);
+                 close(temp);
+-- 
+2.34.1
+

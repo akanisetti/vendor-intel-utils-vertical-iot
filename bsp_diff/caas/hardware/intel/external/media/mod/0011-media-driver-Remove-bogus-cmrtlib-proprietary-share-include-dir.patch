@@ -1,0 +1,42 @@
+From 622bf98e4417e15fb2bf40886a398122f66531d6 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 15:21:03 +0000
+Subject: [PATCH] media-driver: Remove bogus cmrtlib/proprietary/share include
+ dir
+
+Soong refused to build libigfxcmrt: 'module source path
+"hardware/intel/external/media/mod/cmrtlib/proprietary/share" does
+not exist'.
+
+The 0002 Android.bp regeneration commit (893c80993) added
+'proprietary/share' to cmrtlib's local_include_dirs; no such directory
+has ever existed anywhere under cmrtlib (confirmed absent both
+pre-upgrade and post-upgrade, and via a case-insensitive tree search).
+Almost certainly a stale/conditional entry GenerateAndroidBp.py picked
+up from the CMake build's include scraping for an optional proprietary
+extension that isn't present in this checkout.
+
+Removed the entry; the other 4 cmrtlib/{agnostic,linux}/{share,hardware}
+dirs are real and already correctly listed.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ cmrtlib/Android.bp | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/cmrtlib/Android.bp b/cmrtlib/Android.bp
+index 4e6cc2541..493ab57dd 100644
+--- a/cmrtlib/Android.bp
++++ b/cmrtlib/Android.bp
+@@ -40,7 +40,6 @@ cc_library_shared {
+     ],
+ 
+     local_include_dirs: [
+-        "proprietary/share",
+         "agnostic/share",
+         "agnostic/hardware",
+         "linux/share",
+-- 
+2.34.1
+

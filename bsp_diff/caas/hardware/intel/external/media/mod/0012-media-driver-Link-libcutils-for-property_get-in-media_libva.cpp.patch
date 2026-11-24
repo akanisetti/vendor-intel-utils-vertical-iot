@@ -1,0 +1,40 @@
+From 02892e925e18df3bbb9e2c915c61d7c23ba9a192 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Thu, 22 Oct 2026 04:31:23 +0000
+Subject: [PATCH] media-driver: Link libcutils for property_get() in
+ media_libva.cpp
+
+A real flashfiles build failed to link iHD_drv_video.so: undefined
+symbol property_get, referenced from
+DdiMedia_SelectIntelDevice()/media_libva.cpp:1613.
+
+The earlier fork-restoration commit (662b5d7af, restoring the
+dGPU/iGPU device-selection logic discarded by the version-bump
+overlay) added property_get()/<cutils/properties.h> usage but never
+added libcutils to iHD_drv_video's shared_libs -- the header resolved
+fine (already reachable without it), so the gap only surfaced at link
+time, not compile time.
+
+Added libcutils alongside the existing libutils/liblog.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Android.bp b/Android.bp
+index db500ea0a..f0d48f46e 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -2058,6 +2058,7 @@ cc_library_shared {
+     shared_libs: [
+         "libsync",
+         "libutils",
++        "libcutils",
+         "libdrm",
+         "libva",
+         "liblog",
+-- 
+2.34.1
+

@@ -1,0 +1,30 @@
+From eb6ab652894012c59105844e796678698629e515 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 7 Aug 2026 09:35:56 +0000
+Subject: [PATCH] Add soong-android build dependency
+
+changes:
+- Android.bp: add "soong-android" to deps list in bootstrap_go_package
+  "mfx_c2" to resolve build system dependency for A17 Soong module
+
+Tracked-On: NIACP3-1498
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Android.bp b/Android.bp
+index 5113e39..eb6e49b 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -100,6 +100,7 @@ bootstrap_go_package {
+     name: "mfx_c2",
+     pkgPath: "android/soong/vendor/intel/mfx_c2",
+     deps: [
++        "soong-android",
+         "soong-cc",
+     ],
+     srcs: [
+-- 
+2.34.1
+

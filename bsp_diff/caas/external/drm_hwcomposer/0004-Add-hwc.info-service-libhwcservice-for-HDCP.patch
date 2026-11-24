@@ -1,0 +1,388 @@
+From 7ab2d16742ba342e480a8931be629e2b24de9ee8 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 13 Oct 2026 02:53:19 +0000
+Subject: [PATCH 4/6] Add hwc.info service (libhwcservice) for HDCP
+
+Port of the Intel drm-hwcomposer fork hwc.info vndbinder service
+(fork commits 56c1a5b, 5167ccd) used by Intel HDCP clients.
+
+The service itself (libhwcservice, libhwcservicelib, hwcservice_test)
+is hand-written binder code, which Soong allows only under vendor/ and
+hardware/. It is carried in vendor/intel/hardware/interfaces
+(graphic/hwcservice); this patch adds only the HWC side:
+
+ - intel/hwcservice/hwcservice_ops.h: C ops table between the HWC and
+   libhwcservicelib, exported as libhwcservice_ops_headers.
+ - DrmHwc dlopen()s /vendor/lib64/hw/libhwcservicelib.so on a detached
+   thread (optional; logged when absent) and maps the HDCP session
+   calls to HwcDisplay::StartHdcp()/StopHdcp() of the display driven by
+   the connector.
+ - The service is started once and lives for the whole process, while
+   DrmHwc instances come and go (one per composer client). Calls reach
+   the DrmHwc registered as owner under a mutex; ~DrmHwc() unregisters
+   under the same mutex, so a transaction never uses a destroyed
+   instance. The ops table carries no instance pointer.
+ - The requested content type is passed through. HWCS_CP_CONTENT_TYPE1
+   requires HDCP 2.2 or newer, so HwcDisplay::StartHdcp() and
+   HdcpController::Start() take allow_type0_fallback: for Type 1
+   requests a failed Type 1 negotiation ends HDCP instead of retrying
+   with Type 0 (HDCP 1.4). Type 0 requests and the composer3 path keep
+   the Type 1 -> Type 0 fallback.
+
+The existing sepolicy (hwc_info_service, vndservice_contexts) and the
+vendor libbinder (/dev/vndbinder) are used as before.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ compositor/HdcpController.cpp     |  8 +--
+ compositor/HdcpController.h       |  7 ++-
+ drm/DrmHwc.cpp                    | 82 ++++++++++++++++++++++++++++++-
+ drm/DrmHwc.h                      |  9 +++-
+ hwc/HwcDisplay.cpp                |  7 +--
+ hwc/HwcDisplay.h                  |  3 +-
+ intel/hwcservice/Android.bp       | 26 ++++++++++
+ intel/hwcservice/hwcservice_ops.h | 65 ++++++++++++++++++++++++
+ 8 files changed, 197 insertions(+), 10 deletions(-)
+ create mode 100644 intel/hwcservice/Android.bp
+ create mode 100644 intel/hwcservice/hwcservice_ops.h
+
+diff --git a/compositor/HdcpController.cpp b/compositor/HdcpController.cpp
+index 6b930ae..ec3e5a8 100644
+--- a/compositor/HdcpController.cpp
++++ b/compositor/HdcpController.cpp
+@@ -40,11 +40,13 @@ HdcpController::~HdcpController() {
+ }
+ 
+ // Set the HDCP state to desired if not already requested
+-void HdcpController::Start() {
++void HdcpController::Start(bool allow_type0_fallback) {
+   bool changed = false;
+   {
+     std::lock_guard<std::mutex> lock(mutex_);
+-    if (hdcp_state_ != HdcpState::kRetry) {
++    allow_type0_fallback_ = allow_type0_fallback;
++    // A Type 1 only request must not continue a pending Type 0 retry.
++    if (hdcp_state_ != HdcpState::kRetry || !allow_type0_fallback) {
+       hdcp_state_ = HdcpState::kDesired;
+       changed = true;
+     }
+@@ -100,7 +102,7 @@ void HdcpController::SetContentProtectionStatus() {
+           notify_type = HdcpContentType::kType1;
+         }
+       } else {
+-        if (was_retry_) {
++        if (was_retry_ || !allow_type0_fallback_) {
+           was_retry_ = false;
+           hdcp_state_ = HdcpState::kUndesired;
+           notify_type = std::nullopt;
+diff --git a/compositor/HdcpController.h b/compositor/HdcpController.h
+index 785243c..ea13a02 100644
+--- a/compositor/HdcpController.h
++++ b/compositor/HdcpController.h
+@@ -60,7 +60,10 @@ class HdcpController {
+   // Sets the internal state to kDesired if it's not currently in a retry state.
+   // This signals the display pipeline to include HDCP properties in the next
+   // commit.
+-  void Start();
++  //
++  // With allow_type0_fallback=false (HDCP 2.2+ required), a failed Type 1
++  // negotiation ends in kUndesired instead of a Type 0 retry.
++  void Start(bool allow_type0_fallback = true);
+ 
+   // Signals that an HDCP enablement request has been sent to the kernel.
+   //
+@@ -127,6 +130,8 @@ class HdcpController {
+ 
+   bool was_retry_ GUARDED_BY(mutex_) = false;
+ 
++  bool allow_type0_fallback_ GUARDED_BY(mutex_) = true;
++
+   // Only accessed from helper thread.
+   const HdcpConCallbacks cbks_;
+   decltype(std::chrono::system_clock::now()) sleep_until_ GUARDED_BY(mutex_){};
+diff --git a/drm/DrmHwc.cpp b/drm/DrmHwc.cpp
+index c954e28..431a003 100644
+--- a/drm/DrmHwc.cpp
++++ b/drm/DrmHwc.cpp
+@@ -16,15 +16,20 @@
+ 
+ #include "DrmHwc.h"
+ 
++#include <dlfcn.h>
++
+ #include <cinttypes>
+ #include <map>
+ #include <memory>
++#include <mutex>
+ #include <sstream>
++#include <thread>
+ #include <utility>
+ 
+ #include "drm/DrmConnector.h"
+ #include "drm/DrmDisplayPipeline.h"
+ #include "hwc/HwcDisplay.h"
++#include "intel/hwcservice/hwcservice_ops.h"
+ #include "stats/Stats.h"
+ #include "utils/log.h"
+ #include "utils/properties.h"
+@@ -70,11 +75,86 @@ std::string DumpDisplayStats(const HwcDisplay *display,
+ }
+ }  // namespace
+ 
++namespace {
++/*
++ * Intel hwc.info vndbinder service, optional. It is started once and lives as
++ * long as the process, while DrmHwc instances come and go (one per composer
++ * client). Calls go to the instance registered as owner; the owner pointer is
++ * only used under hwc_info_mutex, and ~DrmHwc() unregisters under the same
++ * mutex, so a call never reaches a destroyed instance.
++ * Lock order: hwc_info_mutex, then the ResourceManager main lock.
++ */
++std::mutex hwc_info_mutex;
++DrmHwc *hwc_info_owner = nullptr; /* guarded by hwc_info_mutex */
++
++bool HwcServiceSetHdcp(void * /*ctx*/, uint32_t connector, bool all_displays,
++                       bool enable, HwcServiceHdcpContentType content_type) {
++  const std::lock_guard lock(hwc_info_mutex);
++  if (hwc_info_owner == nullptr)
++    return false;
++  return hwc_info_owner->SetHdcp(connector, all_displays, enable,
++                                 content_type ==
++                                     HWC_SERVICE_HDCP_CONTENT_TYPE1);
++}
++
++void StartHwcInfoServiceOnce() {
++  static std::once_flag started;
++  std::call_once(started, [] {
++    std::thread([] {
++      void *handle = dlopen(HWC_SERVICE_LIB_PATH, RTLD_NOW);
++      if (handle == nullptr) {
++        ALOGI("%s not available: %s", HWC_SERVICE_LIB_PATH, dlerror());
++        return;
++      }
++      auto start = reinterpret_cast<StartHwcInfoServiceFn>(
++          dlsym(handle, HWC_SERVICE_START_FN));
++      if (start == nullptr) {
++        ALOGE("dlsym(%s) failed: %s", HWC_SERVICE_START_FN, dlerror());
++        return;
++      }
++      static const HwcServiceOps kOps = {
++          .ctx = nullptr, /* the owner is looked up per call */
++          .set_hdcp = HwcServiceSetHdcp,
++      };
++      start(&kOps);
++    }).detach();
++  });
++}
++}  // namespace
++
+ DrmHwc::DrmHwc()
+     : resource_manager_(this),
+       dump_stats_tracker_(this),
+       refresh_rates_reporter_(
+-          DisplayRefreshRatesChangedAtomReporter::Create()) {};
++          DisplayRefreshRatesChangedAtomReporter::Create()) {
++  {
++    const std::lock_guard lock(hwc_info_mutex);
++    hwc_info_owner = this;
++  }
++  StartHwcInfoServiceOnce();
++};
++
++DrmHwc::~DrmHwc() {
++  /* Waits for an hwc.info call in flight; a newer instance stays the owner */
++  const std::lock_guard lock(hwc_info_mutex);
++  if (hwc_info_owner == this)
++    hwc_info_owner = nullptr;
++}
++
++bool DrmHwc::SetHdcp(uint32_t connector, bool all_displays, bool enable,
++                     bool type1_only) {
++  const std::unique_lock lock(GetResMan().GetMainLock());
++  bool done = false;
++  for (auto &[handle, display] : displays_) {
++    if (display->IsInHeadlessMode())
++      continue;
++    if (!all_displays && display->GetPipe().connector->Get()->GetId() != connector)
++      continue;
++    done |= enable ? display->StartHdcp(/*allow_type0_fallback=*/!type1_only)
++                   : display->StopHdcp();
++  }
++  return done;
++}
+ 
+ /* Must be called after every display attach/detach cycle */
+ void DrmHwc::FinalizeDisplayBinding() {
+diff --git a/drm/DrmHwc.h b/drm/DrmHwc.h
+index c2db597..6d8ee29 100644
+--- a/drm/DrmHwc.h
++++ b/drm/DrmHwc.h
+@@ -29,7 +29,7 @@ struct DrmDisplayPipeline;
+ class DrmHwc : public PipelineToFrontendBindingInterface, public StatsProvider {
+  public:
+   DrmHwc();
+-  ~DrmHwc() override = default;
++  ~DrmHwc() override;
+ 
+   // Enum for Display status: Connected, Disconnected, Link Training Failed
+   enum DisplayStatus {
+@@ -58,6 +58,13 @@ class DrmHwc : public PipelineToFrontendBindingInterface, public StatsProvider {
+ 
+   std::string DumpState();
+ 
++  // Intel hwc.info service (libhwcservicelib): start or stop HDCP on the
++  // display driven by |connector|, or on all displays. With |type1_only|,
++  // HDCP must be negotiated as Content Type 1 (HDCP 2.2+); there is no
++  // fallback to Type 0.
++  bool SetHdcp(uint32_t connector, bool all_displays, bool enable,
++               bool type1_only);
++
+   // Virtual Display functions.
+   std::optional<DisplayHandle> CreateVirtualDisplay(uint32_t width,
+                                                     uint32_t height);
+diff --git a/hwc/HwcDisplay.cpp b/hwc/HwcDisplay.cpp
+index 7f3b7ee..1eba43d 100644
+--- a/hwc/HwcDisplay.cpp
++++ b/hwc/HwcDisplay.cpp
+@@ -861,7 +861,7 @@ auto HwcDisplay::IsHdcpPropertyPresent() -> bool {
+   return true;
+ }
+ 
+-auto HwcDisplay::StartHdcp() -> bool {
++auto HwcDisplay::StartHdcp(bool allow_type0_fallback) -> bool {
+   /*
+    * Client can request to start Hdcp
+    * If Client requests to start Hdcp, internal state is set to kDesired
+@@ -877,8 +877,9 @@ auto HwcDisplay::StartHdcp() -> bool {
+         "display");
+     return false;
+   }
+-  ALOGI("Client requested to start HDCP");
+-  hdcpcon_->Start();
++  ALOGI("Client requested to start HDCP%s",
++        allow_type0_fallback ? "" : " (Content Type 1 only)");
++  hdcpcon_->Start(allow_type0_fallback);
+   return true;
+ }
+ 
+diff --git a/hwc/HwcDisplay.h b/hwc/HwcDisplay.h
+index efbeb49..305d759 100644
+--- a/hwc/HwcDisplay.h
++++ b/hwc/HwcDisplay.h
+@@ -200,7 +200,8 @@ class HwcDisplay : public ICompositorDisplay {
+                           float *max_average_luminance, float *min_luminance);
+ 
+   auto IsHdcpPropertyPresent() -> bool;
+-  auto StartHdcp() -> bool;
++  // allow_type0_fallback=false: fail instead of retrying with Type 0.
++  auto StartHdcp(bool allow_type0_fallback = true) -> bool;
+   auto StopHdcp() -> bool;
+ 
+   bool IsWritebackSupported();
+diff --git a/intel/hwcservice/Android.bp b/intel/hwcservice/Android.bp
+new file mode 100644
+index 0000000..b6041ac
+--- /dev/null
++++ b/intel/hwcservice/Android.bp
+@@ -0,0 +1,26 @@
++//
++// Copyright (C) 2026 Intel Corporation
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package {
++    default_applicable_licenses: ["external_drm_hwcomposer_license"],
++}
++
++// HWC <-> libhwcservicelib plugin interface (hwcservice_ops.h). The
++// library itself is in vendor/intel/hardware/interfaces/graphic/hwcservice.
++cc_library_headers {
++    name: "libhwcservice_ops_headers",
++    export_include_dirs: ["."],
++    vendor: true,
++}
+diff --git a/intel/hwcservice/hwcservice_ops.h b/intel/hwcservice/hwcservice_ops.h
+new file mode 100644
+index 0000000..82e0f34
+--- /dev/null
++++ b/intel/hwcservice/hwcservice_ops.h
+@@ -0,0 +1,65 @@
++/*
++ * Copyright (C) 2026 Intel Corporation
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <stdint.h>
++
++/*
++ * Interface between the HWC and libhwcservicelib, the Intel hwc.info
++ * vndbinder service. The HWC dlopen()s HWC_SERVICE_LIB_PATH and passes the
++ * ops to StartHwcInfoService(), which runs the binder thread pool and does
++ * not return. libhwcservicelib does not link against the HWC sources.
++ *
++ * libhwcservicelib lives in vendor/intel/hardware/interfaces
++ * (graphic/hwcservice) and gets this header from libhwcservice_ops_headers.
++ */
++
++#define HWC_SERVICE_LIB_PATH "/vendor/lib64/hw/libhwcservicelib.so"
++#define HWC_SERVICE_START_FN "StartHwcInfoService"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* HDCP content type, same values as EHwcsContentType in libhwcservice. */
++enum HwcServiceHdcpContentType {
++  /* Any HDCP version: try HDCP 2.2+ (Type 1), fall back to HDCP 1.4. */
++  HWC_SERVICE_HDCP_CONTENT_TYPE0 = 0,
++  /* HDCP 2.2 or newer only: no fallback to HDCP 1.4. */
++  HWC_SERVICE_HDCP_CONTENT_TYPE1 = 1,
++};
++
++struct HwcServiceOps {
++  /* Passed back unchanged to the callbacks. The ops table and the service
++   * live for the whole process; the HWC resolves its current instance per
++   * call, so ctx does not point at a DrmHwc. */
++  void *ctx;
++  /* Start (enable) or stop HDCP on the display driven by the DRM connector,
++   * or on every display when all_displays is set. content_type is only used
++   * when enable is set. Returns false when no display supports the
++   * request. */
++  bool (*set_hdcp)(void *ctx, uint32_t connector, bool all_displays,
++                   bool enable, enum HwcServiceHdcpContentType content_type);
++};
++
++typedef void (*StartHwcInfoServiceFn)(const struct HwcServiceOps *ops);
++
++void StartHwcInfoService(const struct HwcServiceOps *ops);
++
++#ifdef __cplusplus
++}
++#endif
+-- 
+2.34.1
+

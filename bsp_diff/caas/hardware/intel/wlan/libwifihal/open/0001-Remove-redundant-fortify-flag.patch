@@ -1,0 +1,31 @@
+From 63682890497a78118eaa3b9c8b975177f1636d5b Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 7 Aug 2026 09:20:32 +0000
+Subject: [PATCH] Remove redundant fortify flag
+
+changes:
+- Android.bp: remove -D_FORTIFY_SOURCE=2 from cflags; source
+  fortification handled by -fstack-protector-strong and Clang's
+  built-in protections for A17
+
+Tracked-On: NIACP3-1498
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ Android.bp | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/Android.bp b/Android.bp
+index 448dce5..f2d6a82 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -18,7 +18,6 @@ cc_library_static {
+ 
+     cflags: [
+         "-Wno-int-to-pointer-cast",
+-        "-D_FORTIFY_SOURCE=2",
+         "-fstack-protector-strong",
+         "-fno-delete-null-pointer-checks",
+         "-fwrapv",
+-- 
+2.34.1
+

@@ -1,0 +1,232 @@
+From c0ae9c3dc0d6f19e3b723ea6fb905aca94ed21a0 Mon Sep 17 00:00:00 2001
+From: Les Lee <lesl@google.com>
+Date: Tue, 16 Jun 2026 22:29:29 +0000
+Subject: [PATCH] Fix LOHS BSSID configuration validation bypass
+
+The Local Only Hotspot (LOHS) startup logic was posting the start
+request to the WifiHandlerThread. Inside `startSoftApInternal`, which
+runs on the handler thread, `Binder.getCallingUid()` and
+`Binder.getCallingPid()` were used for validating the SoftApConfiguration.
+Because it was running on the handler thread, these calls returned
+the system server's identity (SYSTEM_UID), thereby incorrectly passing the
+privilege check (which requires NETWORK_SETTINGS) for setting a custom
+BSSID.
+
+This change fixes the issue by passing the original LOHS requestor's
+calling UID and PID directly to `startSoftApInternal` (which are obtained
+on the binder thread when the request is initially received).
+
+Bug: 515051745
+Test: atest FrameworksWifiTests:com.android.server.wifi.WifiServiceImplTest#testCustomLohs_BssidValidationFailsForUnprivilegedCaller
+Flag: EXEMPT CVE_FIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:6dd37bdad465e8995140635a181af5e48cf759b5
+Merged-In: Iaeb0be8fc35ad7f8a4fa1c2fb22b1ba7221f8347
+Change-Id: Iaeb0be8fc35ad7f8a4fa1c2fb22b1ba7221f8347
+---
+ .../android/server/wifi/WifiServiceImpl.java  | 57 ++++++++++++-------
+ .../server/wifi/WifiServiceImplTest.java      | 39 +++++++++++++
+ 2 files changed, 74 insertions(+), 22 deletions(-)
+
+diff --git a/service/java/com/android/server/wifi/WifiServiceImpl.java b/service/java/com/android/server/wifi/WifiServiceImpl.java
+index 72f8aa7190..77b36226e6 100644
+--- a/service/java/com/android/server/wifi/WifiServiceImpl.java
++++ b/service/java/com/android/server/wifi/WifiServiceImpl.java
+@@ -2124,8 +2124,12 @@ public class WifiServiceImpl extends IWifiManager.Stub {
+      */
+     @Override
+     public boolean validateSoftApConfiguration(SoftApConfiguration config) {
+-        int pid = Binder.getCallingPid();
+-        int uid = Binder.getCallingUid();
++        return validateSoftApConfigurationInternal(config, Binder.getCallingUid(),
++                Binder.getCallingPid());
++    }
++
++    private boolean validateSoftApConfigurationInternal(SoftApConfiguration config,
++            int uid, int pid) {
+         boolean privileged = isSettingsOrSuw(pid, uid)
+                 || checkNetworkStackPermission(pid, uid)
+                 || checkMainlineNetworkStackPermission(pid, uid);
+@@ -2198,9 +2202,10 @@ public class WifiServiceImpl extends IWifiManager.Stub {
+         }
+ 
+         if (!startSoftApInternal(new SoftApModeConfiguration(
+-                WifiManager.IFACE_IP_MODE_TETHERED, softApConfig,
+-                mTetheredSoftApTracker.getSoftApCapability(),
+-                mCountryCode.getCountryCode(), null), requestorWs, null)) {
++                        WifiManager.IFACE_IP_MODE_TETHERED, softApConfig,
++                        mTetheredSoftApTracker.getSoftApCapability(),
++                        mCountryCode.getCountryCode(), null),
++                requestorWs, null, callingUid, Binder.getCallingPid())) {
+             mTetheredSoftApTracker.setFailedWhileEnabling();
+             return false;
+         }
+@@ -2233,9 +2238,10 @@ public class WifiServiceImpl extends IWifiManager.Stub {
+ 
+         mLog.info("startTetheredHotspot uid=%").c(callingUid).flush();
+         return startTetheredHotspotInternal(new SoftApModeConfiguration(
+-                WifiManager.IFACE_IP_MODE_TETHERED, softApConfig,
+-                mTetheredSoftApTracker.getSoftApCapability(),
+-                mCountryCode.getCountryCode(), null /* request */), callingUid, packageName, null);
++                        WifiManager.IFACE_IP_MODE_TETHERED, softApConfig,
++                        mTetheredSoftApTracker.getSoftApCapability(),
++                        mCountryCode.getCountryCode(), null /* request */),
++                callingUid, Binder.getCallingPid(), packageName, null);
+     }
+ 
+     /**
+@@ -2275,11 +2281,12 @@ public class WifiServiceImpl extends IWifiManager.Stub {
+ 
+         mLog.info("startTetheredHotspot uid=%").c(callingUid).flush();
+         startTetheredHotspotInternal(new SoftApModeConfiguration(
+-                WifiManager.IFACE_IP_MODE_TETHERED,
+-                com.android.net.flags.Flags.tetheringWithSoftApConfig()
+-                        ? request.getSoftApConfiguration() : null,
+-                mTetheredSoftApTracker.getSoftApCapability(),
+-                mCountryCode.getCountryCode(), request), callingUid, packageName, callback);
++                        WifiManager.IFACE_IP_MODE_TETHERED,
++                        com.android.net.flags.Flags.tetheringWithSoftApConfig()
++                                ? request.getSoftApConfiguration() : null,
++                        mTetheredSoftApTracker.getSoftApCapability(),
++                        mCountryCode.getCountryCode(), request),
++                callingUid, Binder.getCallingPid(), packageName, callback);
+     }
+ 
+     private void sendSoftApCallbackStartFailure(@Nullable ISoftApCallback callback,
+@@ -2298,7 +2305,8 @@ public class WifiServiceImpl extends IWifiManager.Stub {
+      * proper permissions beyond the NetworkStack permission.
+      */
+     private boolean startTetheredHotspotInternal(@NonNull SoftApModeConfiguration modeConfig,
+-            int callingUid, String packageName, @Nullable ISoftApCallback callback) {
++            int callingUid, int callingPid, String packageName,
++            @Nullable ISoftApCallback callback) {
+         TetheringManager.TetheringRequest tetheringRequest = modeConfig.getTetheringRequest();
+         if (mActiveModeWarden.isSoftApRestartingForCcChange(IFACE_IP_MODE_TETHERED)) {
+             mLog.err("Tethering is in the middle of restarting for CC change.").flush();
+@@ -2322,12 +2330,12 @@ public class WifiServiceImpl extends IWifiManager.Stub {
+             Binder.restoreCallingIdentity(id);
+         }
+ 
+-        if (!startSoftApInternal(modeConfig, requestorWs, callback)) {
++        if (!startSoftApInternal(modeConfig, requestorWs, callback, callingUid, callingPid)) {
+             mTetheredSoftApTracker.setFailedWhileEnabling();
+             return false;
+         }
+         mLastCallerInfoManager.put(WifiManager.API_TETHERED_HOTSPOT, Process.myTid(),
+-                callingUid, Binder.getCallingPid(), packageName, true);
++                callingUid, callingPid, packageName, true);
+         return true;
+     }
+ 
+@@ -2336,15 +2344,14 @@ public class WifiServiceImpl extends IWifiManager.Stub {
+      * proper permissions beyond the NetworkStack permission.
+      */
+     private boolean startSoftApInternal(SoftApModeConfiguration apConfig, WorkSource requestorWs,
+-            @Nullable ISoftApCallback callback) {
+-        int uid = Binder.getCallingUid();
+-        mLog.trace("startSoftApInternal uid=% mode=%")
+-                .c(uid).c(apConfig.getTargetMode()).flush();
++            @Nullable ISoftApCallback callback, int uid, int pid) {
++        mLog.trace("startSoftApInternal uid=% pid=% mode=%")
++                .c(uid).c(pid).c(apConfig.getTargetMode()).flush();
+ 
+         // null wifiConfig is a meaningful input for CMD_SET_AP; it means to use the persistent
+         // AP config.
+         SoftApConfiguration softApConfig = apConfig.getSoftApConfiguration();
+-        if (softApConfig != null && !validateSoftApConfiguration(softApConfig)) {
++        if (softApConfig != null && !validateSoftApConfigurationInternal(softApConfig, uid, pid)) {
+             Log.e(TAG, "Invalid SoftApConfiguration");
+             if (callback != null) {
+                 try {
+@@ -3112,8 +3119,14 @@ public class WifiServiceImpl extends IWifiManager.Stub {
+             mActiveConfig = new SoftApModeConfiguration(
+                     WifiManager.IFACE_IP_MODE_LOCAL_ONLY,
+                     softApConfig, lohsCapability, mCountryCode.getCountryCode(), null);
++            int uid = -1;
++            WorkSource ws = request.getWorkSource();
++            if (ws != null && !ws.isEmpty()) {
++                uid = ws.getUid(0);
++            }
++            int pid = request.getPid();
+             // Report the error if we got failure in startSoftApInternal
+-            if (!startSoftApInternal(mActiveConfig, request.getWorkSource(), null)) {
++            if (!startSoftApInternal(mActiveConfig, request.getWorkSource(), null, uid, pid)) {
+                 onStateChanged(new SoftApState(
+                         WIFI_AP_STATE_FAILED, SAP_START_FAILURE_GENERAL,
+                         mActiveConfig.getTetheringRequest(), null /* iface */));
+diff --git a/service/tests/wifitests/src/com/android/server/wifi/WifiServiceImplTest.java b/service/tests/wifitests/src/com/android/server/wifi/WifiServiceImplTest.java
+index af039a8350..18f8257fbb 100644
+--- a/service/tests/wifitests/src/com/android/server/wifi/WifiServiceImplTest.java
++++ b/service/tests/wifitests/src/com/android/server/wifi/WifiServiceImplTest.java
+@@ -4058,23 +4058,29 @@ public class WifiServiceImplTest extends WifiBaseTest {
+ 
+     private static class FakeLohsCallback extends ILocalOnlyHotspotCallback.Stub {
+         boolean mIsStarted = false;
++        boolean mIsFailed = false;
++        int mFailureReason = -1;
+         SoftApConfiguration mSoftApConfig = null;
+ 
+         @Override
+         public void onHotspotStarted(SoftApConfiguration softApConfig) {
+             mIsStarted = true;
++            mIsFailed = false;
+             this.mSoftApConfig = softApConfig;
+         }
+ 
+         @Override
+         public void onHotspotStopped() {
+             mIsStarted = false;
++            mIsFailed = false;
+             mSoftApConfig = null;
+         }
+ 
+         @Override
+         public void onHotspotFailed(int i) {
+             mIsStarted = false;
++            mIsFailed = true;
++            mFailureReason = i;
+             mSoftApConfig = null;
+         }
+     }
+@@ -4266,6 +4272,39 @@ public class WifiServiceImplTest extends WifiBaseTest {
+                 .ignoringCase().isEqualTo("aa:bb:cc:dd:ee:ff");
+     }
+ 
++    @Test
++    public void testCustomLohs_BssidValidationFailsForUnprivilegedCaller() {
++        mLooper.startAutoDispatch();
++        SoftApConfiguration lohsConfig = createValidSoftApConfiguration();
++        SoftApConfiguration customizedConfig = new SoftApConfiguration.Builder(lohsConfig)
++                .setBssid(MacAddress.fromString("aa:bb:cc:dd:ee:ff"))
++                .build();
++        int testUid = 9999;
++        // Mock permissions: deny for testUid, grant for Process.myUid() for all permissions
++        when(mContext.checkPermission(anyString(), anyInt(), eq(testUid)))
++                .thenReturn(PackageManager.PERMISSION_DENIED);
++        when(mContext.checkPermission(anyString(), anyInt(), eq(Process.myUid())))
++                .thenReturn(PackageManager.PERMISSION_GRANTED);
++
++        when(mWifiApConfigStore.generateLocalOnlyHotspotConfig(
++                eq(mContext), eq(customizedConfig), any(), eq(true)))
++                .thenReturn(customizedConfig);
++        FakeLohsCallback callback = new FakeLohsCallback();
++
++        setupLohsPermissions();
++        WorkSource testWs = new WorkSource(testUid, TEST_PACKAGE_NAME);
++        LocalOnlyHotspotRequestInfo request = new LocalOnlyHotspotRequestInfo(
++                mLooper.getLooper(), testWs, callback,
++                WifiServiceImplTest::nopDeathCallback, customizedConfig);
++
++        mWifiServiceImpl.registerLOHSForTest(request.getPid(), request);
++        stopAutoDispatchWithDispatchAllBeforeStopAndIgnoreExceptions(mLooper);
++
++        verify(mActiveModeWarden, never()).startSoftAp(any(), any());
++        assertThat(callback.mIsFailed).isTrue();
++        assertThat(callback.mFailureReason).isEqualTo(LocalOnlyHotspotCallback.ERROR_GENERIC);
++    }
++
+     /**
+          * Verify that WifiServiceImpl does not send the stop ap message if there were no
+          * pending LOHS requests upon a binder death callback.
+-- 
+2.56.0.385.gac671c819a-goog
+

@@ -1,0 +1,41 @@
+From bf3e9ecaf22f39d1e9e463a42c5d27fef099ba27 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 07:33:12 +0000
+Subject: [PATCH] media-driver: Add missing media_common/agnostic/common/cp
+ include dir
+
+A real flashfiles build failed with a fatal file-not-found error:
+media_common/agnostic/common/hw/mhw_vebox.h includes "mhw_cp_interface.h",
+whose containing directory, media_common/agnostic/common/cp, was
+deliberately excluded from the earlier comprehensive include-dirs sweep
+as a supposed filename collision against
+media_common/agnostic/common/codec/shared (both contain
+codec_def_cenc_decode.h).
+
+Diffed the two codec_def_cenc_decode.h copies: they are byte-for-byte
+identical, so the 'collision' carries no functional risk regardless of
+which -I directory the compiler resolves it from first. Added the
+directory; the other two headers it provides (mhw_cp_interface.h,
+cp_factory.h) have no duplicate filenames anywhere else in the tree.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Android.bp b/Android.bp
+index 05d96ae9e..1f1037954 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -2073,6 +2073,7 @@ cc_library_shared {
+ 
+     local_include_dirs: [
+         "media_common/agnostic/common/codec/shared",
++        "media_common/agnostic/common/cp",
+         "media_driver/agnostic/common/cm",
+         "media_driver/agnostic/common/codec/hal",
+         "media_driver/agnostic/common/codec/kernel",
+-- 
+2.34.1
+

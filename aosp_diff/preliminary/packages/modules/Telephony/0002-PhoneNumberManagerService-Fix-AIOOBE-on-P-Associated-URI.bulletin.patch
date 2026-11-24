@@ -1,0 +1,62 @@
+From a1c599418e5ca00c4d26db840bc5b3881dc9692f Mon Sep 17 00:00:00 2001
+From: Hyein Yu <hyeinyu@google.com>
+Date: Fri, 3 Jul 2026 06:56:58 +0000
+Subject: [PATCH] PhoneNumberManagerService: Fix AIOOBE on P-Associated-URI
+
+Fixes an uncaught ArrayIndexOutOfBoundsException in
+PhoneNumberManagerService and ImsPhone caused by processing a
+P-Associated-URI composed only of the delimiter (e.g., sip:@). By
+passing a limit to split, the array is never empty. Additionally,
+catches RuntimeException from PhoneNumberManager in ImsPhone to prevent
+crash loops.
+
+Bug: 517377202
+Test: atest PhoneNumberManagerTest
+Flag: EXEMPT BUGFIX
+
+TAG=agy
+CONV=96a2cb83-a901-4037-81da-7fa7df3a933f
+
+Change-Id: I10f10a9712dc273a7a71cd0c9227cb958e3ffa48
+---
+ .../telephony/PhoneNumberManagerService.java         |  2 +-
+ .../module/tests/PhoneNumberManagerTest.java         | 12 ++++++++++++
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/framework/java/com/android/internal/telephony/PhoneNumberManagerService.java b/framework/java/com/android/internal/telephony/PhoneNumberManagerService.java
+index e9fb866..29f91b7 100644
+--- a/framework/java/com/android/internal/telephony/PhoneNumberManagerService.java
++++ b/framework/java/com/android/internal/telephony/PhoneNumberManagerService.java
+@@ -125,7 +125,7 @@ public final class PhoneNumberManagerService extends IPhoneNumber.Stub {
+ 
+         for (Uri uri : associatedUris) {
+             if (uri != null && uri.isOpaque()) {
+-                String phoneNumberCandidate = uri.getSchemeSpecificPart().split("@")[0];
++                String phoneNumberCandidate = uri.getSchemeSpecificPart().split("@", 2)[0];
+                 try {
+                     // Converts countryIso to uppercase as required by libphonenumber.
+                     PhoneNumber phoneNumber = util.parse(phoneNumberCandidate,
+diff --git a/tests/unit/src/com/android/telephony/module/tests/PhoneNumberManagerTest.java b/tests/unit/src/com/android/telephony/module/tests/PhoneNumberManagerTest.java
+index c65167e..dc064d2 100644
+--- a/tests/unit/src/com/android/telephony/module/tests/PhoneNumberManagerTest.java
++++ b/tests/unit/src/com/android/telephony/module/tests/PhoneNumberManagerTest.java
+@@ -514,4 +514,16 @@ public class PhoneNumberManagerTest {
+         // TODO(b/434607712) - Update with new value to catch null or non opaque uri
+         assertEquals(ParsedPhoneNumber.ERROR_TYPE_NONE, result.getErrorCode());
+     }
++
++    @Test
++    @RequiresFlagsEnabled(Flags.FLAG_PHONE_NUMBER_PARSING_API)
++    public void testParsingWithMalformedUriDoesNotThrow() {
++        ParsedPhoneNumber result =
++                mPhoneNumberManager.parsePhoneNumber(
++                    Collections.singletonList(Uri.parse("sip:@")),
++                    "US");
++
++        assertEquals(false, result.isValidPhoneNumber());
++        assertThrows(IllegalStateException.class, result::getParsedPhoneNumber);
++    }
+ }
+-- 
+2.56.0.385.gac671c819a-goog
+

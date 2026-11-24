@@ -1,0 +1,64 @@
+From da2dedbe6e081ceeb08c25d94f8c853e91f60815 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Thu, 12 Nov 2026 05:55:49 +0000
+Subject: [PATCH] Default ENABLE_AVF to false in caas mixins
+
+Change the ENABLE_AVF ?= default from true to false across the
+three caas mixins files that gate it, so AVF is disabled unless
+explicitly requested with ENABLE_AVF=true:
+
+Tracked-On: NIACP3-1702
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ groups/device-specific/caas/AndroidBoard.mk | 2 +-
+ groups/device-specific/caas/BoardConfig.mk  | 4 ++--
+ groups/device-specific/caas/product.mk      | 4 ++--
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/groups/device-specific/caas/AndroidBoard.mk b/groups/device-specific/caas/AndroidBoard.mk
+index 1264ae90..cb14e8c4 100644
+--- a/groups/device-specific/caas/AndroidBoard.mk
++++ b/groups/device-specific/caas/AndroidBoard.mk
+@@ -8,7 +8,7 @@ KERNEL_DIFFCONFIG += $(KERNEL_CAAS_DIFFCONFIG)
+ # VMs. This makes ENABLE_AVF=false disable AVF at the KERNEL level, not just in
+ # userspace. Appended last so it overrides CONFIG_KVM=y from the base defconfig.
+ # Mutually exclusive with Trusty (IKGT), which blocks KVM at the hypervisor level.
+-ENABLE_AVF ?= true
++ENABLE_AVF ?= false
+ ifeq ($(ENABLE_AVF),false)
+ KERNEL_AVF_DISABLE_DIFFCONFIG = $(wildcard $(KERNEL_CONFIG_PATH)/avf_disable_diffconfig)
+ KERNEL_DIFFCONFIG += $(KERNEL_AVF_DISABLE_DIFFCONFIG)
+diff --git a/groups/device-specific/caas/BoardConfig.mk b/groups/device-specific/caas/BoardConfig.mk
+index 02ac100f..b5cb0d76 100644
+--- a/groups/device-specific/caas/BoardConfig.mk
++++ b/groups/device-specific/caas/BoardConfig.mk
+@@ -6,8 +6,8 @@ BOARD_KERNEL_CMDLINE += \
+ 	loop.max_part=7
+ 
+ # AVF: Set hypervisor properties in bootconfig for VirtualizationService.
+-# Configurable via ENABLE_AVF (default: enabled). Mutually exclusive with Trusty.
+-ENABLE_AVF ?= true
++# Configurable via ENABLE_AVF (default: disabled). Mutually exclusive with Trusty.
++ENABLE_AVF ?= false
+ ifeq ($(ENABLE_AVF),true)
+ ifeq ($(BOOTCONFIG_ENABLE), true)
+ BOARD_BOOTCONFIG += androidboot.hypervisor.vm.supported=1
+diff --git a/groups/device-specific/caas/product.mk b/groups/device-specific/caas/product.mk
+index e2973a5a..29df02eb 100644
+--- a/groups/device-specific/caas/product.mk
++++ b/groups/device-specific/caas/product.mk
+@@ -19,9 +19,9 @@ PRODUCT_PACKAGES += vndservicemanager
+ 
+ PRODUCT_PACKAGES += SystemUpdaterSample
+ 
+-# AVF (Android Virtualization Framework) - configurable via ENABLE_AVF (default: enabled).
++# AVF (Android Virtualization Framework) - configurable via ENABLE_AVF (default: disabled).
+ # Mutually exclusive with Trusty (TARGET_USE_TRUSTY); enable only one on a given build.
+-ENABLE_AVF ?= true
++ENABLE_AVF ?= false
+ ifeq ($(ENABLE_AVF),true)
+ # Enable full APEX with vm CLI, crosvm, virtualizationservice
+ $(call inherit-product, packages/modules/Virtualization/apex/product_packages.mk)
+-- 
+2.34.1
+

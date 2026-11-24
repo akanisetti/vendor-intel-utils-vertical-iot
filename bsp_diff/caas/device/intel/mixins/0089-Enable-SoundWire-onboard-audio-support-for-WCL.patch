@@ -1,0 +1,187 @@
+From 3c7071f610991cdf2180e87bcc581b10501e91cf Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 13 Nov 2026 20:16:11 +0000
+Subject: [PATCH] Enable SoundWire onboard audio support for WCL
+
+Three issues were blocking onboard/SoundWire audio (rt722 codec) from
+working on WCL at all, independent of the HAL-level fixes:
+
+1. caas_diffconfig was missing the kernel configs required to build
+   the SoundWire bus, Intel SoundWire controller driver, and RT722
+   SDCA codec driver (CONFIG_SOUNDWIRE, CONFIG_SOUNDWIRE_INTEL,
+   CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE, CONFIG_SND_SOC_RT722_SDCA_SDW,
+   etc.), so the corresponding .ko modules referenced by init.rc were
+   never built in the first place.
+
+2. groups/audio/project-celadon/init.rc loaded snd-intel-sdw-acpi
+   after snd-hda-codec-hdmi and never loaded the SoundWire bus/codec
+   modules (soundwire-bus, soundwire-intel, snd-soc-rt722-sdca,
+   snd-soc-sof-sdw, etc.) at all. Reordered snd-intel-sdw-acpi to
+   load before snd-intel-dspcfg (required so dspcfg can detect the
+   SoundWire ACPI device) and added the full SoundWire/RT722 module
+   load chain in dependency order.
+
+3. groups/audio/project-celadon/auto_hal.in unconditionally grepped
+   /mnt/share/mixins.spec for the audio type, crashing/defaulting to
+   nothing useful when that guest-share path doesn't exist on
+   baremetal (non-CIV) boots. Fall back to "sof-hda" when the file
+   is absent.
+
+Also documents in product.mk that WCL firmware now ships via
+vendor/linux/firmware/intel/sof-ipc4{,-tplg}/wcl/ instead of
+PRODUCT_COPY_FILES (comment only, no functional change).
+
+Without this patch, the HAL-level mic/speaker fixes have nothing to
+talk to: the SOF SoundWire card never registers on boot.
+
+Tracked-On: NIACP3-1695
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ groups/audio/project-celadon/auto_hal.in      |  6 +++-
+ groups/audio/project-celadon/init.rc          | 28 ++++++++++++++++---
+ groups/device-specific/caas/product.mk        |  8 ++++++
+ .../linux-intel-lts2025/caas_diffconfig       | 10 +++++++
+ 4 files changed, 47 insertions(+), 5 deletions(-)
+
+diff --git a/groups/audio/project-celadon/auto_hal.in b/groups/audio/project-celadon/auto_hal.in
+index bb65c139..bee462fb 100644
+--- a/groups/audio/project-celadon/auto_hal.in
++++ b/groups/audio/project-celadon/auto_hal.in
+@@ -9,7 +9,11 @@ fi
+ }
+ check_for_audio(){
+ GUEST_AAF_CONFIG="/mnt/share/mixins.spec"
+-value=`grep -i audio-type mnt/share/mixins.spec |cut -d ':' -f2`
++if [ -f "$GUEST_AAF_CONFIG" ]; then
++    value=`grep -i audio-type "$GUEST_AAF_CONFIG" |cut -d ':' -f2`
++else
++    value="sof-hda"
++fi
+ setprop vendor.intel.enable.audio $value
+ }
+ update_audio
+diff --git a/groups/audio/project-celadon/init.rc b/groups/audio/project-celadon/init.rc
+index 677385be..aa82a081 100644
+--- a/groups/audio/project-celadon/init.rc
++++ b/groups/audio/project-celadon/init.rc
+@@ -4,11 +4,11 @@ on post-fs && property:vendor.intel.enable.audio=legacy-hda
+     insmod /vendor/lib/modules/snd-hda-core.ko
+     insmod /vendor/lib/modules/snd-hda-codec.ko
+     insmod /vendor/lib/modules/snd-hda-codec-generic.ko
++    insmod /vendor/lib/modules/snd-intel-sdw-acpi.ko
+     insmod /vendor/lib/modules/snd-intel-dspcfg.ko dsp_driver=1
+     insmod /vendor/lib/modules/snd-hda-intel.ko
+     insmod /vendor/lib/modules/snd-hda-codec-realtek.ko
+     insmod /vendor/lib/modules/snd-hda-codec-hdmi.ko
+-    insmod /vendor/lib/modules/snd-intel-sdw-acpi.ko
+     insmod /vendor/lib/modules/snd-soc-acpi.ko
+     insmod /vendor/lib/modules/snd-soc-acpi-intel-match.ko
+     insmod /vendor/lib/modules/snd-soc-core.ko
+@@ -19,14 +19,16 @@ on post-fs && property:vendor.intel.enable.audio=sof-hda
+     insmod /vendor/lib/modules/snd-hda-core.ko
+     insmod /vendor/lib/modules/snd-hda-codec.ko
+     insmod /vendor/lib/modules/snd-hda-codec-generic.ko
++    insmod /vendor/lib/modules/snd-intel-sdw-acpi.ko
+     insmod /vendor/lib/modules/snd-intel-dspcfg.ko dsp_driver=3
+     insmod /vendor/lib/modules/snd-hda-intel.ko
+     insmod /vendor/lib/modules/snd-hda-codec-realtek.ko
+     insmod /vendor/lib/modules/snd-hda-codec-hdmi.ko
+-    insmod /vendor/lib/modules/snd-intel-sdw-acpi.ko
+     insmod /vendor/lib/modules/snd-soc-acpi.ko
+-    insmod /vendor/lib/modules/snd-soc-acpi-intel-match.ko
+     insmod /vendor/lib/modules/snd-soc-core.ko
++    insmod /vendor/lib/modules/snd-soc-sdca.ko
++    insmod /vendor/lib/modules/snd-soc-acpi-intel-sdca-quirks.ko
++    insmod /vendor/lib/modules/snd-soc-acpi-intel-match.ko
+     insmod /vendor/lib/modules/snd-sof-utils.ko
+     insmod /vendor/lib/modules/snd-sof-xtensa-dsp.ko
+     insmod /vendor/lib/modules/snd-sof.ko
+@@ -35,10 +37,25 @@ on post-fs && property:vendor.intel.enable.audio=sof-hda
+     insmod /vendor/lib/modules/snd-hda-ext-core.ko
+     insmod /vendor/lib/modules/snd-sof-intel-hda.ko
+     insmod /vendor/lib/modules/snd-soc-hdac-hda.ko
++    insmod /vendor/lib/modules/snd-sof-intel-hda-mlink.ko
+     insmod /vendor/lib/modules/snd-sof-intel-hda-common.ko
++    insmod /vendor/lib/modules/crc8.ko
++    insmod /vendor/lib/modules/soundwire-bus.ko
++    insmod /vendor/lib/modules/soundwire-cadence.ko
++    insmod /vendor/lib/modules/soundwire-generic-allocation.ko
++    insmod /vendor/lib/modules/regmap-sdw.ko
++    insmod /vendor/lib/modules/regmap-sdw-mbq.ko
++    insmod /vendor/lib/modules/snd-soc-sdw-utils.ko
++    insmod /vendor/lib/modules/snd-sof-intel-hda-sdw-bpt.ko
++    insmod /vendor/lib/modules/soundwire-intel.ko
++    insmod /vendor/lib/modules/snd-soc-rt-sdw-common.ko
++    insmod /vendor/lib/modules/snd-soc-rt722-sdca.ko
+     insmod /vendor/lib/modules/snd-soc-dmic.ko
+     insmod /vendor/lib/modules/snd-soc-hdac-hdmi.ko
+     insmod /vendor/lib/modules/snd-soc-intel-hda-dsp-common.ko
++    insmod /vendor/lib/modules/snd-soc-sof-sdw.ko
++    insmod /vendor/lib/modules/snd-soc-intel-sof-board-helpers.ko
++    insmod /vendor/lib/modules/snd-sof-intel-hda-generic.ko
+     insmod /vendor/lib/modules/snd-soc-sst-dsp.ko
+     insmod /vendor/lib/modules/snd-soc-sst-ipc.ko
+     insmod /vendor/lib/modules/snd-sof-acpi-intel-bdw.ko
+@@ -48,6 +65,9 @@ on post-fs && property:vendor.intel.enable.audio=sof-hda
+     insmod /vendor/lib/modules/snd-usb-hiface.ko
+     insmod /vendor/lib/modules/snd-soc-skl_hda_dsp.ko
+     insmod /vendor/lib/modules/snd-sof-pci-intel-tgl.ko
++    insmod /vendor/lib/modules/snd-sof-pci-intel-mtl.ko
++    insmod /vendor/lib/modules/snd-sof-pci-intel-lnl.ko
++    insmod /vendor/lib/modules/snd-sof-pci-intel-ptl.ko
+ 
+ on boot
+     insmod /vendor/lib/modules/snd.ko
+@@ -59,11 +79,11 @@ on boot
+     insmod /vendor/lib/modules/snd-hda-core.ko
+     insmod /vendor/lib/modules/snd-hda-codec.ko
+     insmod /vendor/lib/modules/snd-hda-codec-generic.ko
++    insmod /vendor/lib/modules/snd-intel-sdw-acpi.ko
+     insmod /vendor/lib/modules/snd-intel-dspcfg.ko dsp_driver=1
+     insmod /vendor/lib/modules/snd-hda-intel.ko
+     insmod /vendor/lib/modules/snd-hda-codec-realtek.ko
+     insmod /vendor/lib/modules/snd-hda-codec-hdmi.ko
+-    insmod /vendor/lib/modules/snd-intel-sdw-acpi.ko
+     insmod /vendor/lib/modules/snd-soc-acpi.ko
+     insmod /vendor/lib/modules/snd-soc-acpi-intel-match.ko
+     insmod /vendor/lib/modules/snd-soc-core.ko
+diff --git a/groups/device-specific/caas/product.mk b/groups/device-specific/caas/product.mk
+index 29df02eb..c85832ad 100644
+--- a/groups/device-specific/caas/product.mk
++++ b/groups/device-specific/caas/product.mk
+@@ -73,6 +73,14 @@ PRODUCT_COPY_FILES += $(LOCAL_PATH)/sof_audio/configure_sof.sh:$(PRODUCT_OUT)/sc
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/cam_sharing/0001-Netlink-sync.patch:$(PRODUCT_OUT)/scripts/cam_sharing/0001-Netlink-sync.patch
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/cam_sharing/IntelCameraService:$(PRODUCT_OUT)/scripts/cam_sharing/IntelCameraService
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/cam_sharing/virtualcamera.service:$(PRODUCT_OUT)/scripts/cam_sharing/virtualcamera.service
++# WCL onboard audio (RT722 SoundWire codec): SOF firmware (.ri) ships via
++# vendor/linux/firmware/intel/sof-ipc4/wcl/; the SOF modular "function topology"
++# files (one per DAI-link function: sof-sdca-jack-id0.tplg, sof-sdca-1amp-id2.tplg,
++# sof-sdca-mic-id4.tplg, sof-hdmi-pcm5-id5.tplg) ship flat under
++# vendor/linux/firmware/intel/sof-ipc4-tplg/ (no wcl/ subdir). Both are picked up
++# automatically by device/intel/common/firmware.mk's wholesale "intel" dir copy -
++# no PRODUCT_COPY_FILES needed here.
++
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/setup_audio_host.sh:$(PRODUCT_OUT)/scripts/setup_audio_host.sh
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/guest_pm_control:$(PRODUCT_OUT)/scripts/guest_pm_control
+ PRODUCT_COPY_FILES += $(LOCAL_PATH)/intel-thermal-conf.xml:$(PRODUCT_OUT)/scripts/intel-thermal-conf.xml
+diff --git a/groups/kernel/gmin64/config-lts/linux-intel-lts2025/caas_diffconfig b/groups/kernel/gmin64/config-lts/linux-intel-lts2025/caas_diffconfig
+index 9fc72cd5..f3c4d695 100644
+--- a/groups/kernel/gmin64/config-lts/linux-intel-lts2025/caas_diffconfig
++++ b/groups/kernel/gmin64/config-lts/linux-intel-lts2025/caas_diffconfig
+@@ -9,3 +9,13 @@ CONFIG_TRUSTY_VIRTIO_IPC=y
+ # CONFIG_TRUSTY_CRASH_IS_PANIC is not set
+ CONFIG_TRUSTY_X86_64=y
+ CONFIG_TRUSTY_BACKUP_TIMER=y
++
++# WCL onboard audio: enable SoundWire bus + RT722 SDCA codec for SOF
++CONFIG_SOUNDWIRE=m
++CONFIG_SOUNDWIRE_INTEL=m
++CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE=m
++# required dependency for SND_SOC_INTEL_SOUNDWIRE_SOF_MACH (no COMPILE_TEST in production kernel)
++CONFIG_SND_SOC_INTEL_USER_FRIENDLY_LONG_NAMES=y
++CONFIG_SND_SOC_INTEL_SOUNDWIRE_SOF_MACH=m
++CONFIG_SND_SOC_SDW_UTILS=m
++CONFIG_SND_SOC_RT722_SDCA_SDW=m
+-- 
+2.34.1
+

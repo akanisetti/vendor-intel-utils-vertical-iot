@@ -1,0 +1,65 @@
+From afb6b070544d6fc5e8ff941232647860761cede7 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Thu, 12 Nov 2026 19:50:04 +0000
+Subject: [PATCH 2/2] Fix periodic capture dropouts by making ALSA pipe writer
+ non-blocking
+
+StreamAlsaMonoPipe::start() created the input-side MonoPipe sink with
+makeSink(mIsInput), which passed true (blocking) for input streams,
+contradicting the method's own comment ("Do not block the writer
+when it is on our thread").
+
+The HAL's capture I/O thread continuously drains the real ALSA
+hardware ring via proxy_read_with_retries() and pushes samples into
+a software MonoPipe consumed by AudioFlinger's transfer() calls. With
+a blocking sink, any brief delay in AudioFlinger draining the pipe
+caused the capture thread's write() to block, which in turn stalled
+it from re-draining the actual ALSA hardware ring. This allowed the
+hardware ring to back up (observed up to ~854ms / 87% of polled
+samples over the configured buffer size) and eventually overrun,
+producing periodic ~70ms silence gaps roughly every 0.65s in
+recordings.
+
+Fix: always construct the input sink as non-blocking (makeSink(false))
+so the capture thread never stalls on the downstream pipe, regardless
+of how fast the consumer drains it.
+
+Verified via live polling of /proc/asound/cardN/pcmNc/sub0/status
+during capture (buffer overrun samples dropped from 87% to 0%, mean
+backlog from ~412ms to ~14ms) and via audio analysis of recordings
+from the built-in mic, a USB headset mic, and a Bluetooth SCO headset
+mic, all showing zero periodic dropouts post-fix.
+
+Note: on A17 this fix lands in StreamAlsaMonoPipe.cpp rather than
+StreamAlsa.cpp, since StreamPrimary now inherits from a dedicated
+StreamAlsaMonoPipe class (the base StreamAlsa class on A17 is a
+simpler direct-passthrough implementation with no MonoPipe sink).
+
+Test: Manual capture via built-in/USB/Bluetooth mic, verified no
+      periodic silence gaps; confirmed /proc/asound avail/hw_ptr
+      backlog eliminated.
+
+Tracked-On: NIACP3-1695
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp b/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
+index 3738f3056f..34bfb5f6dd 100644
+--- a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
++++ b/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
+@@ -79,7 +79,9 @@ StreamAlsaMonoPipe::~StreamAlsaMonoPipe() {
+         return status;
+     }
+     for (size_t i = 0; i < alsaDeviceProxies.size(); ++i) {
+-        auto sink = makeSink(mIsInput);  // Do not block the writer when it is on our thread.
++        // Writer here is our own capture io thread; it must never block on the pipe,
++        // otherwise it stalls draining the ALSA hardware ring and causes capture overruns.
++        auto sink = makeSink(false);
+         if (sink != nullptr) {
+             sinks.push_back(sink);
+         } else {
+-- 
+2.34.1
+

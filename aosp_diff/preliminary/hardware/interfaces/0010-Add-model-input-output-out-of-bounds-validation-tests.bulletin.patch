@@ -1,0 +1,67 @@
+From 98d133b6182eab38f6af5c56bf1f9a00687ea277 Mon Sep 17 00:00:00 2001
+From: Michael Butler <butlermichael@google.com>
+Date: Tue, 30 Jun 2026 11:46:10 -0700
+Subject: [PATCH] Add model input/output out-of-bounds validation tests
+
+Add mutateModelInputOperandIndexTest and mutateModelOutputOperandIndexTest
+VTS tests under a new logical block to check that AIDL NeuralNetworks
+devices reject models containing out-of-bounds input/output indexes.
+
+Bug: 269456968
+Test: alint, VtsHalNeuralnetworksTargetTest
+Flag: EXEMPT BUGFIX
+DISABLE_TOPIC_PROTECTOR
+Change-Id: I65bac4e258c2df162cac7a1fe21dc94f6e6e875c
+---
+ .../aidl/vts/functional/ValidateModel.cpp     | 28 +++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/neuralnetworks/aidl/vts/functional/ValidateModel.cpp b/neuralnetworks/aidl/vts/functional/ValidateModel.cpp
+index d7baf199a5..32218482c8 100644
+--- a/neuralnetworks/aidl/vts/functional/ValidateModel.cpp
++++ b/neuralnetworks/aidl/vts/functional/ValidateModel.cpp
+@@ -1016,6 +1016,32 @@ static void mutateOperationOutputOperandIndexTest(const std::shared_ptr<IDevice>
+     }
+ }
+ 
++///////////////////////// VALIDATE MODEL INPUT/OUTPUT OPERAND INDEXES /////////////////////////
++
++static void mutateModelInputOperandIndexTest(const std::shared_ptr<IDevice>& device,
++                                             const Model& model) {
++    const int32_t invalidOperand = model.main.operands.size();
++    for (size_t input = 0; input < model.main.inputIndexes.size(); ++input) {
++        const std::string message = "mutateModelInputOperandIndexTest: input " + std::to_string(input);
++        validate(device, message, model,
++                 [input, invalidOperand](Model* model, ExecutionPreference*, Priority*) {
++                     model->main.inputIndexes[input] = invalidOperand;
++                 });
++    }
++}
++
++static void mutateModelOutputOperandIndexTest(const std::shared_ptr<IDevice>& device,
++                                              const Model& model) {
++    const int32_t invalidOperand = model.main.operands.size();
++    for (size_t output = 0; output < model.main.outputIndexes.size(); ++output) {
++        const std::string message = "mutateModelOutputOperandIndexTest: output " + std::to_string(output);
++        validate(device, message, model,
++                 [output, invalidOperand](Model* model, ExecutionPreference*, Priority*) {
++                     model->main.outputIndexes[output] = invalidOperand;
++                 });
++    }
++}
++
+ ///////////////////////// VALIDATE MODEL OPERANDS WRITTEN ///////////////////////////////////////
+ 
+ static void mutateOperationRemoveWriteTest(const std::shared_ptr<IDevice>& device,
+@@ -1359,6 +1385,8 @@ void validateModel(const std::shared_ptr<IDevice>& device, const Model& model) {
+     mutateOperandLifeTimeTest(device, model);
+     mutateOperandInputOutputTest(device, model);
+     mutateOperandAddWriterTest(device, model);
++    mutateModelInputOperandIndexTest(device, model);
++    mutateModelOutputOperandIndexTest(device, model);
+     mutateOperationOperandTypeTest(device, model);
+     mutateOperationTypeTest(device, model);
+     mutateOperationInputOperandIndexTest(device, model);
+-- 
+2.56.0.385.gac671c819a-goog
+

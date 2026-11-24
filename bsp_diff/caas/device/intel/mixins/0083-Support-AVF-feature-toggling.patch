@@ -1,7 +1,7 @@
-From c8cb0b2ec720074268a70d4acb273954c9ea400c Mon Sep 17 00:00:00 2001
+From 76ec2ec2171dd447eced7b2bea9635754e6f4424 Mon Sep 17 00:00:00 2001
 From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
-Date: Wed, 9 Sep 2026 08:54:45 +0000
-Subject: [PATCH] Support AVF feature toggling
+Date: Thu, 1 Oct 2026 07:04:19 +0000
+Subject: [PATCH 3/3] Support AVF feature toggling
 
 Default configuration is AVF enabled, Trusty Disabled
 
@@ -15,12 +15,12 @@ Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
  groups/device-specific/caas/AndroidBoard.mk          | 11 +++++++++++
  groups/device-specific/caas/BoardConfig.mk           |  6 +++++-
  groups/device-specific/caas/product.mk               | 12 ++++++++++--
- .../linux-intel-lts2024/avf_disable_diffconfig       | 11 +++++++++++
+ .../linux-intel-lts2025/avf_disable_diffconfig       | 11 +++++++++++
  4 files changed, 37 insertions(+), 3 deletions(-)
- create mode 100644 groups/kernel/gmin64/config-lts/linux-intel-lts2024/avf_disable_diffconfig
+ create mode 100644 groups/kernel/gmin64/config-lts/linux-intel-lts2025/avf_disable_diffconfig
 
 diff --git a/groups/device-specific/caas/AndroidBoard.mk b/groups/device-specific/caas/AndroidBoard.mk
-index 722eb178..1264ae90 100644
+index 722eb17..1264ae9 100644
 --- a/groups/device-specific/caas/AndroidBoard.mk
 +++ b/groups/device-specific/caas/AndroidBoard.mk
 @@ -3,6 +3,17 @@ KERNEL_DIFFCONFIG += $(KERNEL_VIRT_DIFFCONFIG)
@@ -42,11 +42,11 @@ index 722eb178..1264ae90 100644
  BOARD_MMC_SIZE = 15335424K
  
 diff --git a/groups/device-specific/caas/BoardConfig.mk b/groups/device-specific/caas/BoardConfig.mk
-index 55257e38..4621667c 100644
+index 9037011..02ac100 100644
 --- a/groups/device-specific/caas/BoardConfig.mk
 +++ b/groups/device-specific/caas/BoardConfig.mk
-@@ -10,12 +10,16 @@ BOARD_KERNEL_CMDLINE += \
- 	reboot=a,e,p,t,f \
+@@ -5,12 +5,16 @@ BOARD_KERNEL_CMDLINE += \
+ 	intel_iommu=off \
  	loop.max_part=7
  
 -# AVF: Set hypervisor properties in bootconfig for VirtualizationService
@@ -64,7 +64,7 @@ index 55257e38..4621667c 100644
  BOARD_FLASHFILES += ${TARGET_DEVICE_DIR}/bldr_utils.img:bldr_utils.img
  BOARD_FLASHFILES += $(PRODUCT_OUT)/LICENSE
 diff --git a/groups/device-specific/caas/product.mk b/groups/device-specific/caas/product.mk
-index b5e5f0f6..e2973a5a 100644
+index b5e5f0f..e2973a5 100644
 --- a/groups/device-specific/caas/product.mk
 +++ b/groups/device-specific/caas/product.mk
 @@ -9,7 +9,6 @@ PRODUCT_COPY_FILES += \
@@ -96,11 +96,11 @@ index b5e5f0f6..e2973a5a 100644
  # PRODUCT_PACKAGES += androidx.window.extensions \
  		    androidx.window.sidecar
  
-diff --git a/groups/kernel/gmin64/config-lts/linux-intel-lts2024/avf_disable_diffconfig b/groups/kernel/gmin64/config-lts/linux-intel-lts2024/avf_disable_diffconfig
+diff --git a/groups/kernel/gmin64/config-lts/linux-intel-lts2025/avf_disable_diffconfig b/groups/kernel/gmin64/config-lts/linux-intel-lts2025/avf_disable_diffconfig
 new file mode 100644
-index 00000000..f72325f0
+index 0000000..f72325f
 --- /dev/null
-+++ b/groups/kernel/gmin64/config-lts/linux-intel-lts2024/avf_disable_diffconfig
++++ b/groups/kernel/gmin64/config-lts/linux-intel-lts2025/avf_disable_diffconfig
 @@ -0,0 +1,11 @@
 +# AVF Layer 1 kernel-level disable fragment.
 +# Applied ONLY when ENABLE_AVF=false (see device-specific/caas/AndroidBoard.mk).

@@ -1,0 +1,34 @@
+From f5402bc9beebe2ac8693018ddb7d13f537203671 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Tue, 3 Nov 2026 15:53:33 +0000
+Subject: [PATCH] libva: Initialize the DRM file descriptor to -1
+
+calloc() zero-initializes drm_state, leaving drm_state->fd at 0. If
+device selection later fails before ever opening a real DRM fd (e.g.
+va_DisplayContextConnect() finds no candidate device),
+va_DisplayContextDestroy() unconditionally calls close(drm_state->fd),
+closing fd 0 (typically stdin) -- a descriptor this driver doesn't
+own. Initialize fd to -1 right after allocation so cleanup can never
+close an unrelated descriptor; close(-1) is a safe EBADF no-op.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ va/android/va_android.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/va/android/va_android.cpp b/va/android/va_android.cpp
+index b99f859..4a0286b 100644
+--- a/va/android/va_android.cpp
++++ b/va/android/va_android.cpp
+@@ -277,6 +277,7 @@ VADisplay vaGetDisplay(
+         return NULL;
+     }
+ 
++    drm_state->fd = -1;
+     pDriverContext->drm_state = drm_state;
+ 
+     return (VADisplay)pDisplayContext;
+-- 
+2.34.1
+

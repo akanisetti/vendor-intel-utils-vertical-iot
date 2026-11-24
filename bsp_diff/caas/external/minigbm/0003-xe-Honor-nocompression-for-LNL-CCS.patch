@@ -1,0 +1,51 @@
+From a591386372ff9d00597b6cb36d623436ece0433e Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 13 Oct 2026 02:21:16 +0000
+Subject: [PATCH 3/3] xe: Honor nocompression for LNL CCS
+
+vendor.minigbm.debug=nocompression only drops
+I915_FORMAT_MOD_Y_TILED_CCS. On Xe2/Xe3 (LNL, PTL, WCL) the backend
+picks I915_FORMAT_MOD_4_TILED_LNL_CCS, so compression could not be
+turned off at runtime.
+
+When compression is disabled, fall back to an uncompressed modifier
+the caller allows: I915_FORMAT_MOD_4_TILED without a modifier list, or
+the first of 4-tiled and linear present in the list. If the list holds
+neither, the allocation fails rather than returning a buffer with a
+modifier the caller did not ask for. Compression stays enabled by
+default.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ xe.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/xe.c b/xe.c
+index 03c019a..dc913de 100644
+--- a/xe.c
++++ b/xe.c
+@@ -596,6 +596,20 @@ static int xe_bo_compute_metadata(struct bo *bo, uint32_t width, uint32_t height
+ 			modifier = I915_FORMAT_MOD_Y_TILED;
+ 	}
+ 
++	/*
++	 * Skip I915_FORMAT_MOD_4_TILED_LNL_CCS modifier if compression is disabled.
++	 * Without a modifier list use 4 tiled. With a list, only fall back to a
++	 * modifier the caller allows (4 tiled, then linear), otherwise fail.
++	 */
++	if (!bo->drv->compression && modifier == I915_FORMAT_MOD_4_TILED_LNL_CCS) {
++		if (!modifiers || drv_has_modifier(modifiers, count, I915_FORMAT_MOD_4_TILED))
++			modifier = I915_FORMAT_MOD_4_TILED;
++		else if (drv_has_modifier(modifiers, count, DRM_FORMAT_MOD_LINEAR))
++			modifier = DRM_FORMAT_MOD_LINEAR;
++		else
++			return -EINVAL;
++	}
++
+ 	switch (modifier) {
+ 	case DRM_FORMAT_MOD_LINEAR:
+ 		bo->meta.tiling = XE_TILING_NONE;
+-- 
+2.34.1
+

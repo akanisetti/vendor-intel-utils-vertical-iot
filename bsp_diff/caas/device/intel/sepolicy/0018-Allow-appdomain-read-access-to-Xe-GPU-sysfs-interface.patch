@@ -1,0 +1,30 @@
+From e0680e0572e8f67a31a5790d449bc0fcf2b3b9c2 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 7 Aug 2026 09:00:33 +0000
+Subject: [PATCH] Allow appdomain read access to Xe GPU sysfs interface
+
+changes:
+- graphics/mesa/xe_proc_access.te: add rule to grant all app
+  domains read access to /proc/sys/dev/xe/ for GPU capability
+  detection; resolves SELinux denials from RenderThread and
+  graphics subsystem querying Xe driver parameters
+
+Tracked-On: NIACP3-1498
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ graphics/mesa/xe_proc_access.te | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/graphics/mesa/xe_proc_access.te b/graphics/mesa/xe_proc_access.te
+index df7305c..c5bd425 100644
+--- a/graphics/mesa/xe_proc_access.te
++++ b/graphics/mesa/xe_proc_access.te
+@@ -4,3 +4,5 @@ allow system_app proc_sys_dev_xe:file { read open getattr };
+ allow platform_app proc_sys_dev_xe:file { read open getattr };
+ allow priv_app proc_sys_dev_xe:file { read open getattr };
+ allow surfaceflinger proc_sys_dev_xe:file { read open getattr };
++# Grant every app domain (incl. untrusted_app) read access; RenderThread checks observation_paranoid.
++allow appdomain proc_sys_dev_xe:file r_file_perms;
+-- 
+2.34.1
+

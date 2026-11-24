@@ -1,0 +1,60 @@
+From 89517ef7d2b440109998f9efee6c87f046261bdb Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Fri, 16 Oct 2026 12:52:36 +0000
+Subject: [PATCH] libva: Restore va_log* macros needed by the retained Android
+ shim
+
+A real build (2h27m in, 128060/172944 targets done) failed compiling
+va/android/va_android.cpp with 7 "use of undeclared identifier"
+errors for va_loge/va_logd.
+
+The 2.23.0 overlay removed the entire va_loge/va_logi/va_logv/va_logd
+macro block from va_internal.h (an ANDROID-vs-else #ifdef wrapping
+ALOGE/ALOGI/ALOGV/ALOGD or fprintf fallbacks) with no replacement --
+unrelated to, but discovered alongside, upstream's separate removal of
+va_android.cpp/va_android.h itself. Since va_android.cpp is being kept
+as a fork-local addition (earlier decision in this series, because
+mediasdk_c2 and media-driver's cmrtlib depend on vaGetDisplay()), its
+va_loge/va_logd calls need this macro block back too.
+
+Restored verbatim from the pre-upgrade va_internal.h. No other build
+errors were reported for va_android.cpp in the same compiler
+invocation, so this is the only missing piece for this file.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ va/va_internal.h | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/va/va_internal.h b/va/va_internal.h
+index 784e01c..eb0c92d 100644
+--- a/va/va_internal.h
++++ b/va/va_internal.h
+@@ -25,6 +25,23 @@
+ #ifndef VA_INTERNAL_H
+ #define VA_INTERNAL_H
+ 
++#ifdef ANDROID
++#include <log/log.h>
++
++#define va_loge(format, ...) ALOGE(format, ##__VA_ARGS__)
++#define va_logi(format, ...) ALOGI(format, ##__VA_ARGS__)
++#define va_logv(format, ...) ALOGV(format, ##__VA_ARGS__)
++#define va_logd(format, ...) ALOGD(format, ##__VA_ARGS__)
++
++#else
++
++#define va_loge(format, ...) fprintf(stderr, format, ##__VA_ARGS__)
++#define va_logi(format, ...) fprintf(stdout, format, ##__VA_ARGS__)
++#define va_logv(format, ...) fprintf(stdout, format, ##__VA_ARGS__)
++#define va_logd(format, ...) fprintf(stdout, format, ##__VA_ARGS__)
++
++#endif
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-- 
+2.34.1
+

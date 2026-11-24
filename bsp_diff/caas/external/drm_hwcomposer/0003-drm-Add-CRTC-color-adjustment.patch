@@ -1,0 +1,372 @@
+From 2f7c0e4a891f9e7e37302830cae058baa0e80719 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 13 Oct 2026 02:43:14 +0000
+Subject: [PATCH 3/6] drm: Add CRTC color adjustment
+
+Port of the Intel drm-hwcomposer fork commit 57d6bca ("Add display
+color adjustment function"), enabled with
+vendor.hwcomposer.color.adjustment.enabling=1.
+
+Values are read from /data/vendor/color/ when the display is powered
+on:
+ - hue (0..359) and saturation (75..125 %) build a BT.709 hue/saturation
+   matrix that is multiplied into the CRTC CTM after the SurfaceFlinger
+   color transform. The fork set the CTM out of band with
+   drmModeObjectSetProperty, which the per-frame atomic CTM would
+   override.
+ - brightness and contrast (0..255, 128 neutral) build a CRTC GAMMA_LUT
+   that is set in the atomic commit. Neutral values give an identity
+   LUT (sampled over 0..lut_size-1, brightness centred on 128).
+
+Non-finite values (nan, inf) in the color files are ignored, like
+unreadable or out-of-range ones.
+
+Disabled by default; the GAMMA_LUT properties are only looked up when
+the feature is enabled.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ drm/DrmAtomicStateManager.cpp | 200 +++++++++++++++++++++++++++++++++-
+ drm/DrmAtomicStateManager.h   |   8 ++
+ drm/DrmCrtc.cpp               |  12 ++
+ drm/DrmCrtc.h                 |  10 ++
+ 4 files changed, 229 insertions(+), 1 deletion(-)
+
+diff --git a/drm/DrmAtomicStateManager.cpp b/drm/DrmAtomicStateManager.cpp
+index 99d646f..908ee80 100644
+--- a/drm/DrmAtomicStateManager.cpp
++++ b/drm/DrmAtomicStateManager.cpp
+@@ -20,12 +20,19 @@
+ 
+ #include "DrmAtomicStateManager.h"
+ 
++#include <android-base/file.h>
++#include <android-base/properties.h>
+ #include <drm/drm_mode.h>
+ #include <sync/sync.h>
+ #include <utils/Trace.h>
+ 
+ #include <algorithm>
++#include <array>
+ #include <cassert>
++#include <cmath>
++#include <cstdlib>
++#include <string>
++#include <vector>
+ 
+ #include "compositor/LayerData.h"
+ #include "compositor/LayerToPlaneJoiningPlan.h"
+@@ -308,6 +315,120 @@ bool DrmAtomicStateManager::SetDisplayModeIfNeeded(const AtomicCommitArgs &args,
+   return true;
+ }
+ 
++namespace {
++/*
++ * Intel (Celadon) display color adjustment, enabled with
++ * vendor.hwcomposer.color.adjustment.enabling=1. The values are read from
++ * /data/vendor/color/ when the display is powered on:
++ *  - hue (0..359 degrees), saturation (75..125 %): folded into the CRTC CTM
++ *    after the SurfaceFlinger color transform.
++ *  - brightness, contrast (0..255, 128 is neutral): CRTC GAMMA_LUT.
++ */
++constexpr char kColorAdjustmentDir[] = "/data/vendor/color/";
++constexpr double kNeutralColorValue = 128.0;
++
++auto ColorAdjustmentEnabled() -> bool {
++  static const bool kEnabled = android::base::
++      GetBoolProperty("vendor.hwcomposer.color.adjustment.enabling", false);
++  return kEnabled;
++}
++
++auto ReadColorValue(const char *name) -> std::optional<double> {
++  std::string value;
++  if (!android::base::ReadFileToString(std::string(kColorAdjustmentDir) + name,
++                                       &value)) {
++    return {};
++  }
++  char *end = nullptr;
++  const double result = std::strtod(value.c_str(), &end);
++  /* Reject "nan"/"inf": they would pass the range checks and reach the CTM or
++   * the float to uint16_t LUT conversion. */
++  if (end == value.c_str() || !std::isfinite(result))
++    return {};
++  return result;
++}
++
++using Mat3x3 = std::array<std::array<double, 3>, 3>;
++
++auto Multiply3x3(const Mat3x3 &a, const Mat3x3 &b) -> Mat3x3 {
++  Mat3x3 result{};
++  for (size_t y = 0; y < 3; y++) {
++    for (size_t x = 0; x < 3; x++) {
++      result[y][x] = (a[y][0] * b[0][x]) + (a[y][1] * b[1][x]) +
++                     (a[y][2] * b[2][x]);
++    }
++  }
++  return result;
++}
++
++/* Hue rotation and saturation scaling in BT.709 YCbCr space */
++auto HueSaturationMatrix(double hue, double saturation)
++    -> HalColorTransforMatrix {
++  const double hue_shift = hue * M_PI / 180.0;
++  const double c = std::cos(hue_shift);
++  const double s = std::sin(hue_shift);
++  const Mat3x3 hue_rotation = {{{1.0, 0.0, 0.0}, {0.0, c, -s}, {0.0, s, c}}};
++  const Mat3x3 saturation_scale = {
++      {{1.0, 0.0, 0.0}, {0.0, saturation, 0.0}, {0.0, 0.0, saturation}}};
++  const Mat3x3 ycbcr2rgb709 = {{{1.0000, 0.0000, 1.5748},
++                                {1.0000, -0.1873, -0.4681},
++                                {1.0000, 1.8556, 0.0000}}};
++  const Mat3x3 rgb2ycbcr709 = {{{0.2126, 0.7152, 0.0722},
++                                {-0.1146, -0.3854, 0.5000},
++                                {0.5000, -0.4542, -0.0458}}};
++  const Mat3x3 coeff = Multiply3x3(Multiply3x3(Multiply3x3(ycbcr2rgb709,
++                                                           saturation_scale),
++                                               hue_rotation),
++                                   rgb2ycbcr709);
++
++  /* The HAL matrix is applied to row vectors: hal[i * 4 + j] = coeff[j][i] */
++  HalColorTransforMatrix hal = kIdentityMatrix;
++  for (size_t i = 0; i < 3; i++) {
++    for (size_t j = 0; j < 3; j++) {
++      hal[(i * 4) + j] = static_cast<float>(coeff[j][i]);
++    }
++  }
++  return hal;
++}
++
++/* Returns a * b, i.e. the transform a followed by b */
++auto MultiplyHalMatrix(const HalColorTransforMatrix &a,
++                       const HalColorTransforMatrix &b)
++    -> HalColorTransforMatrix {
++  HalColorTransforMatrix result{};
++  for (size_t r = 0; r < 4; r++) {
++    for (size_t c = 0; c < 4; c++) {
++      float sum = 0.0F;
++      for (size_t k = 0; k < 4; k++)
++        sum += a[(r * 4) + k] * b[(k * 4) + c];
++      result[(r * 4) + c] = sum;
++    }
++  }
++  return result;
++}
++
++auto BrightnessContrastLut(double brightness_value, double contrast_value,
++                           size_t lut_size) -> std::vector<drm_color_lut> {
++  /* 128 is neutral for both: brightness 128 adds 0, contrast 128 scales by 1,
++   * so neutral values give an identity LUT. */
++  const double brightness = (brightness_value - kNeutralColorValue) / 255.0;
++  const double contrast = contrast_value / kNeutralColorValue;
++  const double last = lut_size > 1 ? static_cast<double>(lut_size - 1) : 1.0;
++  std::vector<drm_color_lut> lut(lut_size);
++  /* lut[0] stays black */
++  for (size_t i = 1; i < lut_size; i++) {
++    const double in = static_cast<double>(i) / last;
++    const double out = std::clamp(((in - 0.5) * contrast) + 0.5 + brightness,
++                                  0.0, 1.0);
++    const auto value = static_cast<uint16_t>(std::lround(out * 0xFFFF));
++    lut[i].red = value;
++    lut[i].green = value;
++    lut[i].blue = value;
++  }
++  return lut;
++}
++}  // namespace
++
+ bool DrmAtomicStateManager::SetCtmIfNeeded(const AtomicCommitArgs &args,
+                                            AtomicRequest &request) {
+   auto *crtc = pipe_->crtc->Get();
+@@ -319,7 +440,12 @@ bool DrmAtomicStateManager::SetCtmIfNeeded(const AtomicCommitArgs &args,
+   if (drm->GetResMan().UseColorPipeline()) {
+     return crtc->GetCtmProperty().AtomicSet(*request.property_set, 0);
+   }
+-  auto drm_color_matrix = ColorUtil::ToColorTransform3x3(args.color_matrix);
++  auto color_matrix = args.color_matrix;
++  if (color_adjustment_matrix_) {
++    color_matrix = std::make_shared<HalColorTransforMatrix>(
++        MultiplyHalMatrix(*args.color_matrix, *color_adjustment_matrix_));
++  }
++  auto drm_color_matrix = ColorUtil::ToColorTransform3x3(color_matrix);
+   auto ctm_blob = drm->RegisterUserPropertyBlob(drm_color_matrix.get(),
+                                                 sizeof(drm_color_ctm));
+   if (!ctm_blob) {
+@@ -335,6 +461,71 @@ bool DrmAtomicStateManager::SetCtmIfNeeded(const AtomicCommitArgs &args,
+   return true;
+ }
+ 
++void DrmAtomicStateManager::LoadColorAdjustmentIfNeeded(
++    const AtomicCommitArgs &args, AtomicRequest &request) {
++  if (!ColorAdjustmentEnabled())
++    return;
++
++  const bool power_on = args.power_mode &&
++                        *args.power_mode == HwcDisplay::PowerMode::kOn;
++  if (color_adjustment_loaded_ && !power_on)
++    return;
++  color_adjustment_loaded_ = true;
++
++  color_adjustment_matrix_.reset();
++  const auto hue = ReadColorValue("hue");
++  const auto saturation = ReadColorValue("saturation");
++  if (hue || saturation) {
++    double h = hue.value_or(0.0);
++    if (h < 0.0 || h > 359.0)
++      h = 0.0;
++    double s = saturation.value_or(100.0) / 100.0;
++    if (s < 0.75 || s > 1.25)
++      s = 1.0;
++    ALOGI("Color adjustment: hue %f saturation %f", h, s);
++    color_adjustment_matrix_ = HueSaturationMatrix(h, s);
++  }
++
++  /* Keep the previous LUT blob alive until this frame is retired */
++  if (color_adjustment_lut_blob_)
++    request.used_kms_objects.blobs.emplace_back(
++        std::move(color_adjustment_lut_blob_));
++
++  auto *crtc = pipe_->crtc->Get();
++  const auto lut_size = crtc->GetGammaLutSizeProperty().GetValue();
++  const auto brightness = ReadColorValue("brightness");
++  const auto contrast = ReadColorValue("contrast");
++  if ((!brightness && !contrast) || !crtc->GetGammaLutProperty() ||
++      !lut_size || *lut_size == 0) {
++    return;
++  }
++
++  double b = brightness.value_or(kNeutralColorValue);
++  if (b < 0.0 || b > 255.0)
++    b = kNeutralColorValue;
++  double c = contrast.value_or(kNeutralColorValue);
++  if (c < 0.0 || c > 255.0)
++    c = kNeutralColorValue;
++  ALOGI("Color adjustment: brightness %f contrast %f", b, c);
++
++  auto lut = BrightnessContrastLut(b, c, *lut_size);
++  color_adjustment_lut_blob_ = pipe_->device->RegisterUserPropertyBlob(
++      lut.data(), sizeof(drm_color_lut) * lut.size());
++  if (!color_adjustment_lut_blob_)
++    ALOGE("Failed to create color adjustment LUT blob");
++}
++
++bool DrmAtomicStateManager::SetColorAdjustmentLutIfNeeded(
++    AtomicRequest &request) {
++  auto *crtc = pipe_->crtc->Get();
++  if (!ColorAdjustmentEnabled() || !crtc->GetGammaLutProperty())
++    return true;
++
++  return crtc->GetGammaLutProperty()
++      .AtomicSet(*request.property_set,
++                 color_adjustment_lut_blob_ ? *color_adjustment_lut_blob_ : 0);
++}
++
+ bool DrmAtomicStateManager::SetColorSpaceIfNeeded(const AtomicCommitArgs &args,
+                                                   AtomicRequest &request) {
+   auto *connector = pipe_->connector->Get();
+@@ -554,11 +745,18 @@ DrmAtomicStateManager::GetAtomicModeReqForArgs(AtomicCommitArgs &args) {
+     return nullptr;
+   }
+ 
++  LoadColorAdjustmentIfNeeded(args, *atomic_request);
++
+   if (!SetCtmIfNeeded(args, *atomic_request)) {
+     ALOGE("Failed to set CTM blob");
+     return nullptr;
+   }
+ 
++  if (!SetColorAdjustmentLutIfNeeded(*atomic_request)) {
++    ALOGE("Failed to set color adjustment LUT");
++    return nullptr;
++  }
++
+   if (!SetColorSpaceIfNeeded(args, *atomic_request)) {
+     ALOGE("Failed to set color space");
+     return nullptr;
+diff --git a/drm/DrmAtomicStateManager.h b/drm/DrmAtomicStateManager.h
+index 4e1eb9e..4c57c67 100644
+--- a/drm/DrmAtomicStateManager.h
++++ b/drm/DrmAtomicStateManager.h
+@@ -126,6 +126,9 @@ class DrmAtomicStateManager : public DrmAtomicCommitSink {
+   bool SetDisplayModeIfNeeded(const AtomicCommitArgs &args,
+                               AtomicRequest &request);
+   bool SetCtmIfNeeded(const AtomicCommitArgs &args, AtomicRequest &request);
++  void LoadColorAdjustmentIfNeeded(const AtomicCommitArgs &args,
++                                   AtomicRequest &request);
++  bool SetColorAdjustmentLutIfNeeded(AtomicRequest &request);
+   bool SetColorSpaceIfNeeded(const AtomicCommitArgs &args,
+                              AtomicRequest &request);
+   bool SetContentTypeIfNeeded(const AtomicCommitArgs &args,
+@@ -157,6 +160,11 @@ class DrmAtomicStateManager : public DrmAtomicCommitSink {
+   int frames_staged_ GUARDED_BY(mutex_){};
+   int frames_tracked_ GUARDED_BY(mutex_){};
+ 
++  // Intel color adjustment (vendor.hwcomposer.color.adjustment.enabling)
++  bool color_adjustment_loaded_{};
++  std::optional<HalColorTransforMatrix> color_adjustment_matrix_;
++  DrmModeUserPropertyBlobUnique color_adjustment_lut_blob_;
++
+   // Cached gamut mappings
+   std::map<std::tuple<Colorspace, Colorspace>, const mat3> color_transform_map_;
+   // Cached 1D LUTs
+diff --git a/drm/DrmCrtc.cpp b/drm/DrmCrtc.cpp
+index bee6808..59fd6dc 100644
+--- a/drm/DrmCrtc.cpp
++++ b/drm/DrmCrtc.cpp
+@@ -16,6 +16,7 @@
+ 
+ #include "DrmCrtc.h"
+ 
++#include <android-base/properties.h>
+ #include <xf86drmMode.h>
+ 
+ #include <cstdint>
+@@ -69,6 +70,17 @@ auto DrmCrtc::CreateInstance(DrmDevice &dev, uint32_t crtc_id, uint32_t index)
+     }
+   }
+ 
++  /* Intel color adjustment: brightness/contrast use the CRTC gamma LUT */
++  if (android::base::
++          GetBoolProperty("vendor.hwcomposer.color.adjustment.enabling",
++                          false)) {
++    if (GetCrtcProperty(dev, *c, "GAMMA_LUT", &c->gamma_lut_property_) != 0 ||
++        GetCrtcProperty(dev, *c, "GAMMA_LUT_SIZE",
++                        &c->gamma_lut_size_property_) != 0) {
++      ALOGW("Missing optional GAMMA_LUT properties");
++    }
++  }
++
+   return c;
+ }
+ 
+diff --git a/drm/DrmCrtc.h b/drm/DrmCrtc.h
+index ad55c0f..1ba772c 100644
+--- a/drm/DrmCrtc.h
++++ b/drm/DrmCrtc.h
+@@ -65,6 +65,14 @@ class DrmCrtc : public PipelineBindable<DrmCrtc> {
+     return ctm_property_;
+   }
+ 
++  auto &GetGammaLutProperty() const {
++    return gamma_lut_property_;
++  }
++
++  auto &GetGammaLutSizeProperty() const {
++    return gamma_lut_size_property_;
++  }
++
+  private:
+   DrmCrtc(DrmModeCrtcUnique crtc, uint32_t index)
+       : crtc_(std::move(crtc)), index_in_res_array_(index){};
+@@ -74,6 +82,8 @@ class DrmCrtc : public PipelineBindable<DrmCrtc> {
+   const uint32_t index_in_res_array_;
+ 
+   DrmProperty ctm_property_;
++  DrmProperty gamma_lut_property_;
++  DrmProperty gamma_lut_size_property_;
+ 
+   DrmProperty active_property_;
+   DrmProperty mode_property_;
+-- 
+2.34.1
+

@@ -1,0 +1,150 @@
+From 331790e3508cc15d3011953c54b03284ffb9785a Mon Sep 17 00:00:00 2001
+From: Pranit Rane <pranitrane@google.com>
+Date: Tue, 7 Jul 2026 00:53:52 -0700
+Subject: [PATCH] [1] Fix authority-case desync in MmsService
+
+Currently, MmsService checks the authority of the PDU URI using a case-insensitive comparison ("mms".equalsIgnoreCase(...)). However, the system's provider matching is case-sensitive, which can allow an app to pass a URI with a case-variant authority (such as "MMS") to bypass access checks and overwrite existing database records during the message persistence phase.
+
+This change modifies the authority check in SendRequest to be case-sensitive ("mms".equals(...)), aligning it with the system authority resolution. A Robolectric unit test has also been added to verify this behavior.
+
+Bug: 517377188
+Flag: EXEMPT BUGFIX
+Test: atest MmsServiceRoboTests:com.android.mms.service.MmsRequestRoboTest
+Ignore-AOSP-First: security
+
+(cherry picked from commit 7ad5c63b37d4ccdc380f573776474996aa2e7dd4)
+
+Change-Id: I5d8dc522adfc2a745d5b856a022c35a118af396c
+---
+ src/com/android/mms/service/SendRequest.java  |  2 +-
+ .../mms/service/MmsRequestRoboTest.java       | 74 +++++++++++++++++++
+ 2 files changed, 75 insertions(+), 1 deletion(-)
+
+diff --git a/src/com/android/mms/service/SendRequest.java b/src/com/android/mms/service/SendRequest.java
+index ee7616f..a873452 100644
+--- a/src/com/android/mms/service/SendRequest.java
++++ b/src/com/android/mms/service/SendRequest.java
+@@ -227,7 +227,7 @@ public class SendRequest extends MmsRequest {
+             Uri insertUri = Telephony.Mms.Sent.CONTENT_URI;
+             // Ensure that message is updated if the uri points to an existing message in the
+             // telephpny db
+-            if (Flags.messagePromotion() && "mms".equalsIgnoreCase(mPduUri.getAuthority())) {
++            if (Flags.messagePromotion() && "mms".equals(mPduUri.getAuthority())) {
+                 long msgId = ContentUris.parseId(mPduUri);
+                 if (msgId != -1) {
+                     insertUri = ContentUris.withAppendedId(insertUri, msgId);
+diff --git a/tests/robotests/src/com/android/mms/service/MmsRequestRoboTest.java b/tests/robotests/src/com/android/mms/service/MmsRequestRoboTest.java
+index 1681a71..18a6bfb 100644
+--- a/tests/robotests/src/com/android/mms/service/MmsRequestRoboTest.java
++++ b/tests/robotests/src/com/android/mms/service/MmsRequestRoboTest.java
+@@ -18,13 +18,19 @@ package com.android.mms.service;
+ 
+ import static com.google.common.truth.Truth.assertThat;
+ 
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.anyBoolean;
+ import static org.mockito.ArgumentMatchers.anyInt;
++import static org.mockito.ArgumentMatchers.eq;
+ import static org.mockito.Mockito.doReturn;
+ import static org.mockito.Mockito.mock;
+ import static org.mockito.Mockito.spy;
++import static org.mockito.Mockito.verify;
+ import static org.mockito.Mockito.when;
+ 
++import android.app.Activity;
+ import android.content.Context;
++import android.content.pm.PackageManager;
+ import android.net.Uri;
+ import android.os.Bundle;
+ import android.telephony.CarrierConfigManager;
+@@ -38,14 +44,21 @@ import androidx.test.core.app.ApplicationProvider;
+ 
+ import com.android.mms.service.metrics.MmsStats;
+ import com.android.mms.service.metrics.PersistMmsAtomsStorage;
++import com.google.android.mms.pdu.GenericPdu;
++import com.google.android.mms.pdu.PduComposer;
++import com.google.android.mms.pdu.PduPersister;
++import com.google.android.mms.pdu.SendReq;
+ 
+ import org.junit.After;
+ import org.junit.Before;
+ import org.junit.Test;
+ import org.junit.runner.RunWith;
++import org.mockito.ArgumentCaptor;
+ import org.mockito.MockitoAnnotations;
+ import org.robolectric.RobolectricTestRunner;
+ 
++import java.lang.reflect.Field;
++
+ @RunWith(RobolectricTestRunner.class)
+ public class MmsRequestRoboTest {
+     // Mocked classes
+@@ -159,4 +172,65 @@ public class MmsRequestRoboTest {
+ 
+         assertThat(okToDownload).isTrue();
+     }
++
++    @Test
++    public void testPersistIfRequired_caseVariantAuthority_doesNotOverwrite() throws Exception {
++        // Setup mock PduPersister
++        PduPersister mockPersister = mock(PduPersister.class);
++        Field contextField = PduPersister.class.getDeclaredField("mContext");
++        contextField.setAccessible(true);
++        contextField.set(mockPersister, mContext);
++
++        Field field = PduPersister.class.getDeclaredField("sPersister");
++        field.setAccessible(true);
++        field.set(null, mockPersister);
++
++        // Grant WRITE_SMS permission to Context spy
++        doReturn(PackageManager.PERMISSION_GRANTED)
++                .when(mContext)
++                .checkPermission(eq(android.Manifest.permission.WRITE_SMS), anyInt(), anyInt());
++
++        // Prepare dummy pdu raw bytes representing a SendReq
++        SendReq sendReq = new SendReq();
++        PduComposer composer = new PduComposer(mContext, sendReq);
++        byte[] pduData = composer.make();
++        if (pduData == null) {
++            pduData = new byte[]{
++                (byte) 0x8C, (byte) 0x80, // X-Mms-Message-Type: m-send-req
++                (byte) 0x98, (byte) 0x61,
++                (byte) 0x62, (byte) 0x63, (byte) 0x00, // X-Mms-Transaction-Id: abc
++                (byte) 0x8D, (byte) 0x90, // X-Mms-MMS-Version: 1.0
++                (byte) 0x89, (byte) 0x14, // From
++                (byte) 0x8A, (byte) 0x80 // To
++            };
++        }
++
++        // We want to test case-variant authority "MMS" with ID 123
++        Uri caseVariantUri = Uri.parse("content://MMS/123");
++
++        SendRequest request = new SendRequest(mMmsService, mSubId, caseVariantUri,
++                sFakeLocationUri, /* sentIntent= */ null, /* callingUser= */ CALLING_USER,
++                /* callingPkg= */ "com.android.mms.service", mCarrierConfigValues, /* context= */ mContext,
++                sFakeMessageId, mMmsStats, mTelephonyManager);
++        request.mPduData = pduData;
++
++        // Stub mockPersister.persist to return a dummy URI
++        Uri persistedUri = Uri.parse("content://mms/sent/123");
++        when(mockPersister.persist(any(GenericPdu.class), any(Uri.class), anyBoolean(), anyBoolean(), any()))
++                .thenReturn(persistedUri);
++
++        // Call persistIfRequired
++        Uri resultUri = request.persistIfRequired(mContext, Activity.RESULT_OK, /* response= */ null);
++
++        // Capture the insertUri passed to persister.persist
++        ArgumentCaptor<Uri> uriCaptor = ArgumentCaptor.forClass(Uri.class);
++        verify(mockPersister).persist(any(GenericPdu.class), uriCaptor.capture(), anyBoolean(), anyBoolean(), any());
++
++        // Assert that the captured URI has authority "mms" and does NOT have ID appended.
++        // If it was case-insensitive (broken), it would have matched "MMS", parsed ID 123, and appended it: "content://mms/sent/123".
++        // With case-sensitive fix, it does NOT match "MMS", so it inserts to default: "content://mms/sent".
++        Uri capturedUri = uriCaptor.getValue();
++        assertThat(capturedUri.getAuthority()).isEqualTo("mms");
++        assertThat(capturedUri.toString()).isEqualTo("content://mms/sent");
++    }
+ }
+-- 
+2.56.0.385.gac671c819a-goog
+

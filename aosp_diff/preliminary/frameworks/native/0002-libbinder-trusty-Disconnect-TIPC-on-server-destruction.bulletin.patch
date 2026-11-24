@@ -1,0 +1,78 @@
+From 13da64879873d12dba61d729ad1e2d6bc663b429 Mon Sep 17 00:00:00 2001
+From: Weston Carvalho <westoncarvalho@google.com>
+Date: Mon, 29 Jun 2026 12:16:22 -0700
+Subject: [PATCH] libbinder: trusty: Disconnect TIPC on server destruction
+
+The RpcServerTrusty contains the tipc_port used to create the TIPC
+server that the RpcServerTrusty uses, but that port data is supposed to
+outlive the TIPC server. Previously, when/if the RpcServerTrusty were
+destroyed, the port data would dangle. Tear down the TIPC server before
+the RpcServerTrusty so that the TIPC event loop can't read after this
+data is freed.
+
+Bug: 514731794
+Test: presubmits
+Flag: EXEMPT BUGFIX
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:c0fbe7b7b8b7de9082eb799338e324945664664c
+Merged-In: I858df991918958a4917e113827ecd48ec78a2c66
+Change-Id: I858df991918958a4917e113827ecd48ec78a2c66
+---
+ libs/binder/trusty/RpcServerTrusty.cpp              | 9 ++++++++-
+ libs/binder/trusty/include/binder/RpcServerTrusty.h | 2 ++
+ libs/binder/trusty/include_mock/lib/tipc/tipc_srv.h | 5 +++++
+ 3 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/libs/binder/trusty/RpcServerTrusty.cpp b/libs/binder/trusty/RpcServerTrusty.cpp
+index edfa8b8622..4f0ccea41f 100644
+--- a/libs/binder/trusty/RpcServerTrusty.cpp
++++ b/libs/binder/trusty/RpcServerTrusty.cpp
+@@ -66,12 +66,19 @@ sp<RpcServerTrusty> RpcServerTrusty::make(
+     return srv;
+ }
+ 
++RpcServerTrusty::~RpcServerTrusty() {
++    if (mTipcPortCtx != nullptr) {
++        tipc_remove_service(mTipcPortCtx);
++    }
++}
++
+ RpcServerTrusty::RpcServerTrusty(std::unique_ptr<RpcTransportCtx> ctx, std::string&& portName,
+                                  std::shared_ptr<const PortAcl>&& portAcl, size_t msgMaxSize,
+                                  size_t msgQueueLen)
+       : mRpcServer(makeRpcServer(std::move(ctx))),
+         mPortName(std::move(portName)),
+-        mPortAcl(std::move(portAcl)) {
++        mPortAcl(std::move(portAcl)),
++        mTipcPortCtx(nullptr) {
+     mTipcPort.name = mPortName.c_str();
+     mTipcPort.msg_max_size = msgMaxSize;
+     mTipcPort.msg_queue_len = msgQueueLen;
+diff --git a/libs/binder/trusty/include/binder/RpcServerTrusty.h b/libs/binder/trusty/include/binder/RpcServerTrusty.h
+index b6edf1a162..f137344a43 100644
+--- a/libs/binder/trusty/include/binder/RpcServerTrusty.h
++++ b/libs/binder/trusty/include/binder/RpcServerTrusty.h
+@@ -47,6 +47,8 @@ public:
+         const void* extraData;
+     };
+ 
++    ~RpcServerTrusty();
++
+     /**
+      * Creates an RPC server listening on the given port and adds it to the
+      * Trusty handle set at |handleSet|.
+diff --git a/libs/binder/trusty/include_mock/lib/tipc/tipc_srv.h b/libs/binder/trusty/include_mock/lib/tipc/tipc_srv.h
+index 1bfb60010a..950254a2de 100644
+--- a/libs/binder/trusty/include_mock/lib/tipc/tipc_srv.h
++++ b/libs/binder/trusty/include_mock/lib/tipc/tipc_srv.h
+@@ -69,3 +69,8 @@ static inline int tipc_add_connection(struct tipc_port_ctx*, handle_t, const str
+ static inline struct tipc_hset* tipc_get_hset(struct tipc_port_ctx*) {
+     return nullptr;
+ }
++
++static inline int tipc_remove_service(struct tipc_port_ctx*) {
++    return 0;
++}
++
+-- 
+2.56.0.385.gac671c819a-goog
+

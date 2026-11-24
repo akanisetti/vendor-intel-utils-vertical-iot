@@ -1,0 +1,32 @@
+From 737883c725cb094a2bcb848ab6a046b0221b163d Mon Sep 17 00:00:00 2001
+From: HeYue <yue.he@intel.com>
+Date: Tue, 9 Sep 2025 11:07:43 +0800
+Subject: [PATCH 13/19] Fix the Antutu11 GPU cases not supported issue.
+
+Disable update acceleration structure descriptors after a set is bound.
+
+Tracked-On: OAM-133989
+Signed-off-by: HeYue <yue.he@intel.com>
+(cherry picked from commit bc90a1a970c0f69951ab6219c398d989f294fcaa)
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ src/intel/vulkan/anv_physical_device.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/intel/vulkan/anv_physical_device.c b/src/intel/vulkan/anv_physical_device.c
+index c44eac43a0a7..f1c3418d2a86 100644
+--- a/src/intel/vulkan/anv_physical_device.c
++++ b/src/intel/vulkan/anv_physical_device.c
+@@ -586,7 +586,7 @@ get_features(const struct anv_physical_device *pdevice,
+       .accelerationStructureCaptureReplay = true,
+       .accelerationStructureIndirectBuild = false, /* TODO */
+       .accelerationStructureHostCommands = false,
+-      .descriptorBindingAccelerationStructureUpdateAfterBind = rt_enabled,
++      .descriptorBindingAccelerationStructureUpdateAfterBind = false,
+ 
+       /* VK_EXT_border_color_swizzle */
+       .borderColorSwizzle = true,
+-- 
+2.34.1
+

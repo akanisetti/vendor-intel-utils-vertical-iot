@@ -1,0 +1,32 @@
+From c096f4b4aea04dc9bda21eedf7f9cd39932d424b Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 13 Nov 2026 16:11:25 +0000
+Subject: [PATCH] Enable memfd_class policycap for caas
+
+Add policycap memfd_class so memfd-backed objects are classified
+as memfd_file instead of generic tmpfs, matching existing AOSP
+allow rules for audioserver, mediaserver, mediaswcodec,
+cameraserver, and hal_audio_default. Fixes Bluetooth, Camera, and
+video playback failures caused by sys.use_memfd=true.
+
+Tracked-On: NIACP3-1704
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ policy_capabilities | 5 +++++
+ 1 file changed, 5 insertions(+)
+ create mode 100644 policy_capabilities
+
+diff --git a/policy_capabilities b/policy_capabilities
+new file mode 100644
+index 0000000..af6182c
+--- /dev/null
++++ b/policy_capabilities
+@@ -0,0 +1,5 @@
++# Enable the memfd_file security class so memfd-backed objects (FMQs used by
++# hal_audio_default, mediaserver, mediaswcodec, audioserver, cameraserver, etc.)
++# are classified as memfd_file instead of falling back to a generic tmpfs file,
++# matching the class AOSP's existing allow rules already target.
++policycap memfd_class;
+-- 
+2.34.1
+

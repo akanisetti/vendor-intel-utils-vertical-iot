@@ -1,0 +1,42 @@
+From 2ccbd76cd37d2e899e34543ebf92eec718e76a45 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 13 Oct 2026 02:28:52 +0000
+Subject: [PATCH] graphics/auto: Drop dead drm_minigbm HWC entries
+
+hwcomposer.drm_minigbm is not defined by any module and
+ro.hardware.hwcomposer is not read by the AIDL HWC3 service. The HWC
+is android.hardware.composer.hwc3-service.drm from AOSP
+external/drm_hwcomposer (device-specific/caas/product.mk).
+
+libhwcservice/libhwcservicelib came from the Intel drm-hwcomposer fork,
+which is no longer in the manifest.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ groups/graphics/auto/product.mk | 9 ---------
+ 1 file changed, 9 deletions(-)
+
+diff --git a/groups/graphics/auto/product.mk b/groups/graphics/auto/product.mk
+index e981744..49cbefc 100755
+--- a/groups/graphics/auto/product.mk
++++ b/groups/graphics/auto/product.mk
+@@ -74,15 +74,6 @@ PRODUCT_COPY_FILES += \
+ PRODUCT_COPY_FILES += \
+     vendor/intel/hardware/interfaces/graphic/dgpu-renderwlocal.cfg:vendor/etc/dgpu-renderwlocal.cfg
+ 
+-# DRM HWComposer
+-PRODUCT_PACKAGES += \
+-    hwcomposer.drm_minigbm \
+-    libhwcservice \
+-    libhwcservicelib
+-
+-PRODUCT_PROPERTY_OVERRIDES += \
+-    ro.hardware.hwcomposer=drm_minigbm
+-
+ {{#minigbm}}
+ # Mini gbm (AOSP external/minigbm, IMapper stable-C v5)
+ PRODUCT_PACKAGES += \
+-- 
+2.34.1
+

@@ -1,0 +1,162 @@
+From 32582bb782b0e42fe9788e807a946d6604c0612f Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Sat, 17 Oct 2026 06:08:00 +0000
+Subject: [PATCH] vpl-gpu-rt: Set -std=c++14 on all C++ modules missing an
+ explicit standard
+
+A real build failed compiling umc_brc.cpp:
+mfx_utils.h:342:36: error: no template named 'result_of' in namespace
+'std'. std::result_of was deprecated in C++17 and removed in C++20;
+the libumc_brc module in _studio/shared/umc/codec/Android.mk never set
+an explicit -std flag, so it falls back to the Android toolchain's
+default C++ standard, which has drifted to C++20+ over the years.
+
+mfx_utils.h's own result_of<TRes(TArgs...)> specialization changed
+upstream in intel-onevpl-26.2.3 to inherit from std::result_of
+(previously an empty, self-contained specialization with no std
+dependency at all) -- a real upstream regression for C++20-default
+toolchains, but the minimal, non-invasive fix here is to give this
+fork's affected modules the same -std=c++14 that
+_studio/mfx_lib/Android.mk already uses, rather than altering
+upstream's header logic.
+
+Audited every Android.mk module in this fork that compiles C++
+sources: only _studio/mfx_lib/Android.mk had an explicit -std flag.
+The other 10 module blocks across umc/core, umc/io, umc/codec (x2),
+mfx_logging, mfx_trace, asc (x3), and enctools/aenc had none --
+fixing all of them now rather than rediscovering each one through
+further multi-hour build-fail cycles.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ _studio/enctools/aenc/Android.mk      | 2 ++
+ _studio/shared/asc/Android.mk         | 6 ++++++
+ _studio/shared/mfx_logging/Android.mk | 2 ++
+ _studio/shared/mfx_trace/Android.mk   | 2 ++
+ _studio/shared/umc/codec/Android.mk   | 4 ++++
+ _studio/shared/umc/core/Android.mk    | 2 ++
+ _studio/shared/umc/io/Android.mk      | 2 ++
+ 7 files changed, 20 insertions(+)
+
+diff --git a/_studio/enctools/aenc/Android.mk b/_studio/enctools/aenc/Android.mk
+index 0642b0dc..b68544a4 100644
+--- a/_studio/enctools/aenc/Android.mk
++++ b/_studio/enctools/aenc/Android.mk
+@@ -21,6 +21,8 @@ LOCAL_CFLAGS := \
+ LOCAL_CFLAGS_32 := $(MFX_CFLAGS_INTERNAL_32)
+ LOCAL_CFLAGS_64 := $(MFX_CFLAGS_INTERNAL_64)
+ 
++LOCAL_CPPFLAGS += -std=c++14
++
+ LOCAL_MODULE_TAGS := optional
+ LOCAL_MODULE := libmfx_aenc
+ include $(BUILD_STATIC_LIBRARY)
+diff --git a/_studio/shared/asc/Android.mk b/_studio/shared/asc/Android.mk
+index 03c8063a..13123d3d 100644
+--- a/_studio/shared/asc/Android.mk
++++ b/_studio/shared/asc/Android.mk
+@@ -23,6 +23,8 @@ LOCAL_CFLAGS += -I $(MFX_HOME)/_studio/shared/asc/include/
+ LOCAL_CFLAGS_32 := $(MFX_CFLAGS_INTERNAL_32)
+ LOCAL_CFLAGS_64 := $(MFX_CFLAGS_INTERNAL_64)
+ 
++LOCAL_CPPFLAGS += -std=c++14
++
+ LOCAL_MODULE_TAGS := optional
+ LOCAL_MODULE := libmfx_asc_avx2
+ include $(BUILD_STATIC_LIBRARY)
+@@ -48,6 +50,8 @@ LOCAL_CFLAGS := \
+ LOCAL_CFLAGS_32 := $(MFX_CFLAGS_INTERNAL_32)
+ LOCAL_CFLAGS_64 := $(MFX_CFLAGS_INTERNAL_64)
+ 
++LOCAL_CPPFLAGS += -std=c++14
++
+ LOCAL_MODULE_TAGS := optional
+ LOCAL_MODULE := libmfx_asc_sse4
+ include $(BUILD_STATIC_LIBRARY)
+@@ -84,6 +88,8 @@ LOCAL_CFLAGS := \
+ LOCAL_CFLAGS_32 := $(MFX_CFLAGS_INTERNAL_32)
+ LOCAL_CFLAGS_64 := $(MFX_CFLAGS_INTERNAL_64)
+ 
++LOCAL_CPPFLAGS += -std=c++14
++
+ LOCAL_WHOLE_STATIC_LIBRARIES := $(LOCAL_STATIC_LIBRARIES)
+ 
+ LOCAL_MODULE_TAGS := optional
+diff --git a/_studio/shared/mfx_logging/Android.mk b/_studio/shared/mfx_logging/Android.mk
+index 93f6fc38..014cbb01 100644
+--- a/_studio/shared/mfx_logging/Android.mk
++++ b/_studio/shared/mfx_logging/Android.mk
+@@ -17,6 +17,8 @@ LOCAL_CFLAGS := \
+ LOCAL_CFLAGS_32 := $(MFX_CFLAGS_INTERNAL_32)
+ LOCAL_CFLAGS_64 := $(MFX_CFLAGS_INTERNAL_64)
+ 
++LOCAL_CPPFLAGS += -std=c++14
++
+ LOCAL_MODULE_TAGS := optional
+ LOCAL_MODULE := libmfx_logging
+ 
+diff --git a/_studio/shared/mfx_trace/Android.mk b/_studio/shared/mfx_trace/Android.mk
+index 93c71ffd..573dc969 100644
+--- a/_studio/shared/mfx_trace/Android.mk
++++ b/_studio/shared/mfx_trace/Android.mk
+@@ -17,6 +17,8 @@ LOCAL_CFLAGS := \
+ LOCAL_CFLAGS_32 := $(MFX_CFLAGS_INTERNAL_32)
+ LOCAL_CFLAGS_64 := $(MFX_CFLAGS_INTERNAL_64)
+ 
++LOCAL_CPPFLAGS += -std=c++14
++
+ LOCAL_MODULE_TAGS := optional
+ LOCAL_MODULE := libmfx_gen_trace
+ 
+diff --git a/_studio/shared/umc/codec/Android.mk b/_studio/shared/umc/codec/Android.mk
+index 7e4cf270..fdf12dff 100644
+--- a/_studio/shared/umc/codec/Android.mk
++++ b/_studio/shared/umc/codec/Android.mk
+@@ -40,6 +40,8 @@ LOCAL_CFLAGS := \
+ LOCAL_CFLAGS_32 := $(MFX_CFLAGS_INTERNAL_32)
+ LOCAL_CFLAGS_64 := $(MFX_CFLAGS_INTERNAL_64)
+ 
++LOCAL_CPPFLAGS += -std=c++14
++
+ LOCAL_SHARED_LIBRARIES := liblog libcutils
+ 
+ LOCAL_MODULE_TAGS := optional
+@@ -75,6 +77,8 @@ LOCAL_CFLAGS := \
+ LOCAL_CFLAGS_32 := $(MFX_CFLAGS_INTERNAL_32)
+ LOCAL_CFLAGS_64 := $(MFX_CFLAGS_INTERNAL_64)
+ 
++LOCAL_CPPFLAGS += -std=c++14
++
+ LOCAL_SHARED_LIBRARIES := liblog libcutils
+ 
+ LOCAL_MODULE_TAGS := optional
+diff --git a/_studio/shared/umc/core/Android.mk b/_studio/shared/umc/core/Android.mk
+index aedbfe82..365edcad 100644
+--- a/_studio/shared/umc/core/Android.mk
++++ b/_studio/shared/umc/core/Android.mk
+@@ -32,6 +32,8 @@ LOCAL_CFLAGS := \
+ LOCAL_CFLAGS_32 := $(MFX_CFLAGS_INTERNAL_32)
+ LOCAL_CFLAGS_64 := $(MFX_CFLAGS_INTERNAL_64)
+ 
++LOCAL_CPPFLAGS += -std=c++14
++
+ LOCAL_STATIC_LIBRARIES += libmfx_logging
+ 
+ LOCAL_MODULE_TAGS := optional
+diff --git a/_studio/shared/umc/io/Android.mk b/_studio/shared/umc/io/Android.mk
+index 0baf70d8..18fd39c0 100644
+--- a/_studio/shared/umc/io/Android.mk
++++ b/_studio/shared/umc/io/Android.mk
+@@ -29,6 +29,8 @@ LOCAL_CFLAGS := \
+ LOCAL_CFLAGS_32 := $(MFX_CFLAGS_INTERNAL_32)
+ LOCAL_CFLAGS_64 := $(MFX_CFLAGS_INTERNAL_64)
+ 
++LOCAL_CPPFLAGS += -std=c++14
++
+ LOCAL_MODULE_TAGS := optional
+ LOCAL_MODULE := libumc_va
+ 
+-- 
+2.34.1
+

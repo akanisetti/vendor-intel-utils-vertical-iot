@@ -1,0 +1,47 @@
+From cb3f789b07a26e3e793da05da141c5caa9c801ab Mon Sep 17 00:00:00 2001
+From: ZhuChenyanX <zhucx@intel.com>
+Date: Mon, 24 Mar 2025 08:20:22 +0000
+Subject: [PATCH 07/19] gralloc/imapper5: Fix cts DecodeGlAccuracyTest fail
+
+Previously the dataspace data for YUV is hardcoded. Since gralloc5 can
+retrieve the dataspace data now, we just set a default value and
+try to get real value from gralloc5.
+
+Adapted for Mesa 26.0.3: the defaults are set for every buffer before
+the metadata is read, so this drops the YUV early return together with
+the requested-format lookup it needed.
+
+Tracked-On: OAM-131274
+Signed-off-by: ZhuChenyanX <zhucx@intel.com>
+(cherry picked from commit ba64875c19336e60a309c6733d0df058b4c85868)
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ src/util/u_gralloc/u_gralloc_imapper5_api.cpp | 11 -----------
+ 1 file changed, 11 deletions(-)
+
+diff --git a/src/util/u_gralloc/u_gralloc_imapper5_api.cpp b/src/util/u_gralloc/u_gralloc_imapper5_api.cpp
+index d6ef93a02127..1ca8fc0f06f7 100644
+--- a/src/util/u_gralloc/u_gralloc_imapper5_api.cpp
++++ b/src/util/u_gralloc/u_gralloc_imapper5_api.cpp
+@@ -435,17 +435,6 @@ mapper_get_buffer_color_info(struct u_gralloc *gralloc,
+       return -EINVAL;
+    }
+ 
+-   int droid_format = 0;
+-   if (mapper_get_requested_format(gr, importedHandle, &droid_format)) {
+-      (void)free_buffer(gralloc, importedHandle);
+-      return -EINVAL;
+-   }
+-
+-   if (is_hal_format_yuv(droid_format)) {
+-      (void)free_buffer(gralloc, importedHandle);
+-      return 0;
+-   }
+-
+    /* optional attributes */
+    std::optional<ChromaSiting> chroma_siting;
+    {
+-- 
+2.34.1
+

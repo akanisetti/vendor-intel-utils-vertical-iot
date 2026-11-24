@@ -1,0 +1,89 @@
+From f6a241d94228523470cf1d299b4a9b8f7ffeaeb0 Mon Sep 17 00:00:00 2001
+From: Biswarup Pal <biswarupp@google.com>
+Date: Tue, 23 Jun 2026 15:04:46 -0700
+Subject: [PATCH] Revert^2 "Restrict VirtualDeviceImpl methods to device
+ owner."
+
+This reverts commit 53e47f9fae4bf7b1a91b27ef7b13b5ce63a1a471.
+
+Reason for revert: Adding proper fix for b/495646742 and b/525681148
+
+Bug: 495646742
+Change-Id: I68f9b448165a428fcc5be8e89da46837fbd6847d
+---
+ .../companion/virtual/VirtualDeviceImpl.java     | 16 ++++++++++++++--
+ .../virtual/VirtualDeviceShellCommand.java       |  2 +-
+ 2 files changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/services/companion/java/com/android/server/companion/virtual/VirtualDeviceImpl.java b/services/companion/java/com/android/server/companion/virtual/VirtualDeviceImpl.java
+index 850e8806e698..33eae6739136 100644
+--- a/services/companion/java/com/android/server/companion/virtual/VirtualDeviceImpl.java
++++ b/services/companion/java/com/android/server/companion/virtual/VirtualDeviceImpl.java
+@@ -730,6 +730,7 @@ final class VirtualDeviceImpl extends IVirtualDevice.Stub implements IBinder.Dea
+     @Override // Binder call
+     public void setListeners(@NonNull IVirtualDeviceActivityListener activityListener,
+             @NonNull IVirtualDeviceSoundEffectListener soundEffectListener) {
++        checkCallerIsDeviceOwner();
+         mActivityListener = Objects.requireNonNull(activityListener);
+         mSoundEffectListener = Objects.requireNonNull(soundEffectListener);
+     }
+@@ -949,6 +950,7 @@ final class VirtualDeviceImpl extends IVirtualDevice.Stub implements IBinder.Dea
+ 
+     @Override // Binder call
+     public void close() {
++        checkCallerIsDeviceOwner();
+         // Remove about-to-be-closed virtual device from the service before butchering it.
+         if (!mService.removeVirtualDevice(mDeviceId)) {
+             // Device is already closed.
+@@ -1394,6 +1396,7 @@ final class VirtualDeviceImpl extends IVirtualDevice.Stub implements IBinder.Dea
+     @Override // Binder call
+     public String getVirtualCameraId(@NonNull VirtualCameraConfig cameraConfig)
+             throws RemoteException {
++        checkCallerIsDeviceOwner();
+         Objects.requireNonNull(cameraConfig);
+         if (mVirtualCameraController == null) {
+             throw new UnsupportedOperationException("Virtual camera controller is not available");
+@@ -1779,9 +1782,13 @@ final class VirtualDeviceImpl extends IVirtualDevice.Stub implements IBinder.Dea
+ 
+     private void checkCallerIsDeviceOwner() {
+         final int callingUid = Binder.getCallingUid();
+-        if (callingUid != mOwnerUid && callingUid != Process.SYSTEM_UID) {
++        checkUidIsDeviceOwner(callingUid);
++    }
++
++    private void checkUidIsDeviceOwner(int uid) {
++        if (uid != mOwnerUid && uid != Process.SYSTEM_UID) {
+             throw new SecurityException(
+-                "Caller is not the owner of this virtual device");
++                    "Caller is not the owner of this virtual device");
+         }
+     }
+ 
+@@ -1967,6 +1974,11 @@ final class VirtualDeviceImpl extends IVirtualDevice.Stub implements IBinder.Dea
+     }
+ 
+     void playSoundEffect(int effectType) {
++        final int callingUid = Binder.getCallingUid();
++        // Allow virtual device owner and apps running on the virtual device to play sound effects.
++        if (!isAppRunningOnVirtualDevice(callingUid)) {
++            checkUidIsDeviceOwner(callingUid);
++        }
+         if (mSoundEffectListener == null) {
+             return;
+         }
+diff --git a/services/companion/java/com/android/server/companion/virtual/VirtualDeviceShellCommand.java b/services/companion/java/com/android/server/companion/virtual/VirtualDeviceShellCommand.java
+index 410e80a77fe2..4f170f51f27d 100644
+--- a/services/companion/java/com/android/server/companion/virtual/VirtualDeviceShellCommand.java
++++ b/services/companion/java/com/android/server/companion/virtual/VirtualDeviceShellCommand.java
+@@ -166,7 +166,7 @@ class VirtualDeviceShellCommand extends ShellCommand {
+         if (virtualDevice == null) {
+             return 1;
+         }
+-        virtualDevice.close();
++        Binder.withCleanCallingIdentity(() -> virtualDevice.close());
+         return 0;
+     }
+ 
+-- 
+2.56.0.385.gac671c819a-goog
+

@@ -1,0 +1,52 @@
+From 9106972a81ebaf68ac41a505445a202505700dba Mon Sep 17 00:00:00 2001
+From: Junyu Lai <junyulai@google.com>
+Date: Fri, 26 Jun 2026 16:24:19 +0800
+Subject: [PATCH] Fix package spoofing in getMessenger
+
+Verify caller package name when isSystem evaluates to true to prevent
+registering custom display IDs for unauthorized package names.
+
+Surgical resolution of merge conflict: Removed feature flag checks
+(mFeatureFlags.validateCallerPackage()) since the feature flag system
+is not present on this branch, and instead perform the package
+verification check unconditionally when the caller package name
+evaluates to system.
+
+Bug: 515051007
+Test: atest FrameworksWifiTests:com.android.server.wifi.p2p.WifiP2pServiceImplTest
+Flag: EXEMPT CVE_FIX
+
+TAG=agy
+CONV=c711ca70-bc8c-45d1-9993-abddba6e3586
+
+(cherry picked from commit 129a667d459d18de6087fedc17b21df57fa74678)
+Merged-In: I23219ad606f095b15220d54b19b909fa009d194c
+Change-Id: I23219ad606f095b15220d54b19b909fa009d194c
+---
+ .../java/com/android/server/wifi/p2p/WifiP2pServiceImpl.java   | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/service/java/com/android/server/wifi/p2p/WifiP2pServiceImpl.java b/service/java/com/android/server/wifi/p2p/WifiP2pServiceImpl.java
+index ff1401bf55..f79af18d17 100644
+--- a/service/java/com/android/server/wifi/p2p/WifiP2pServiceImpl.java
++++ b/service/java/com/android/server/wifi/p2p/WifiP2pServiceImpl.java
+@@ -730,6 +730,8 @@ public class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
+         final DeathRecipient mDeathRecipient;
+         final Messenger mMessenger;
+         final WorkSource mWorkSource;
++        // TODO(b/515051007): mDisplayId is unused and should be removed.
++        @Deprecated
+         final int mDisplayId;
+     }
+     private final Object mLock = new Object();
+@@ -1076,6 +1078,7 @@ public class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
+         // get the DisplayId of the caller (if available)
+         int displayId = Display.DEFAULT_DISPLAY;
+         if (mWifiPermissionsUtil.isSystem(packageName, callerUid)) {
++            mWifiPermissionsUtil.checkPackage(callerUid, packageName);
+             displayId = extras.getInt(WifiP2pManager.EXTRA_PARAM_KEY_DISPLAY_ID,
+                     Display.DEFAULT_DISPLAY);
+         }
+-- 
+2.56.0.385.gac671c819a-goog
+

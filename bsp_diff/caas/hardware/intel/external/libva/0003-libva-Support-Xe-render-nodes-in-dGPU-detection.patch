@@ -1,0 +1,123 @@
+From e0133f39defdd50e5db81a1609ef53915b266363 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Tue, 3 Nov 2026 15:25:22 +0000
+Subject: [PATCH] libva: Support Xe render nodes in dGPU detection
+
+va_SelectIntelDevice()'s backend check only matched driver name
+"i915", so on Xe-only configurations (no i915 KMD) every render
+node was rejected and the restored vaGetDisplay() path could never
+find a candidate DRM device, breaking hardware video entirely.
+
+Accept both "i915" and "xe" driver names, and dispatch
+va_IsIntelDgpu() to a backend-appropriate memory-region query
+(DRM_IOCTL_I915_QUERY vs DRM_IOCTL_XE_DEVICE_QUERY) instead of
+issuing i915-specific ioctls against Xe nodes.
+
+xe_drm.h comes from bionic's kernel UAPI headers (<drm/xe_drm.h>,
+currently Linux 6.19): upstream libdrm does not ship it, so the
+copy carried in drm-intel is no longer needed.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ va/android/va_android.cpp | 53 ++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 49 insertions(+), 4 deletions(-)
+
+diff --git a/va/android/va_android.cpp b/va/android/va_android.cpp
+index 3e3e8ac..62cd1e5 100644
+--- a/va/android/va_android.cpp
++++ b/va/android/va_android.cpp
+@@ -41,6 +41,7 @@
+ #include <errno.h>
+ #include <xf86drm.h>
+ #include <i915_drm.h>
++#include <drm/xe_drm.h> /* kernel UAPI from bionic; libdrm does not ship it */
+ 
+ #if defined(ANDROID)
+ #include <cutils/properties.h>
+@@ -67,7 +68,42 @@ static void va_DisplayContextDestroy(
+     free(pDisplayContext);
+ }
+ 
+-static int va_IsIntelDgpu(int fd)
++static int va_IsIntelDgpuXe(int fd)
++{
++    struct drm_xe_device_query query = {
++        .query = DRM_XE_DEVICE_QUERY_MEM_REGIONS,
++    };
++    if (drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query) || !query.size) {
++        va_loge("drv: Failed to DRM_XE_DEVICE_QUERY_MEM_REGIONS");
++        return 0;
++    }
++
++    struct drm_xe_query_mem_regions *meminfo = (struct drm_xe_query_mem_regions *)calloc(1, query.size);
++    if (!meminfo) {
++        va_loge("drv: %s Exit due to memory allocation failure", __func__);
++        return 0;
++    }
++
++    query.data = (uintptr_t)meminfo;
++    if (drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query)) {
++        free(meminfo);
++        va_loge("%s:%d DRM_XE_DEVICE_QUERY_MEM_REGIONS error", __FUNCTION__, __LINE__);
++        return 0;
++    }
++
++    int has_local = 0;
++    for (uint32_t i = 0; i < meminfo->num_mem_regions; i++) {
++        if (meminfo->mem_regions[i].mem_class == DRM_XE_MEM_REGION_CLASS_VRAM) {
++            has_local = 1;
++            break;
++        }
++    }
++
++    free(meminfo);
++    return has_local;
++}
++
++static int va_IsIntelDgpuI915(int fd)
+ {
+     struct drm_i915_query_item item = {
+         .query_id = DRM_I915_QUERY_MEMORY_REGIONS,
+@@ -112,6 +148,13 @@ static int va_IsIntelDgpu(int fd)
+     free(meminfo);
+     return has_local;
+ }
++
++// Dispatches to the backend-appropriate memory-region query -- the i915
++// ioctl is a no-op (or worse, undefined) on Xe nodes and vice versa.
++static int va_IsIntelDgpu(int fd, bool is_xe)
++{
++    return is_xe ? va_IsIntelDgpuXe(fd) : va_IsIntelDgpuI915(fd);
++}
+ static int va_SelectIntelDevice()
+ {
+     int use_dgpu = 1;
+@@ -135,18 +178,20 @@ static int va_SelectIntelDevice()
+             close(temp);
+             continue;
+         }
+-        if (strncmp(version->name, "i915", strlen("i915")) == 0) {
++        bool is_i915 = strncmp(version->name, "i915", strlen("i915")) == 0;
++        bool is_xe = strncmp(version->name, "xe", strlen("xe")) == 0;
++        if (is_i915 || is_xe) {
+             intel_gpu_index = i;
+             // If specify to use dgpu and found dgpu, return the first found dgpu,
+             // else if specify to use igpu and found igpu, return the first found igpu,
+             // otherwise use the last available intel node for codec
+-            if (use_dgpu && va_IsIntelDgpu(temp)) {
++            if (use_dgpu && va_IsIntelDgpu(temp, is_xe)) {
+                 drmFreeVersion(version);
+                 close(temp);
+                 va_logd("%s:%d find dgpu", __FUNCTION__, __LINE__);
+                 break;
+             }
+-            if (!use_dgpu && !va_IsIntelDgpu(temp)) {
++            if (!use_dgpu && !va_IsIntelDgpu(temp, is_xe)) {
+                 va_logd("%s:%d find igpu", __FUNCTION__, __LINE__);
+                 drmFreeVersion(version);
+                 close(temp);
+-- 
+2.34.1
+

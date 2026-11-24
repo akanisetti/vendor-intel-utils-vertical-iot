@@ -1,0 +1,102 @@
+name: Comment and label PR when approved
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  comment-on-approval:
+    if: github.event.review.state == 'approved'
+    runs-on: innersource.prod.amr.dind
+
+    steps:
+
+      # ============================================
+      # Step 1: Team membership check (ORG_TOKEN)
+      # ============================================
+      - name: Check reviewer in admin team
+        id: team_check
+        run: |
+          reviewer="${{ github.event.review.user.login }}"
+          org="${{ github.repository_owner }}"
+          team_slug="os-android-edge-bsp-vendor-intel-vertical-utils-admin"
+
+          echo "Reviewer: $reviewer"
+
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${{ secrets.ORG_TOKEN }}" \
+            https://api.github.com/orgs/$org/teams/$team_slug/memberships/$reviewer)
+
+          echo "HTTP status: $response"
+
+          if [ "$response" -eq 200 ]; then
+            echo "is_member=true" >> $GITHUB_OUTPUT
+            echo "Reviewer is part of admin team"
+          else
+            echo "is_member=false" >> $GITHUB_OUTPUT
+            echo "Reviewer NOT in admin team"
+          fi
+
+      # ============================================
+      # Step 2: Proceed only if team check passed
+      # ============================================
+      - name: Validate comment, label and trigger CI
+        if: steps.team_check.outputs.is_member == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const prNumber = context.payload.pull_request.number;
+
+            console.log("PR:", prNumber);
+
+            // ============================================
+            // Fetch PR comments (uses GITHUB_TOKEN)
+            // ============================================
+            const comments = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: prNumber
+            });
+
+            // ============================================
+            // Check "Trigger CI" (case-insensitive)
+            // ============================================
+            const triggerExists = comments.data.some(c =>
+              c.body && /trigger\s*ci/i.test(c.body)
+            );
+
+            if (!triggerExists) {
+              console.log("No 'Trigger CI' comment found. Skipping.");
+              return;
+            }
+
+            console.log("'Trigger CI' comment exists.");
+
+            // ============================================
+            // Add label
+            // ============================================
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: prNumber,
+              labels: ['approved']
+            });
+
+            console.log("Approved label added.");
+
+            // ============================================
+            // Add comment (triggers Jenkins)
+            // ============================================
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: prNumber,
+              body: "Trigger CI"
+            });
+
+            console.log("Trigger CI comment added.");

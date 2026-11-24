@@ -1,0 +1,75 @@
+From ce5b43db7cbb853e6807b7b92eea2a254a6c5d75 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Fri, 7 Aug 2026 09:33:20 +0000
+Subject: [PATCH] Upgrade Health AIDL V4->V5 and update Lights API
+
+changes:
+- health/aidl/Android.bp: upgrade android.hardware.health-V3-ndk to
+  V5-ndk in both libhealth_aidl_defaults and
+  libhealth_aidl_charger_defaults for A17 Health HAL compatibility
+  (folds in the former common/vendor/intel/hardware/interfaces/0001
+  V3 -> V4 update)
+- health/aidl/android.hardware.health-service.intel.xml: bump Health
+  HAL AIDL version from 4 to 5 for VINTF validation
+- lights/aidl/main.rs: update rustutils system properties API from
+  rustutils::system_properties::read to rustutils::android::
+  system_properties::read (A17 Rust library reorganization)
+
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ health/aidl/Android.bp                                | 4 ++--
+ health/aidl/android.hardware.health-service.intel.xml | 2 +-
+ lights/aidl/main.rs                                   | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/health/aidl/Android.bp b/health/aidl/Android.bp
+index ab13d03..e4caca9 100644
+--- a/health/aidl/Android.bp
++++ b/health/aidl/Android.bp
+@@ -20,7 +20,7 @@ cc_defaults {
+         "libcutils",
+         "liblog",
+         "libutils",
+-        "android.hardware.health-V3-ndk",
++        "android.hardware.health-V5-ndk",
+ 
+         // TODO(b/177269435): remove when BatteryMonitor works with AIDL HealthInfo.
+         "libhidlbase",
+@@ -39,7 +39,7 @@ cc_defaults {
+     name: "libhealth_aidl_charger_defaults.intel",
+     shared_libs: [
+         // common
+-        "android.hardware.health-V3-ndk",
++        "android.hardware.health-V5-ndk",
+         "libbase",
+         "libcutils",
+         "liblog",
+diff --git a/health/aidl/android.hardware.health-service.intel.xml b/health/aidl/android.hardware.health-service.intel.xml
+index 8ddfbda..14828d4 100644
+--- a/health/aidl/android.hardware.health-service.intel.xml
++++ b/health/aidl/android.hardware.health-service.intel.xml
+@@ -1,7 +1,7 @@
+ <manifest version="1.0" type="device">
+     <hal format="aidl">
+         <name>android.hardware.health</name>
+-        <version>4</version>
++        <version>5</version>
+         <fqname>IHealth/default</fqname>
+     </hal>
+ </manifest>
+diff --git a/lights/aidl/main.rs b/lights/aidl/main.rs
+index 9f9d522..d31c104 100644
+--- a/lights/aidl/main.rs
++++ b/lights/aidl/main.rs
+@@ -26,7 +26,7 @@ const LOG_TAG: &str = "lights_service_intel_rust";
+ use log::LevelFilter;
+ 
+ fn is_debuggable() -> bool {
+-    rustutils::system_properties::read("ro.debuggable")
++    rustutils::android::system_properties::read("ro.debuggable")
+ 	.ok()
+ 	.flatten()
+ 	.map(|v| v == "1")
+-- 
+2.34.1
+

@@ -1,0 +1,41 @@
+From 6b3d8adbe1c9495acbf3f9092f92623aea3541f7 Mon Sep 17 00:00:00 2001
+From: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+Date: Tue, 13 Oct 2026 02:36:45 +0000
+Subject: [PATCH 1/6] hwc: Use 2560x1600 for headless mode
+
+Celadon runs headless (no connector attached) for streaming use cases
+and expects a 2560x1600 virtual panel instead of the default 1024x768.
+
+Port of the Intel drm-hwcomposer fork commit 17c99d3 ("Change headless
+display with 2560x1600 display mode"). The constants are changed
+directly instead of through a build flag.
+
+Tracked-On: NIACP3-1589
+Signed-off-by: Basanagouda Nagappa Koppad <basanagouda.nagappa.koppad@intel.com>
+---
+ hwc/HwcDisplayConfigs.cpp | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/hwc/HwcDisplayConfigs.cpp b/hwc/HwcDisplayConfigs.cpp
+index 027ad92..854b7e8 100644
+--- a/hwc/HwcDisplayConfigs.cpp
++++ b/hwc/HwcDisplayConfigs.cpp
+@@ -24,10 +24,11 @@
+ #include "utils/log.h"
+ #include "utils/properties.h"
+ 
+-constexpr uint32_t kHeadlessModeDisplayWidthMm = 163;
+-constexpr uint32_t kHeadlessModeDisplayHeightMm = 122;
+-constexpr uint32_t kHeadlessModeDisplayWidthPx = 1024;
+-constexpr uint32_t kHeadlessModeDisplayHeightPx = 768;
++/* Celadon headless (streaming) mode: 2560x1600 */
++constexpr uint32_t kHeadlessModeDisplayWidthMm = 173;
++constexpr uint32_t kHeadlessModeDisplayHeightMm = 108;
++constexpr uint32_t kHeadlessModeDisplayWidthPx = 2560;
++constexpr uint32_t kHeadlessModeDisplayHeightPx = 1600;
+ constexpr uint32_t kHeadlessModeDisplayVRefresh = 60;
+ constexpr uint32_t kSyncLen = 10;
+ constexpr uint32_t kBackPorch = 10;
+-- 
+2.34.1
+

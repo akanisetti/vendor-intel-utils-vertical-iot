@@ -1,0 +1,253 @@
+From 4153f221dfac2f7ea6830b108fc62c6a4237228b Mon Sep 17 00:00:00 2001
+From: Chloe Dai <chloedai@google.com>
+Date: Fri, 3 Jul 2026 03:31:13 +0000
+Subject: [PATCH] Fix infinite loop and logcat spam in NXP NFC HAL teardown
+
+When nxpncihal_ctrl.gDrvCfg.nClientId or message queues are zeroed out during HAL teardown, phDal4Nfc_msgrcv (or MessageQueue_receive) immediately returns -1. Previously, worker thread loops (phNxpNciHal_client_thread, ReaderThread, WriterThread) handled a -1 return value by logging "received bad message" and executing continue.
+
+Because continue skipped the thread_running exit check and msgrcv on a zeroed handle returns -1 without waiting, the threads entered a 100% CPU tight loop. This flooded logcat with error messages and filled log buffers during test execution.
+
+To fix this, when message receive returns -1, the loops now check whether thread_running is false or the message queue/client ID is 0, and break out of the loop immediately to exit cleanly.
+
+Bug: 527379803
+Bug: 522375782
+Test: atest CtsNfcTestCases
+Test: atest VtsAidlHalNfcTargetTest
+Test: atest VtsNfcBehaviorChangesTest
+Test: atest NfcNciUnitTests
+Test: atest NfcTestCases
+Test: atest NfcServiceTest
+Test: atest HostEmulationManagerTest
+Flag: EXEMPT BUGFIX
+Change-Id: Ia366fe7d7f60a65c0e9b103a9212a153d6cb9d72
+Merged-In: Ia366fe7d7f60a65c0e9b103a9212a153d6cb9d72
+(cherry picked from commit e8fc73e9803579a9b02bf46c4b75e01deba3df8d)
+---
+ pn8x/halimpl/hal/phNxpNciHal.cc               | 19 +++++++++++++++++--
+ snxxx/halimpl/hal/phNxpNciHal.cc              | 16 ++++++++++++++--
+ snxxx/halimpl_v2/hal/phNxpNciHal.cc           |  3 +++
+ .../hal/phNxpNciHal_ReaderThread.cc           |  5 +++++
+ .../hal/phNxpNciHal_WriterThread.cc           |  5 +++++
+ .../src/pal/system_ext/WriterThread.cpp       |  5 +++++
+ 6 files changed, 49 insertions(+), 4 deletions(-)
+
+diff --git a/pn8x/halimpl/hal/phNxpNciHal.cc b/pn8x/halimpl/hal/phNxpNciHal.cc
+index a246e52..db0e084 100644
+--- a/pn8x/halimpl/hal/phNxpNciHal.cc
++++ b/pn8x/halimpl/hal/phNxpNciHal.cc
+@@ -178,6 +178,11 @@ static void* phNxpNciHal_client_thread(void* arg) {
+     /* Fetch next message from the NFC stack message queue */
+     if (phDal4Nfc_msgrcv(p_nxpncihal_ctrl->gDrvCfg.nClientId, &msg, 0, 0) ==
+         -1) {
++      if (p_nxpncihal_ctrl->thread_running == 0 ||
++          p_nxpncihal_ctrl->gDrvCfg.nClientId == 0) {
++        NXPLOG_NCIHAL_E("NFC client thread terminating");
++        break;
++      }
+       NXPLOG_NCIHAL_E("NFC client received bad message");
+       continue;
+     }
+@@ -385,8 +390,11 @@ static NFCSTATUS phNxpNciHal_fw_download(void) {
+   if (status != NFCSTATUS_SUCCESS) {
+     if (NFCSTATUS_SUCCESS != phNxpNciHal_fw_mw_ver_check()) {
+       NXPLOG_NCIHAL_D("Chip Version Middleware Version mismatch!!!!");
++      intptr_t client_id = nxpncihal_ctrl.gDrvCfg.nClientId;
++      nxpncihal_ctrl.gDrvCfg.nClientId = 0;
+       phOsalNfc_Timer_Cleanup();
+       phTmlNfc_Shutdown_CleanUp();
++      phDal4Nfc_msgrelease(client_id);
+       status = NFCSTATUS_FAILED;
+     } else {
+       NXPLOG_NCIHAL_E("FW download failed, Continue NFCC init");
+@@ -2066,8 +2074,11 @@ NFCSTATUS phNxpNciHalRFConfigCmdRecSequence() {
+           (pphTmlNfc_TransactCompletionCb_t)&phNxpNciHal_read_complete, NULL);
+       if (status != NFCSTATUS_PENDING) {
+         NXPLOG_NCIHAL_E("TML Read status error status = %x", status);
++        intptr_t client_id = nxpncihal_ctrl.gDrvCfg.nClientId;
++        nxpncihal_ctrl.gDrvCfg.nClientId = 0;
+         phOsalNfc_Timer_Cleanup();
+         phTmlNfc_Shutdown();
++        phDal4Nfc_msgrelease(client_id);
+         status = NFCSTATUS_FAILED;
+       }
+       break;
+@@ -2185,6 +2196,8 @@ int phNxpNciHal_close(bool bShutdown) {
+     status = phTmlNfc_ReadAbort();
+     status = phTmlNfc_WriteAbort();
+ 
++    intptr_t client_id = nxpncihal_ctrl.gDrvCfg.nClientId;
++    nxpncihal_ctrl.gDrvCfg.nClientId = 0;
+     phOsalNfc_Timer_Cleanup();
+ 
+     status = phTmlNfc_Shutdown();
+@@ -2195,7 +2208,7 @@ int phNxpNciHal_close(bool bShutdown) {
+ 
+     phTmlNfc_CleanUp();
+ 
+-    phDal4Nfc_msgrelease(nxpncihal_ctrl.gDrvCfg.nClientId);
++    phDal4Nfc_msgrelease(client_id);
+ 
+     memset(&nxpncihal_ctrl, 0x00, sizeof(nxpncihal_ctrl));
+ 
+@@ -2235,6 +2248,8 @@ int phNxpNciHal_Minclose(void) {
+     status = phTmlNfc_ReadAbort();
+     status = phTmlNfc_WriteAbort();
+ 
++    intptr_t client_id = nxpncihal_ctrl.gDrvCfg.nClientId;
++    nxpncihal_ctrl.gDrvCfg.nClientId = 0;
+     phOsalNfc_Timer_Cleanup();
+ 
+     status = phTmlNfc_Shutdown();
+@@ -2245,7 +2260,7 @@ int phNxpNciHal_Minclose(void) {
+ 
+     phTmlNfc_CleanUp();
+ 
+-    phDal4Nfc_msgrelease(nxpncihal_ctrl.gDrvCfg.nClientId);
++    phDal4Nfc_msgrelease(client_id);
+ 
+     memset(&nxpncihal_ctrl, 0x00, sizeof(nxpncihal_ctrl));
+ 
+diff --git a/snxxx/halimpl/hal/phNxpNciHal.cc b/snxxx/halimpl/hal/phNxpNciHal.cc
+index 2e0edd8..9a232f5 100644
+--- a/snxxx/halimpl/hal/phNxpNciHal.cc
++++ b/snxxx/halimpl/hal/phNxpNciHal.cc
+@@ -273,6 +273,11 @@ void* phNxpNciHal_client_thread(void* arg) {
+     /* Fetch next message from the NFC stack message queue */
+     if (phDal4Nfc_msgrcv(p_nxpncihal_ctrl->gDrvCfg.nClientId, &msg, 0, 0) ==
+         -1) {
++      if (p_nxpncihal_ctrl->thread_running == 0 ||
++          p_nxpncihal_ctrl->gDrvCfg.nClientId == 0) {
++        NXPLOG_NCIHAL_E("NFC client thread terminating");
++        break;
++      }
+       NXPLOG_NCIHAL_E("NFC client received bad message");
+       continue;
+     }
+@@ -490,9 +495,12 @@ static NFCSTATUS phNxpNciHal_force_fw_download(uint8_t seq_handler_offset,
+       fw_download_success = TRUE;
+     } else if (status == NFCSTATUS_FW_CHECK_INTEGRITY_FAILED ||
+                (phNxpNciHal_fw_mw_ver_check() != NFCSTATUS_SUCCESS)) {
++      intptr_t client_id = nxpncihal_ctrl.gDrvCfg.nClientId;
++      nxpncihal_ctrl.gDrvCfg.nClientId = 0;
+       phOsalNfc_Timer_Cleanup();
+       phNxpTempMgr::GetInstance().Reset();
+       phTmlNfc_Shutdown_CleanUp();
++      phDal4Nfc_msgrelease(client_id);
+       return NFCSTATUS_CMD_ABORTED;
+     }
+ 
+@@ -2567,6 +2575,8 @@ close_and_return:
+     status = phTmlNfc_ReadAbort();
+     status = phTmlNfc_WriteAbort();
+ 
++    intptr_t client_id = nxpncihal_ctrl.gDrvCfg.nClientId;
++    nxpncihal_ctrl.gDrvCfg.nClientId = 0;
+     phOsalNfc_Timer_Cleanup();
+ 
+     status = phTmlNfc_Shutdown();
+@@ -2578,7 +2588,7 @@ close_and_return:
+     phNxpTempMgr::GetInstance().Reset();
+     phTmlNfc_CleanUp();
+ 
+-    phDal4Nfc_msgrelease(nxpncihal_ctrl.gDrvCfg.nClientId);
++    phDal4Nfc_msgrelease(client_id);
+ 
+     memset(&nxpncihal_ctrl, 0x00, sizeof(nxpncihal_ctrl));
+ 
+@@ -2648,6 +2658,8 @@ void phNxpNciHal_clean_resources() {
+     if (status != NFCSTATUS_SUCCESS) {
+       NXPLOG_TML_E("phTmlNfc_ReadAbort Failed");
+     }
++    intptr_t client_id = nxpncihal_ctrl.gDrvCfg.nClientId;
++    nxpncihal_ctrl.gDrvCfg.nClientId = 0;
+     phOsalNfc_Timer_Cleanup();
+ 
+     status = phTmlNfc_Shutdown();
+@@ -2663,7 +2675,7 @@ void phNxpNciHal_clean_resources() {
+     phNxpTempMgr::GetInstance().Reset();
+     phTmlNfc_CleanUp();
+ 
+-    phDal4Nfc_msgrelease(nxpncihal_ctrl.gDrvCfg.nClientId);
++    phDal4Nfc_msgrelease(client_id);
+ 
+     memset(&nxpncihal_ctrl, 0x00, sizeof(nxpncihal_ctrl));
+   }
+diff --git a/snxxx/halimpl_v2/hal/phNxpNciHal.cc b/snxxx/halimpl_v2/hal/phNxpNciHal.cc
+index dd965b7..afe6e88 100644
+--- a/snxxx/halimpl_v2/hal/phNxpNciHal.cc
++++ b/snxxx/halimpl_v2/hal/phNxpNciHal.cc
+@@ -321,6 +321,7 @@ static NFCSTATUS phNxpNciHal_force_fw_download(uint8_t seq_handler_offset,
+       fw_download_success = true;
+     } else if (status == NFCSTATUS_FW_CHECK_INTEGRITY_FAILED ||
+                (phNxpNciHal_fw_mw_ver_check() != NFCSTATUS_SUCCESS)) {
++      nxpncihal_ctrl.gDrvCfg.nClientId = 0;
+       phOsalNfc_Timer_Cleanup();
+       phNxpTempMgr::GetInstance().Reset();
+       phTmlNfc_Shutdown_CleanUp();
+@@ -2304,6 +2305,7 @@ close_and_return:
+     phNxpNciHal_complete(NFCSTATUS_SUCCESS, PHNXP_NCIHAL_OP_CLOSE);
+     /* Abort any pending read and write */
+     (void)phTmlNfc_ReadAbort();
++    nxpncihal_ctrl.gDrvCfg.nClientId = 0;
+     phOsalNfc_Timer_Cleanup();
+ 
+     (void)phTmlNfc_Shutdown();
+@@ -2365,6 +2367,7 @@ void phNxpNciHal_clean_resources() {
+     if (status != NFCSTATUS_SUCCESS) {
+       NXPLOG_TML_E("phTmlNfc_ReadAbort Failed");
+     }
++    nxpncihal_ctrl.gDrvCfg.nClientId = 0;
+     phOsalNfc_Timer_Cleanup();
+ 
+     status = phTmlNfc_Shutdown();
+diff --git a/snxxx/halimpl_v2/hal/phNxpNciHal_ReaderThread.cc b/snxxx/halimpl_v2/hal/phNxpNciHal_ReaderThread.cc
+index cf1f1cc..7dd505f 100644
+--- a/snxxx/halimpl_v2/hal/phNxpNciHal_ReaderThread.cc
++++ b/snxxx/halimpl_v2/hal/phNxpNciHal_ReaderThread.cc
+@@ -99,6 +99,11 @@ void phNxpNciHal_ReaderThread::Run() {
+   while (thread_running.load()) {
+     memset(&msg, 0x00, sizeof(phLibNfc_Message_t));
+     if (phDal4Nfc_msgrcv(reader_queue, &msg, 0, 0) == -1) {
++      if (!thread_running.load() || reader_queue == 0) {
++        NXPLOG_NCIHAL_E(
++            "NFC reader thread is not running or queue is invalid, breaking");
++        break;
++      }
+       NXPLOG_NCIHAL_E("NFC reader received bad message");
+       continue;
+     }
+diff --git a/snxxx/halimpl_v2/hal/phNxpNciHal_WriterThread.cc b/snxxx/halimpl_v2/hal/phNxpNciHal_WriterThread.cc
+index d572ad2..946c8ea 100644
+--- a/snxxx/halimpl_v2/hal/phNxpNciHal_WriterThread.cc
++++ b/snxxx/halimpl_v2/hal/phNxpNciHal_WriterThread.cc
+@@ -113,6 +113,11 @@ void phNxpNciHal_WriterThread::Run() {
+   while (thread_running.load()) {
+     memset(&msg, 0x00, sizeof(phLibNfc_Message_t));
+     if (phDal4Nfc_msgrcv(writer_queue, &msg, 0, 0) == -1) {
++      if (!thread_running.load() || writer_queue == 0) {
++        NXPLOG_NCIHAL_E(
++            "WriterThread exiting due to msgrcv failure during stop");
++        break;
++      }
+       NXPLOG_NCIHAL_E("WriterThread received bad message");
+       continue;
+     }
+diff --git a/vendor_extns/libnfc_vendor_extn/src/pal/system_ext/WriterThread.cpp b/vendor_extns/libnfc_vendor_extn/src/pal/system_ext/WriterThread.cpp
+index 42a1f5c..b2220f2 100644
+--- a/vendor_extns/libnfc_vendor_extn/src/pal/system_ext/WriterThread.cpp
++++ b/vendor_extns/libnfc_vendor_extn/src/pal/system_ext/WriterThread.cpp
+@@ -109,6 +109,11 @@ void WriterThread::Run() {
+   while (thread_running.load()) {
+     memset(&msg, 0x00, sizeof(phLibNfc_Message_t));
+     if (MessageQueue_receive(writer_queue, &msg, 0, 0) == -1) {
++      if (!thread_running.load() || writer_queue == 0) {
++        NXPLOG_EXTNS_E(NXPLOG_ITEM_NXP_GEN_EXTN,
++                       "WriterThread exiting due to thread stop or null queue");
++        break;
++      }
+       NXPLOG_EXTNS_E(NXPLOG_ITEM_NXP_GEN_EXTN,
+                      "WriterThread received bad message");
+       continue;
+-- 
+2.56.0.385.gac671c819a-goog
+

@@ -1,0 +1,68 @@
+From 8fa92fb63f05bf1cef7be3f04d5a57685f636878 Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Wed, 21 Oct 2026 05:39:05 +0000
+Subject: [PATCH] vpl-gpu-rt: Re-apply deliberate revert of upstream VP9 decode
+ PR #6509
+
+This fork deliberately reverted upstream's "[Decode] Complete cur
+frame in child thread to unlock res (#6509)" (commit 0c9177cc,
+Tracked-On: OAM-118913), removing CompleteCurFrame() and its two call
+sites. Unlike the other restorations in this series, this one isn't
+fork-authored code the overlay discarded -- it's an upstream feature
+the fork explicitly decided NOT to carry, and the intel-onevpl-26.2.3
+overlay silently reintroduced it since the overlay takes upstream's
+current tree wholesale. Re-applied the same removal.
+
+Checked the related h265_dec task_supplier/va_supplier revert pair
+(commits e342bfa8 + c1dbbd67): confirmed they fully cancel out except
+for a residual change gated behind #ifdef ENABLE_WIDEVINE, which is
+never defined in this build (out of scope) -- no action needed there.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ .../decode/vp9/src/mfx_vp9_dec_decode_hw.cpp       | 14 --------------
+ 1 file changed, 14 deletions(-)
+
+diff --git a/_studio/mfx_lib/decode/vp9/src/mfx_vp9_dec_decode_hw.cpp b/_studio/mfx_lib/decode/vp9/src/mfx_vp9_dec_decode_hw.cpp
+index 3c18a195..5cc83e19 100644
+--- a/_studio/mfx_lib/decode/vp9/src/mfx_vp9_dec_decode_hw.cpp
++++ b/_studio/mfx_lib/decode/vp9/src/mfx_vp9_dec_decode_hw.cpp
+@@ -276,18 +276,6 @@ public:
+         }
+     }
+ 
+-    void CompleteCurFrame(UMC::FrameMemID frameId)
+-    {
+-        auto find_it = std::find_if(m_submittedFrames.begin(), m_submittedFrames.end(),
+-            [frameId](const UMC_VP9_DECODER::VP9DecoderFrame & item) { return item.currFrame == frameId; });
+-
+-        if (find_it != m_submittedFrames.end() && find_it->isDecoded)
+-        {
+-            UnLockResources(*find_it);
+-            m_submittedFrames.erase(find_it);
+-        }
+-    }
+-
+     void CompleteFrames()
+     {
+         for (auto it = m_submittedFrames.begin(); it != m_submittedFrames.end(); )
+@@ -943,7 +931,6 @@ mfxStatus MFX_CDECL VP9DECODERoutine(void *p_state, void * /* pp_param */, mfxU3
+             decoder.m_surface_source->SetFreeSurfaceAllowedFlag(false);
+         }
+         decoder.m_framesStorage->DecodeFrame(data.currFrameId);
+-        decoder.m_framesStorage->CompleteCurFrame(data.currFrameId);
+ 
+         return MFX_ERR_NONE;
+     }
+@@ -981,7 +968,6 @@ mfxStatus MFX_CDECL VP9DECODERoutine(void *p_state, void * /* pp_param */, mfxU3
+     if (data.currFrameId != -1)
+         decoder.m_surface_source->DecreaseReference(data.currFrameId);
+     decoder.m_framesStorage->DecodeFrame(data.currFrameId);
+-    decoder.m_framesStorage->CompleteCurFrame(data.currFrameId);
+ 
+     return MFX_TASK_DONE;
+ }
+-- 
+2.34.1
+

@@ -1,0 +1,97 @@
+From dec1cd189920893a847693dfd908747f0a2fefec Mon Sep 17 00:00:00 2001
+From: "Suresh, Prashanth" <prashanth.suresh@intel.com>
+Date: Sat, 17 Oct 2026 15:24:50 +0000
+Subject: [PATCH] libvpl: Restore fork-local Widevine extension buffers in
+ mfxstructures.h
+
+A real build failed compiling mediasdk_c2's widevine crypto glue
+(mfx_c2_widevine_crypto_defs.h, mfx_frame_constructor.h) with 6
+"unknown type name"/"undeclared identifier" errors for
+EncryptionScheme, mfxExtDecryptConfig, and SubsampleEntry.
+
+These are not external Widevine CDM SDK types -- they are a
+self-contained, fork-local addition this team made directly in
+api/vpl/mfxstructures.h (commit 994df235, "Support widevine",
+Tracked-On: OAM-120419), never upstreamed to the real intel/libvpl.
+The v2.16.0 overlay (earlier in this series) silently discarded this
+41-line addition, since the overlay procedure only excluded
+libvpl/Android.bp, api/Android.bp and examples/Android.bp -- not this
+fork-local customization layered into an otherwise upstream-tracked
+header.
+
+Restored verbatim from the pre-upgrade commit, at the equivalent
+insertion points in the new file (content shifted due to unrelated
+upstream additions around it, e.g. the new ONEVPL_EXPERIMENTAL AI
+encode block and mfxExtTuneEncodeQuality). Confirmed
+mediasdk_c2 is the only consumer of these types/buffer IDs in the
+tree (vpl-gpu-rt itself has no references to them), so this header
+restoration alone is sufficient.
+
+Tracked-On: NIACP3-1547
+Signed-off-by: Suresh, Prashanth <prashanth.suresh@intel.com>
+---
+ api/vpl/mfxstructures.h | 41 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+diff --git a/api/vpl/mfxstructures.h b/api/vpl/mfxstructures.h
+index 0b189c1..f839881 100644
+--- a/api/vpl/mfxstructures.h
++++ b/api/vpl/mfxstructures.h
+@@ -2541,6 +2541,14 @@ enum {
+         See the mfxExtAlphaChannelSurface structure for more details.
+     */
+     MFX_EXTBUFF_ALPHA_CHANNEL_SURFACE = MFX_MAKEFOURCC('A', 'C', 'S', 'F'),
++    /*!
++        See the mfxExtDecryptConfig structure for more details.
++    */
++    MFX_EXTBUFF_DECRYPT_CONFIG = MFX_MAKEFOURCC('D', 'E', 'C', 'R'),
++    /*!
++        See the mfxExtSecureCodec structure for more details.
++    */
++    MFX_EXTBUFF_SECURE_CODEC = MFX_MAKEFOURCC('S', 'E', 'C', 'U'),
+ #ifdef ONEVPL_EXPERIMENTAL
+     /*!
+         See the mfxExtAIEncCtrl structure for more details.
+@@ -5224,6 +5232,39 @@ typedef struct {
+ MFX_PACK_END()
+ #endif
+ 
++enum struct EncryptionScheme {
++  kUnencrypted = 0,
++  kCenc,  // 'cenc' subsample encryption using AES-CTR mode.
++  kCbcs,  // 'cbcs' pattern encryption using AES-CBC mode.
++  kMaxValue = kCbcs
++};
++
++typedef struct {
++    mfxU32 clear_bytes;
++    mfxU32 cypher_bytes;
++} SubsampleEntry;
++
++typedef struct {
++    mfxU32 clear_byte_block;
++    mfxU32 cypher_byte_block;
++} EncryptionPattern;
++
++typedef struct {
++    mfxExtBuffer Header;      /*!< Extension buffer header. Header.BufferId must be equal to MFX_EXTBUFF_DECRYPT_CONFIG. */
++    EncryptionScheme encryption_scheme;
++    mfxU8 hw_key_id[16];
++    mfxU8 iv[16];
++    mfxU32 session;
++    EncryptionPattern pattern;
++    mfxU32 num_subsamples;
++    SubsampleEntry *subsamples;
++} mfxExtDecryptConfig;
++
++typedef struct {
++    mfxExtBuffer Header;
++    mfxU8 on;
++} mfxExtSecureCodec;
++
+ /*! The mfxAISuperResolutionMode enumerator specifies the mode of AI based super resolution. */
+ typedef enum {
+     MFX_AI_SUPER_RESOLUTION_MODE_DISABLED = 0,        /*!< Super Resolution is disabled.*/
+-- 
+2.34.1
+

@@ -1,0 +1,30 @@
+From a68e77bd60476f029c7b5ed1e3e90642e54816f9 Mon Sep 17 00:00:00 2001
+From: Basil Chew <basil.chew@intel.com>
+Date: Tue, 28 Apr 2026 11:07:03 +0800
+Subject: [PATCH] Add XE firmware files into build
+
+Tracked-On: NIACP3-1312
+Signed-off-by: Basil Chew <basil.chew@intel.com>
+---
+ firmware.mk | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/firmware.mk b/firmware.mk
+index 81408a6..04a2fc3 100644
+--- a/firmware.mk
++++ b/firmware.mk
+@@ -46,7 +46,10 @@ LOCAL_FIRMWARE_PATTERN_IN_DIR := \
+     i915/mtl \
+     i915/intel_vsec \
+     i915/compat \
+-    i915/i915_ag
++    i915/i915_ag \
++    xe/lnl \
++    xe/bmg \
++    xe/ptl
+ 
+ LOCAL_FIRMWARE_SRC += $(foreach f,$(LOCAL_FIRMWARE_PATTERN),$(shell cd $(FIRMWARES_DIR) && find *$(f)* -type f,l ))
+ LOCAL_FIRMWARE_SRC += $(foreach f,$(LOCAL_FIRMWARE_DIR),$(shell cd $(FIRMWARES_DIR) && find $(f) -type f,l) )
+-- 
+2.35.3
+

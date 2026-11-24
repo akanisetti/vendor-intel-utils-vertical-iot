@@ -1,0 +1,52 @@
+From 5fa82a3b0f22cdb784171035ff8a57d1bf1c1265 Mon Sep 17 00:00:00 2001
+From: Iustin Ventaniuc <iustiniv@google.com>
+Date: Thu, 30 Jul 2026 03:39:50 -0700
+Subject: [PATCH] Fix dropping of all policies on parsing
+ IllegalArgumentException
+
+Catch IllegalArgumentException per-policy in readPoliciesInner rather
+than per-file in readFromFileLocked.
+
+Test: none
+Bug: 515039631
+Flag: EXEMPT BUGFIX
+
+TAG=agy
+CONV=9a527269-d864-49a9-8dd6-1fffebca18ec
+Cherrypick-From: https://googleplex-android-review.googlesource.com/q/commit:5a6da90eafbffaa512795292791bf880e95e216f
+Merged-In: Idd9d8469e4256945342e178d9498ef90a43230e3
+Change-Id: Idd9d8469e4256945342e178d9498ef90a43230e3
+---
+ .../android/server/devicepolicy/DevicePolicyEngine.java  | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyEngine.java b/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyEngine.java
+index e67c8147ccea..fcbb9753c760 100644
+--- a/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyEngine.java
++++ b/services/devicepolicy/java/com/android/server/devicepolicy/DevicePolicyEngine.java
+@@ -2585,8 +2585,7 @@ final class DevicePolicyEngine {
+ 
+                 readInnerLocked(parser);
+ 
+-            } catch (XmlPullParserException | IOException | ClassNotFoundException
+-                    | IllegalArgumentException e) {
++            } catch (XmlPullParserException | IOException | ClassNotFoundException e) {
+                 Slogf.wtf(TAG, "Error parsing resources file", e);
+             } finally {
+                 IoUtils.closeQuietly(input);
+@@ -2645,7 +2644,11 @@ final class DevicePolicyEngine {
+                         if (policyDefinition == null) {
+                             Slogf.w(TAG, "Skipping policy state - unknown policy definition");
+                         } else {
+-                            policyState = PolicyState.readFromXml(policyDefinition, parser);
++                            try {
++                                policyState = PolicyState.readFromXml(policyDefinition, parser);
++                            } catch (IllegalArgumentException e) {
++                                Slogf.wtf(TAG, "Error parsing policy state", e);
++                            }
+                         }
+                         break;
+                     default:
+-- 
+2.56.0.385.gac671c819a-goog
+

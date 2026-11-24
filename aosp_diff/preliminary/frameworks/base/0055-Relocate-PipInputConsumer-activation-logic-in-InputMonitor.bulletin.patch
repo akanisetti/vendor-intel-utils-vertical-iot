@@ -1,0 +1,103 @@
+From 93e791a1249c0303b0b59324db325e259bb886d0 Mon Sep 17 00:00:00 2001
+From: Hongwei Wang <hwwang@google.com>
+Date: Wed, 8 Jul 2026 17:36:05 +0000
+Subject: [PATCH] Relocate PipInputConsumer activation logic in InputMonitor
+
+Currently, PipInputConsumer is activated during the window iteration
+loop (mDisplayContent.forAllWindows) only when a window in pinned
+windowing mode is encountered. However, if a PiP window is created
+with the INPUT_FEATURE_NO_INPUT_CHANNEL flag, updateInputWindowsLw
+returns early for that window, bypassing the PipInputConsumer
+activation logic.
+
+Because PiP tasks are trusted overlays, touches can pass through to
+underlying windows if the PipInputConsumer is not present, defeating
+tapjacking protections like BLOCK_UNTRUSTED_TOUCHES.
+
+This CL relocates the PipInputConsumer activation logic out of the
+window iteration loop and into the main updateInputWindows method.
+Activation is now tied directly to the presence of a pinned root task,
+ensuring the consumer is correctly shown and configured regardless of
+the input channel status of the PiP window.
+
+Flag: EXEMPT CVE_FIX
+Bug: 527035500
+Test: Manually, verify PiP menu works
+Merged-In: I8d3504a56c14c255f6fb5e8835d8c0a2f7ee7e3b
+Change-Id: I8d3504a56c14c255f6fb5e8835d8c0a2f7ee7e3b
+---
+ .../com/android/server/wm/InputMonitor.java   | 37 ++++++++++---------
+ 1 file changed, 19 insertions(+), 18 deletions(-)
+
+diff --git a/services/core/java/com/android/server/wm/InputMonitor.java b/services/core/java/com/android/server/wm/InputMonitor.java
+index 303e6e4364a0..9e5ec45c7a03 100644
+--- a/services/core/java/com/android/server/wm/InputMonitor.java
++++ b/services/core/java/com/android/server/wm/InputMonitor.java
+@@ -570,7 +570,6 @@ final class InputMonitor {
+         InputConsumerImpl mWallpaperInputConsumer;
+         InputConsumerImpl mRecentsAnimationInputConsumer;
+ 
+-        private boolean mAddPipInputConsumerHandle;
+         private boolean mAddWallpaperInputConsumerHandle;
+         private boolean mAddRecentsAnimationInputConsumerHandle;
+ 
+@@ -583,7 +582,6 @@ final class InputMonitor {
+             mWallpaperInputConsumer = getInputConsumer(INPUT_CONSUMER_WALLPAPER);
+             mRecentsAnimationInputConsumer = getInputConsumer(INPUT_CONSUMER_RECENTS_ANIMATION);
+ 
+-            mAddPipInputConsumerHandle = mPipInputConsumer != null;
+             mAddWallpaperInputConsumerHandle = mWallpaperInputConsumer != null;
+             mAddRecentsAnimationInputConsumerHandle = mRecentsAnimationInputConsumer != null;
+ 
+@@ -604,6 +602,25 @@ final class InputMonitor {
+                     mAddRecentsAnimationInputConsumerHandle = false;
+                 }
+             }
++
++            // Update PiP input consumer layer if active.
++            // This is handled here instead of in the window iteration loop (accept) to ensure
++            // the consumer is shown even for PiP windows created without an input channel
++            // (e.g. INPUT_FEATURE_NO_INPUT_CHANNEL). See b/527035500.
++            final Task rootPinnedTask = mDisplayContent.getDefaultTaskDisplayArea()
++                    .getRootPinnedTask();
++            if (mPipInputConsumer != null && rootPinnedTask != null
++                    && rootPinnedTask.getSurfaceControl() != null) {
++                final DisplayArea targetDA = rootPinnedTask.getDisplayArea();
++                if (targetDA != null) {
++                    mPipInputConsumer.mWindowHandle.replaceTouchableRegionWithCrop(
++                            rootPinnedTask.getSurfaceControl());
++                    mPipInputConsumer.layout(mInputTransaction, rootPinnedTask.getBounds());
++                    mPipInputConsumer.reparent(mInputTransaction, targetDA);
++                    mPipInputConsumer.show(mInputTransaction, MAX_VALUE - 1);
++                }
++            }
++
+             mDisplayContent.forAllWindows(this, true /* traverseTopToBottom */);
+             updateInputFocusRequest(mRecentsAnimationInputConsumer);
+ 
+@@ -631,22 +648,6 @@ final class InputMonitor {
+                 return;
+             }
+ 
+-            if (w.inPinnedWindowingMode()) {
+-                if (mAddPipInputConsumerHandle) {
+-                    final Task rootTask = w.getTask().getRootTask();
+-                    mPipInputConsumer.mWindowHandle.replaceTouchableRegionWithCrop(
+-                            rootTask.getSurfaceControl());
+-                    final DisplayArea targetDA = rootTask.getDisplayArea();
+-                    // We set the layer to z=MAX-1 so that it's always on top.
+-                    if (targetDA != null) {
+-                        mPipInputConsumer.layout(mInputTransaction, rootTask.getBounds());
+-                        mPipInputConsumer.reparent(mInputTransaction, targetDA);
+-                        mPipInputConsumer.show(mInputTransaction, MAX_VALUE - 1);
+-                        mAddPipInputConsumerHandle = false;
+-                    }
+-                }
+-            }
+-
+             if (mAddWallpaperInputConsumerHandle) {
+                 if (w.mAttrs.type == TYPE_WALLPAPER && w.isVisible()) {
+                     mWallpaperInputConsumer.mWindowHandle
+-- 
+2.56.0.385.gac671c819a-goog
+

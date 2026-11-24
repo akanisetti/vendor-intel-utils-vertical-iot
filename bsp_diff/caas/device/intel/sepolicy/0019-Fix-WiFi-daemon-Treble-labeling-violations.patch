@@ -1,0 +1,41 @@
+From a7bdbd3632c142aa85d7349aad37180b47442315 Mon Sep 17 00:00:00 2001
+From: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+Date: Sat, 8 Aug 2026 12:32:52 +0000
+Subject: [PATCH] Fix WiFi daemon Treble labeling violations
+
+- Remove coredomain from wlan_intel_restore (platform-only attribute)
+- Change system_file_type to vendor_file_type for vendor partition
+- Move wlan_intel_restore.sh to /vendor/bin/ for vendor isolation
+
+Tracked-On: NIACP3-1498
+Signed-off-by: Anisetti Avinash Krishna <anisetti.avinash.krishna@intel.com>
+---
+ wlan/iwlwifi/file_contexts         | 2 +-
+ wlan/iwlwifi/wlan_intel_restore.te | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/wlan/iwlwifi/file_contexts b/wlan/iwlwifi/file_contexts
+index b678c7c..a8bbdf9 100644
+--- a/wlan/iwlwifi/file_contexts
++++ b/wlan/iwlwifi/file_contexts
+@@ -1 +1 @@
+-/system/bin/wlan_intel_restore.sh  u:object_r:wlan_intel_restore_exec:s0
++/vendor/bin/wlan_intel_restore.sh  u:object_r:wlan_intel_restore_exec:s0
+diff --git a/wlan/iwlwifi/wlan_intel_restore.te b/wlan/iwlwifi/wlan_intel_restore.te
+index f658a91..d22e6ba 100644
+--- a/wlan/iwlwifi/wlan_intel_restore.te
++++ b/wlan/iwlwifi/wlan_intel_restore.te
+@@ -2,8 +2,8 @@
+ # wlan_intel_restore - does what?
+ #
+ 
+-type wlan_intel_restore, domain, coredomain;
+-type wlan_intel_restore_exec, file_type, exec_type, system_file_type;
++type wlan_intel_restore, domain;
++type wlan_intel_restore_exec, file_type, exec_type, vendor_file_type;
+ 
+ init_daemon_domain(wlan_intel_restore)
+ 
+-- 
+2.34.1
+
